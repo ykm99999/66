@@ -6,6 +6,7 @@
 	compatible = "mediatek,mt7981-spim-nor", "mediatek,mt7981";
 
 	chosen {
+		/* 物理串口锁定：确保 BL2 日志从 UART0 输出 */
 		stdout-path = &uart0;
 		tick-timer = &timer0;
 	};
@@ -15,7 +16,9 @@
 	status = "okay";
 };
 
-/* 注意：既然文件名是 spi2，我们物理对齐使用 &spi2 控制器 */
+/* * 物理链路修复：锁定 SPI2 控制器。
+ * 注意：SL-3000 硬件引脚必须物理连接到 SPIM2 组（GPIO 23-28）。
+ */
 &spi2 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&spi2_flash_pins>;
@@ -24,36 +27,47 @@
 	flash@0 {
 		compatible = "jedec,spi-nor";
 		reg = <0>;
+		/* 物理时钟锁定：52MHz 为兼容性最强的安全频率 */
 		spi-max-frequency = <52000000>;
 		#address-cells = <1>;
 		#size-cells = <1>;
 
-		/* --- 物理加固：分区表 --- */
+		/* --- 物理加固：分区表定义 --- */
 		partitions {
 			compatible = "fixed-partitions";
 			#address-cells = <1>;
 			#size-cells = <1>;
 
-			/* BL2 占用前 512KB - 1MB (根据实际情况) */
+			/* * 物理区间 [0 - 1MB] 
+			 * 预留给 BL2 主程序及备份空间 
+			 */
 			partition@0 {
 				label = "bl2";
-				reg = <0x00000 0x100000>; /* 预留 1MB 给 BL2 及其备份 */
+				reg = <0x00000 0x100000>;
 				read-only;
 			};
 
-			/* 物理命门：FIP (U-Boot) 必须从 1MB (0x100000) 开始 */
+			/* * 物理区间 [1MB - 3MB]
+			 * 物理命门：FIP (U-Boot/BL31) 必须从此地址 (0x100000) 开始 
+			 */
 			partition@100000 {
 				label = "fip";
-				reg = <0x100000 0x200000>; /* 偏移 1MB，大小 2MB */
+				reg = <0x100000 0x200000>;
 			};
 
-			/* 后续分区可以定义在此 */
+			/* * 物理区间 [3MB - 结束]
+			 * 剩下的空间分配给 UBI 分区或存储
+			 */
+			partition@300000 {
+				label = "ubi";
+				reg = <0x300000 0x1d00000>; /* 假设为 32MB Flash */
+			};
 		};
 	};
 };
 
 &pio {
-	/* 物理锁定：确保引脚组与 &spi2 对应 */
+	/* 物理引脚锁定：SPIM2 模式与引脚组 */
 	spi2_flash_pins: spi2-pins {
 		mux {
 			function = "spi";
