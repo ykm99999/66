@@ -24,6 +24,7 @@ define Trusted-Firmware-A/Default
 endef
 
 # 物理定义：SL-3000 专属 NOR + DDR4 组合
+# 1MB 偏移逻辑将通过编译标志注入
 define Trusted-Firmware-A/mt7981-sl3000-nor
   NAME:=SL-3000 (NOR-DDR4)
   BUILD_DEVICES:=mediatek_mt7981-sl-3000
@@ -34,11 +35,33 @@ define Trusted-Firmware-A/mt7981-sl3000-nor
     DEBUG=0
 endef
 
-# 物理注入：强制覆盖源码中的 BL2 引导逻辑
+# --- 【物理加固逻辑：核心注入点】 ---
 define Build/Prepare
 	$(call Build/Prepare/Default)
-	# 将工作流 cp 进来的 files 补丁物理覆盖到源码构建目录
+	
+	@echo "Physical Hardening: Starting SL-3000 patch injection..."
+
+	# 1. 物理注入：驱动程序 (包含 1MB 读取逻辑)
 	$(CP) ./files/bl2_dev_spi_nor.c $(PKG_BUILD_DIR)/plat/mediatek/mt7981/bl2/bl2_dev_spi_nor.c
+	
+	# 2. 物理注入：编译控制文件 (强制 1MB 宏定义)
+	$(CP) ./files/bl2.mk $(PKG_BUILD_DIR)/plat/mediatek/mt7981/bl2/bl2.mk
+	$(CP) ./files/platform.mk $(PKG_BUILD_DIR)/plat/mediatek/mt7981/platform.mk
+	
+	# 3. 物理注入：定义文件 (硬化 MTK_FIP_BASE 为 0x100000)
+	$(CP) ./files/platform_def.h $(PKG_BUILD_DIR)/plat/mediatek/mt7981/include/platform_def.h
+	
+	# 4. 物理注入：DTS 地图 (分区表 1MB 对齐)
+	# 使用 find 自动探测 DTS 物理路径并强制覆盖
+	$(eval DTS_PATH := $(shell find $(PKG_BUILD_DIR) -name "mt7981-spi2.dts" | head -n 1))
+	@if [ -n "$(DTS_PATH)" ]; then \
+		$(CP) ./files/mt7981-spi2.dts $(DTS_PATH); \
+		echo "DTS injected to: $(DTS_PATH)"; \
+	else \
+		echo "WARNING: mt7981-spi2.dts not found, check path!"; \
+	fi
+
+	@echo "Physical Hardening: All patches injected successfully."
 endef
 
 TFA_TARGETS:=mt7981-sl3000-nor
