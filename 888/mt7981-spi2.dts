@@ -1,0 +1,40 @@
+/dts-v1/;
+#include "mt7981.dtsi"
+
+/ {
+	model = "SL-3000 SPI-NOR Boot";
+	compatible = "mediatek,mt7981-spim-nor", "mediatek,mt7981";
+
+	chosen {
+		stdout-path = &uart0;
+		tick-timer = &timer0;
+	};
+};
+
+&uart0 {
+	status = "okay";
+};
+
+&spi0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&spi0_flash_pins>;
+	status = "okay";
+
+	flash@0 {
+		compatible = "jedec,spi-nor";
+		reg = <0>;
+		spi-max-frequency = <52000000>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+	};
+};
+
+&pio {
+	/* 物理锁定：锁定 SPIM2 引脚组 */
+	spi0_flash_pins: spi0-pins {
+		mux {
+			function = "spi";
+			groups = "spi0", "spi0_wp_hold";
+		};
+	};
+};
