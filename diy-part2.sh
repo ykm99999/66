@@ -1,36 +1,41 @@
 #!/bin/bash
-# =========================================================
-# 司络 SL-3000 (MT7981B) 物理加固脚本 - 像素级修正版
-# =========================================================
+# SL-3000 Physical Hardening Script
+# 准则：环境确定性 - 强制物理路径对齐
 
-echo "Starting Physical Injection for SL-3000..."
+set -e
 
-# --- 1. 物理清场与重建 ---
-# 确保目标容器物理存在
-rm -rf package/boot/arm-trusted-firmware-mediatek
-rm -rf package/boot/uboot-mediatek
-mkdir -p package/boot/arm-trusted-firmware-mediatek
-mkdir -p package/boot/uboot-mediatek
+PATCH_SRC="./888"
+# 自动定位 ATF 和 U-Boot 的构建目录
+ATF_DIR=$(find ./openwrt/build_dir -name "arm-trusted-firmware-mediatek-*" -type d | head -n 1)
+UBOOT_DIR=$(find ./openwrt/build_dir -name "uboot-mediatek-*" -type d | head -n 1)
 
-# --- 2. 物理零件精准注入 ---
-# 注入 Makefile (从 888 目录物理复刻)
-[ -f "888/atf-Makefile" ] && cp -f 888/atf-Makefile package/boot/arm-trusted-firmware-mediatek/Makefile
-[ -f "888/uboot-Makefile" ] && cp -f 888/uboot-Makefile package/boot/uboot-mediatek/Makefile
+echo "--- 开始物理硬化注入 ---"
 
-# 物理加固：注入 bl2_dev_spi_nor.c 补丁到 ATF files 目录，供 Makefile 调用
-mkdir -p package/boot/arm-trusted-firmware-mediatek/files
-[ -f "888/bl2_dev_spi_nor.c" ] && cp -f 888/bl2_dev_spi_nor.c package/boot/arm-trusted-firmware-mediatek/files/
+# 1. ATF 核心硬化 (1MB 偏移驱动与控制)
+if [ -d "$ATF_DIR" ]; then
+    echo "注入 ATF 补丁到: $ATF_DIR"
+    cp -v $PATCH_SRC/bl2_dev_spi_nor.c $ATF_DIR/plat/mediatek/mt7981/bl2/
+    cp -v $PATCH_SRC/bl2.mk $ATF_DIR/plat/mediatek/mt7981/bl2/
+    cp -v $PATCH_SRC/platform.mk $ATF_DIR/plat/mediatek/mt7981/
+    cp -v $PATCH_SRC/platform_def.h $ATF_DIR/plat/mediatek/mt7981/include/
+    # 物理地图 (DTS) 覆盖
+    find $ATF_DIR -name "mt7981-spi2.dts" -exec cp -v $PATCH_SRC/mt7981-spi2.dts {} \;
+else
+    echo "错误：未发现 ATF 构建目录，请检查编译状态。" && exit 1
+fi
 
-# 注入内核定义与镜像打包逻辑 (适配 24.10 物理路径)
-[ -f "888/filogic.mk" ] && cp -f 888/filogic.mk target/linux/mediatek/image/filogic.mk
-[ -f "888/mt7981-sl-3000-emmc.dts" ] && cp -f 888/mt7981-sl-3000-emmc.dts target/linux/mediatek/dts/
+# 2. U-Boot 核心硬化 (DDR4 与 1MB 救砖配置)
+if [ -d "$UBOOT_DIR" ]; then
+    echo "注入 U-Boot 配置到: $UBOOT_DIR"
+    cp -v $PATCH_SRC/sl3000.config $UBOOT_DIR/configs/mt7981_sl3000_defconfig
+else
+    echo "警告：未发现 U-Boot 构建目录，跳过 U-Boot 注入。"
+fi
 
-# --- 3. 物理配置注入 ---
-[ -f "888/sl3000.config" ] && cp -f 888/sl3000.config .config
+# 3. 构建框架硬化 (OpenWrt Makefile)
+echo "更新编译框架 Makefile..."
+cp -v $PATCH_SRC/atf-Makefile ./openwrt/package/boot/arm-trusted-firmware-mediatek/Makefile
+cp -v $PATCH_SRC/uboot-Makefile ./openwrt/package/boot/uboot-mediatek/Makefile
+cp -v $PATCH_SRC/filogic.mk ./openwrt/target/linux/mediatek/image/filogic.mk
 
-# --- 4. 物理隔离：移除旧版包干扰 ---
-# 强制移除 feeds 里的同名包，防止 OpenWrt 优先使用 feeds 导致注入失效
-rm -rf package/feeds/devices/arm-trusted-firmware-mediatek
-rm -rf package/feeds/devices/uboot-mediatek
-
-echo "Physical Injection Complete."
+echo "--- 物理执行：补丁链路已闭环 ---"
