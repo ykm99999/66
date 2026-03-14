@@ -1,9 +1,6 @@
-name: SL-3000 Hardened Build
+name: SL-3000 Manual Hardened Build
 
 on:
-  push:
-    paths:
-      - '888/**'
   workflow_dispatch:
 
 jobs:
@@ -26,17 +23,15 @@ jobs:
           cd openwrt
           ../diy-part2.sh
 
-      - name: Build Toolchain (Crucial)
+      - name: Build Toolchain
         run: |
           cd openwrt
-          # 预编译工具链，防止 compile 阶段找不到编译器
           make tools/install -j$(nproc)
           make toolchain/install -j$(nproc)
 
       - name: Compile Hardened Parts
         run: |
           cd openwrt
-          # 按照物理依赖顺序编译
           make package/boot/arm-trusted-firmware-mediatek/compile V=s
           make package/boot/uboot-mediatek/compile V=s
           make target/linux/mediatek/image/compile V=s
