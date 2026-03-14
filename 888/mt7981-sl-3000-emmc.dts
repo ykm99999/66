@@ -21,7 +21,7 @@
 		bootargs = "console=ttyS0,115200n1 loglevel=8 earlycon=uart8250,mmio32,0x11002000 root=PARTLABEL=production rootwait rw rootfstype=f2fs,squashfs,ext4";
 	};
 
-	/* 物理锁定：强制锁定 512MB RAM 映射，确保救砖阶段绝对稳定 */
+	/* 物理锁定：强制锁定 512MB RAM 映射 (0x40000000 - 0x60000000) */
 	memory@40000000 {
 		device_type = "memory";
 		reg = <0 0x40000000 0 0x20000000>;
@@ -30,7 +30,11 @@
 	leds {
 		compatible = "gpio-leds";
 		status_red_led: led-0 { label = "red:status"; gpios = <&pio 10 GPIO_ACTIVE_LOW>; };
-		status_green_led: led-1 { label = "green:status"; gpios = <&pio 11 GPIO_ACTIVE_LOW>; linux,default-trigger = "default-on"; };
+		status_green_led: led-1 { 
+			label = "green:status"; 
+			gpios = <&pio 11 GPIO_ACTIVE_LOW>; 
+			linux,default-trigger = "heartbeat"; /* 物理修正：24.10 建议使用 heartbeat 展示存活 */
+		};
 		status_blue_led: led-2 { label = "blue:status"; gpios = <&pio 12 GPIO_ACTIVE_LOW>; };
 	};
 
@@ -45,7 +49,7 @@
 	};
 };
 
-/* 物理加固：SPI-NOR 32MB 闪存节点（救砖区隔离） */
+/* 物理加固：SPI-NOR 32MB 闪存节点 */
 &spi0 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&spi0_flash_pins>;
@@ -61,7 +65,7 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 
-			/* 物理偏移对齐：1MB (0x100000) 起始，确保不破坏 NOR 上的引导零件 */
+			/* 物理偏移对齐：1MB (0x100000) 起始，避开底层引导零件 */
 			partition@100000 {
 				label = "firmware";
 				reg = <0x100000 0x1f00000>; 
@@ -70,10 +74,11 @@
 	};
 };
 
-/* eMMC 存储链路：对齐引脚复用组 45 (128G 物理支持) */
+/* eMMC 链路：对齐引脚复用组 45 (128G 物理支持) */
 &mmc0 {
 	bus-width = <8>;
 	cap-mmc-highspeed;
+	cap-mmc-hw-reset; /* 物理增加：提高 eMMC 复位稳定性 */
 	max-frequency = <52000000>;
 	non-removable;
 	pinctrl-names = "default", "state_uhs";
@@ -82,7 +87,7 @@
 	status = "okay";
 };
 
-/* 2.5G 网络物理咬合：MT7531 交换机 */
+/* 2.5G 网管物理链路 */
 &eth {
 	status = "okay";
 	gmac0: mac@0 {
