@@ -1,14 +1,14 @@
-name: Build-SL3000-ImmortalWrt-24.10
+name: Build-SL3000-ImmortalWrt-Official-24.10
 
 on:
   repository_dispatch:
   workflow_dispatch:
 
 env:
-  # 物理对齐：指向你指定的专用 MT798x 仓库
-  REPO_URL: https://github.com/OpenWrt01/immortalwrt-mt798x-24.10.git
-  # 物理修正：该仓库的主分支通常是 main，直接克隆主分支即可获取 24.10 源码
-  REPO_BRANCH: main
+  # 物理溯源：锁定 ImmortalWrt 官方仓库地址
+  REPO_URL: https://github.com/immortalwrt/immortalwrt.git
+  # 物理确认：官方 24.10 的真实分支物理名为 openwrt-24.10
+  REPO_BRANCH: openwrt-24.10
   CONFIG_FILE: 888/sl3000.config
   DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
@@ -26,7 +26,7 @@ jobs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        # 物理空间清理
+        # 物理空间清理：腾出约 20GB 空间
         sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/powershell /usr/share/swift /usr/local/.ghcup
         sudo -E apt-get -qq update
         sudo -E apt-get -qq install $(curl -fsSL https://is.gd/depends_ubuntu_2204)
@@ -40,7 +40,7 @@ jobs:
       working-directory: /workdir
       run: |
         df -hT $PWD
-        # 物理执行：克隆该仓库的 24.10 源码
+        # 物理执行：克隆官方分支，depth 1 减少 1.5GB 物理占用
         git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
@@ -55,22 +55,21 @@ jobs:
     - name: Physical Inject 888 Assets
       run: |
         cd openwrt
-        # 1. 物理清场
+        # 1. 物理移除冲突包
         rm -rf package/boot/uboot-mediatek
         rm -rf package/boot/arm-trusted-firmware-mediatek
         
-        # 2. 注入 888 专属 Makefile
+        # 2. 注入 888 专属零件 (Makefile)
         mkdir -p package/boot/uboot-mediatek
         cp -f ../888/uboot-Makefile package/boot/uboot-mediatek/Makefile
         mkdir -p package/boot/arm-trusted-firmware-mediatek
         cp -f ../888/atf-Makefile package/boot/arm-trusted-firmware-mediatek/Makefile
         
-        # 3. 注入底层 C 补丁到 ATF files 目录
+        # 3. 注入补丁文件
         mkdir -p package/boot/arm-trusted-firmware-mediatek/files
         cp -f ../888/bl2_dev_spi_nor.c package/boot/arm-trusted-firmware-mediatek/files/
         
-        # 4. 适配该仓库 24.10 的物理路径 (重点检查这里)
-        # 如果是专用分支，路径可能略有不同，先尝试标准路径
+        # 4. 适配官方 24.10 物理路径 (target/linux/mediatek/filogic/)
         cp -f ../888/mt7981-sl-3000-emmc.dts target/linux/mediatek/dts/mt7981-sl-3000-emmc.dts
         cp -f ../888/filogic.mk target/linux/mediatek/image/filogic.mk
 
@@ -80,6 +79,7 @@ jobs:
         chmod +x $DIY_P2_SH
         cd openwrt
         $GITHUB_WORKSPACE/$DIY_P2_SH
+        # 物理对齐：补全 6.6 内核依赖
         make defconfig
 
     - name: Compile the Firmware
@@ -87,7 +87,6 @@ jobs:
       run: |
         cd openwrt
         echo -e "$(nproc) thread compile"
-        # 物理执行：开启多线程编译
         make -j$(nproc) || make -j1 || make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
 
@@ -95,5 +94,5 @@ jobs:
       uses: actions/upload-artifact@v4
       if: steps.compile.outputs.status == 'success'
       with:
-        name: SL3000-Rescue-Bundle-24.10
+        name: SL3000-Official-24.10-Firmware
         path: openwrt/bin/targets/mediatek/filogic/
