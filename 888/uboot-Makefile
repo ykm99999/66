@@ -1,36 +1,32 @@
-#
-# Copyright (C) 2021-2026 ykm888 (23.05 Optimized)
-#
-
 include $(TOPDIR)/rules.mk
-include $(INCLUDE_DIR)/u-boot.mk
-include $(INCLUDE_DIR)/package.mk
 
 PKG_NAME:=uboot-mediatek
+PKG_VERSION:=24.10-sl3000
 PKG_RELEASE:=1
 
-# 物理溯源：锁定救砖 U-Boot 源码 (ykm888/66.git)
+# 物理对齐：使用你的底层源码
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL:=https://github.com/ykm888/66.git
 PKG_SOURCE_VERSION:=sl3000-clean-source
-PKG_HASH:=skip
+PKG_MIRROR_HASH:=skip
 
-# 物理执行三准则：保持原有定义结构，严禁调整缩进
+include $(INCLUDE_DIR)/u-boot.mk
+include $(INCLUDE_DIR)/package.mk
+
 define U-Boot/Default
   BUILD_TARGET:=mediatek
   BUILD_SUBTARGET:=filogic
-  NAME:=MT7981 (SL-3000)
-  HIDDEN:=1
+  BUILD_DEVICES:=mediatek_mt7981-sl-3000
+  UBOOT_IMAGE:=u-boot.bin
 endef
 
-# --- 司络 SL-3000 专属 U-Boot 定义 ---
+# 物理定义：U-Boot 编译目标
 define U-Boot/mt7981_sl3000_nor
-  NAME:=SL-3000 (SPI-NOR)
-  # 物理修正：对齐 ATF 模板生成的包名，确保编译链路闭环
-  DEPENDS:=+trusted-firmware-a-mt7981-nor-ddr4
+  NAME:=SL-3000 (NOR)
+  BUILD_DEVICES:=mediatek_mt7981-sl-3000
+  UBOOT_CONFIG:=mt7981_sl3000_defconfig
 endef
 
-UBOOT_TARGETS:= mt7981_sl3000_nor
+UBOOT_TARGETS:=mt7981_sl3000_nor
 
 $(eval $(call BuildPackage/U-Boot))
-$(eval $(call BuildPackage,uboot-mediatek))
