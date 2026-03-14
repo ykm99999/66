@@ -1,68 +1,50 @@
-name: SL-3000 Physical Hardening Build
+name: SL-3000 Hardened Build
 
 on:
-  # 1. 自动触发：只要你修改并保存（Push）了 888 目录下的文件，立即构建
   push:
     paths:
       - '888/**'
-    branches:
-      - main  # 或者你的主分支名称
-
-  # 2. 手动触发：在 GitHub Actions 页面点击 "Run workflow" 手动运行
-  workflow_dispatch:
+      - 'diy-part2.sh'
+  workflow_dispatch:  # 保留手动拉起功能
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 检出当前仓库补丁 (888)
+      - name: 检出当前仓库
         uses: actions/checkout@v4
-        with:
-          path: 888
 
-      - name: 初始化系统环境
+      - name: 初始化环境
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential git gawk libncurses5-dev gettext libssl-dev xsltproc wget
-          # 克隆 OpenWrt 源码（环境确定性：锁定分支或版本）
+          # 克隆 OpenWrt (环境确定性：使用 lede 源码)
           git clone --depth 1 https://github.com/coolsnowwolf/lede openwrt
           cd openwrt && ./scripts/feeds update -a && ./scripts/feeds install -a
 
-      - name: 准备源码 (Prepare Phase)
+      - name: 物理执行 - 拉起补丁与编译
         run: |
+          # 物理执行链路：将 diy-part2.sh 移入目录并执行
+          chmod +x diy-part2.sh
           cd openwrt
-          # 仅执行准备步骤，不实际编译，以便我们注入补丁
-          make package/boot/arm-trusted-firmware-mediatek/prepare V=s
-          make package/boot/uboot-mediatek/prepare V=s
-
-      - name: 物理注入补丁 (Hardening Phase)
-        run: |
-          # 准则：链路闭环 - 使用脚本强制覆盖
-          chmod +x ./888/patch_it.sh
-          ./888/patch_it.sh
-
-      - name: 执行最终编译 (Compile Phase)
-        run: |
-          cd openwrt
-          # 准则：环境确定性 - 强制编译已注入补丁的包
+          ../diy-part2.sh
+          
+          # 正式物理编译 (按照闭环顺序)
           make package/boot/arm-trusted-firmware-mediatek/compile V=s
           make package/boot/uboot-mediatek/compile V=s
-          # 生成最终固件镜像
           make target/linux/mediatek/image/compile V=s
 
-      - name: 物理对齐检查 (Alignment Validation)
+      - name: 物理校验 (Security Check)
         run: |
-          # 准则：物理对齐 - 检查生成的 bl2.bin 是否真的指向 1MB (0x100000)
+          # 检查生成的 bl2.bin 是否带 1MB 物理偏移特征 (0x100000)
           BIN_PATH=$(find openwrt/bin/ -name "bl2.bin" | head -n 1)
           if [ -f "$BIN_PATH" ]; then
-            echo "正在物理校验 $BIN_PATH ..."
-            # 查找 0x100000 的十六进制标记（物理命门检查）
-            hexdump -C "$BIN_PATH" | grep "00 00 10 00" || (echo "错误：1MB 偏移未生效！" && exit 1)
-            echo "物理对齐校验通过！"
+            hexdump -C "$BIN_PATH" | grep "00 00 10 00" || (echo "校验失败：1MB 地址未硬化！" && exit 1)
+            echo "校验成功：SL-3000 物理地址对齐。"
           fi
 
-      - name: 上传 SL-3000 救砖补丁包
+      - name: 上传成品
         uses: actions/upload-artifact@v4
         with:
-          name: SL3000-SPI-NOR-Hardened-Firmware
+          name: SL3000-Hardened-Firmware
           path: openwrt/bin/targets/mediatek/filogic/*
