@@ -2,7 +2,7 @@
 #include "mt7981.dtsi"
 
 / {
-	model = "SL-3000 SPI-NOR Boot";
+	model = "SL-3000 SPI-NOR Boot (1MB Offset Hardened)";
 	compatible = "mediatek,mt7981-spim-nor", "mediatek,mt7981";
 
 	chosen {
@@ -15,9 +15,10 @@
 	status = "okay";
 };
 
-&spi0 {
+/* 注意：既然文件名是 spi2，我们物理对齐使用 &spi2 控制器 */
+&spi2 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&spi0_flash_pins>;
+	pinctrl-0 = <&spi2_flash_pins>;
 	status = "okay";
 
 	flash@0 {
@@ -26,15 +27,37 @@
 		spi-max-frequency = <52000000>;
 		#address-cells = <1>;
 		#size-cells = <1>;
+
+		/* --- 物理加固：分区表 --- */
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			/* BL2 占用前 512KB - 1MB (根据实际情况) */
+			partition@0 {
+				label = "bl2";
+				reg = <0x00000 0x100000>; /* 预留 1MB 给 BL2 及其备份 */
+				read-only;
+			};
+
+			/* 物理命门：FIP (U-Boot) 必须从 1MB (0x100000) 开始 */
+			partition@100000 {
+				label = "fip";
+				reg = <0x100000 0x200000>; /* 偏移 1MB，大小 2MB */
+			};
+
+			/* 后续分区可以定义在此 */
+		};
 	};
 };
 
 &pio {
-	/* 物理锁定：锁定 SPIM2 引脚组 */
-	spi0_flash_pins: spi0-pins {
+	/* 物理锁定：确保引脚组与 &spi2 对应 */
+	spi2_flash_pins: spi2-pins {
 		mux {
 			function = "spi";
-			groups = "spi0", "spi0_wp_hold";
+			groups = "spi2", "spi2_wp_hold";
 		};
 	};
 };
