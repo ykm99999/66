@@ -1,13 +1,11 @@
-name: Build-SL3000-ImmortalWrt-Official-24.10
+name: Build-SL3000-Official-24.10
 
 on:
   repository_dispatch:
   workflow_dispatch:
 
 env:
-  # 物理溯源：锁定 ImmortalWrt 官方仓库地址
   REPO_URL: https://github.com/immortalwrt/immortalwrt.git
-  # 物理确认：官方 24.10 的真实分支物理名为 openwrt-24.10
   REPO_BRANCH: openwrt-24.10
   CONFIG_FILE: 888/sl3000.config
   DIY_P1_SH: diy-part1.sh
@@ -19,33 +17,27 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: Checkout Main
-      uses: actions/checkout@v4
+    - name: Checkout Repo Assets
+      uses: actions/checkout@v4 # 物理检出：你的 888 文件夹和 diy 脚本现在位于根目录
 
-    - name: Initialization Environment & Free Disk Space
+    - name: Free Disk Space & Init
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        # 物理空间清理：腾出约 20GB 空间
         sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/powershell /usr/share/swift /usr/local/.ghcup
         sudo -E apt-get -qq update
         sudo -E apt-get -qq install $(curl -fsSL https://is.gd/depends_ubuntu_2204)
-        sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
-        sudo mkdir -p /workdir
-        sudo chown $USER:$GROUPS /workdir
 
     - name: Clone OpenWrt Source
-      working-directory: /workdir
       run: |
-        df -hT $PWD
-        # 物理执行：克隆官方分支，depth 1 减少 1.5GB 物理占用
+        # 在根目录克隆，确保 openwrt 文件夹与 888 文件夹并列
         git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
-        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
     - name: Load Custom Feeds
       run: |
+        # 物理执行 diy-part1.sh
         chmod +x $DIY_P1_SH
         cd openwrt
         $GITHUB_WORKSPACE/$DIY_P1_SH
@@ -54,32 +46,44 @@ jobs:
 
     - name: Physical Inject 888 Assets
       run: |
-        cd openwrt
-        # 1. 物理移除冲突包
-        rm -rf package/boot/uboot-mediatek
-        rm -rf package/boot/arm-trusted-firmware-mediatek
+        # 定义绝对物理路径，消除一切 cp 找不到文件的可能
+        BASE_DIR="$GITHUB_WORKSPACE"
+        SRC_DIR="$BASE_DIR/openwrt"
+        ASSETS_DIR="$BASE_DIR/888"
         
-        # 2. 注入 888 专属零件 (Makefile)
-        mkdir -p package/boot/uboot-mediatek
-        cp -f ../888/uboot-Makefile package/boot/uboot-mediatek/Makefile
-        mkdir -p package/boot/arm-trusted-firmware-mediatek
-        cp -f ../888/atf-Makefile package/boot/arm-trusted-firmware-mediatek/Makefile
-        
-        # 3. 注入补丁文件
-        mkdir -p package/boot/arm-trusted-firmware-mediatek/files
-        cp -f ../888/bl2_dev_spi_nor.c package/boot/arm-trusted-firmware-mediatek/files/
-        
-        # 4. 适配官方 24.10 物理路径 (target/linux/mediatek/filogic/)
-        cp -f ../888/mt7981-sl-3000-emmc.dts target/linux/mediatek/dts/mt7981-sl-3000-emmc.dts
-        cp -f ../888/filogic.mk target/linux/mediatek/image/filogic.mk
+        echo "Source Path: $SRC_DIR"
+        echo "Assets Path: $ASSETS_DIR"
 
-    - name: Load Custom Config & DIY2
+        # 1. 物理移除官方冗余零件
+        rm -rf $SRC_DIR/package/boot/uboot-mediatek
+        rm -rf $SRC_DIR/package/boot/arm-trusted-firmware-mediatek
+        
+        # 2. 物理注入 888 专属 Makefile
+        mkdir -p $SRC_DIR/package/boot/uboot-mediatek
+        cp -v $ASSETS_DIR/uboot-Makefile $SRC_DIR/package/boot/uboot-mediatek/Makefile
+        
+        mkdir -p $SRC_DIR/package/boot/arm-trusted-firmware-mediatek
+        cp -v $ASSETS_DIR/atf-Makefile $SRC_DIR/package/boot/arm-trusted-firmware-mediatek/Makefile
+        
+        # 3. 物理注入引导补丁 (bl2_dev_spi_nor.c)
+        mkdir -p $SRC_DIR/package/boot/arm-trusted-firmware-mediatek/files
+        cp -v $ASSETS_DIR/bl2_dev_spi_nor.c $SRC_DIR/package/boot/arm-trusted-firmware-mediatek/files/
+        
+        # 4. 物理注入内核定义与镜像打包逻辑 (针对 24.10 路径)
+        cp -v $ASSETS_DIR/mt7981-sl-3000-emmc.dts $SRC_DIR/target/linux/mediatek/dts/mt7981-sl-3000-emmc.dts
+        cp -v $ASSETS_DIR/filogic.mk $SRC_DIR/target/linux/mediatek/image/filogic.mk
+        
+        echo "Physical Injection Done Successfully."
+
+    - name: Load Config & DIY2
       run: |
-        [ -e $CONFIG_FILE ] && cp -f $CONFIG_FILE openwrt/.config
-        chmod +x $DIY_P2_SH
         cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P2_SH
-        # 物理对齐：补全 6.6 内核依赖
+        # 物理覆盖 .config 文件
+        [ -e "$GITHUB_WORKSPACE/$CONFIG_FILE" ] && cp -f "$GITHUB_WORKSPACE/$CONFIG_FILE" .config
+        # 物理执行 diy-part2.sh
+        chmod +x "$GITHUB_WORKSPACE/$DIY_P2_SH"
+        "$GITHUB_WORKSPACE/$DIY_P2_SH"
+        # 关键步骤：补全 6.6 内核硬件依赖
         make defconfig
 
     - name: Compile the Firmware
@@ -94,5 +98,5 @@ jobs:
       uses: actions/upload-artifact@v4
       if: steps.compile.outputs.status == 'success'
       with:
-        name: SL3000-Official-24.10-Firmware
+        name: SL3000-Rescue-Bundle-Official-24.10
         path: openwrt/bin/targets/mediatek/filogic/
