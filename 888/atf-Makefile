@@ -5,19 +5,14 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=arm-trusted-firmware-mediatek
-PKG_VERSION:=sl3000-c
 PKG_RELEASE:=1
 
-# 物理溯源：锁定救砖专用源码分支
+# 物理溯源：锁定救砖专用源码分支 (ykm888/66.git)
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL:=https://github.com/ykm888/66.git
 PKG_SOURCE_VERSION:=sl3000-clean-source
-PKG_MIRROR_HASH:=skip
+PKG_HASH:=skip
 
-# 物理核心：硬锁定编译路径，防止 No targets specified 报错
-PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(BUILD_VARIANT)/$(PKG_NAME)-$(PKG_VERSION)
-
-include $(INCLUDE_DIR)/kernel.mk
 include $(INCLUDE_DIR)/trusted-firmware-a.mk
 include $(INCLUDE_DIR)/package.mk
 
@@ -26,23 +21,26 @@ define Trusted-Firmware-A/Default
   BUILD_TARGET:=mediatek
   BUILD_SUBTARGET:=filogic
   PLAT:=mt7981
-  TFA_IMAGE:=bl2.img
+  # 物理修正：必须包含 fip.bin，否则 U-Boot 无法打包
+  TFA_IMAGE:=bl2.img fip.bin
 endef
 
 # --- 2. 司络 SL-3000 专属零件定义 ---
+# 物理执行三准则：VARIANT 名称必须与 U-Boot 中的 DEPENDS 像素级对应
 define Trusted-Firmware-A/mt7981-nor-ddr4
   NAME:=SL-3000 (SPI-NOR/DDR4)
+  VARIANT:=mt7981-nor-ddr4
   BOOT_DEVICE:=nor
   DDR_TYPE:=ddr4
-  FIP_OFFSET:=0x100000
 endef
 
 TFA_TARGETS:= mt7981-nor-ddr4
 
-# 物理修正：在源码解压后，强制把寻宝图（1MB偏移补丁）打进去
+# 物理修正：在源码解压后，物理复刻补丁文件到指定驱动目录
 define Build/Prepare
 	$(call Build/Prepare/Default)
-	$(CP) $(TOPDIR)/888/bl2_dev_spi_nor.c $(PKG_BUILD_DIR)/plat/mediatek/mt7981/bl2/bl2_dev_spi_nor.c
+	$(CP) $(TOPDIR)/888/bl2_dev_spi_nor.c $(PKG_BUILD_DIR)/drivers/mediatek/uart.c || \
+	$(CP) $(TOPDIR)/888/bl2_dev_spi_nor.c $(PKG_BUILD_DIR)/plat/mediatek/mt7981/bl2/
 endef
 
 $(eval $(call BuildPackage/Trusted-Firmware-A))
