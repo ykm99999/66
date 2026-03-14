@@ -1,62 +1,90 @@
-name: Build SL-3000 Firmware (23.05 Physical Sync)
+name: Build-SL3000-ImmortalWrt-24.10
 
 on:
   repository_dispatch:
   workflow_dispatch:
 
 env:
-  # 物理溯源：锁定地基分支
-  REPO_URL: https://github.com/ykm888/66
-  REPO_BRANCH: sl3000-immortalwrt-bootstrap
+  REPO_URL: https://github.com/OpenWrt01/immortalwrt-mt798x-24.10.git
+  REPO_BRANCH: openwrt-24.10
   CONFIG_FILE: 888/sl3000.config
+  DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
   TZ: Asia/Shanghai
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+
     steps:
-    - name: Checkout Command Center
-      uses: actions/checkout@v4
-      with:
-        ref: main
+    - name: Checkout Main
+      uses: actions/checkout@v3
 
     - name: Initialization Environment
+      env:
+        DEBIAN_FRONTEND: noninteractive
       run: |
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
         sudo -E apt-get -qq update
         sudo -E apt-get -qq install $(curl -fsSL https://is.gd/depends_ubuntu_2204)
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
+        sudo mkdir -p /workdir
+        sudo chown $USER:$GROUPS /workdir
 
-    - name: Clone Foundation & Merge 888
+    - name: Clone OpenWrt Source
+      working-directory: /workdir
       run: |
-        git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
-        cp -r 888 openwrt/
-        cp $DIY_P2_SH openwrt/
+        git clone $REPO_URL -b $REPO_BRANCH openwrt
+        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
-    - name: Update & Install Feeds
-      working-directory: ./openwrt
+    - name: Load Custom Feeds
       run: |
+        chmod +x $DIY_P1_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_P1_SH
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Physical Stitching & Hardening
-      working-directory: ./openwrt
+    - name: Physical Inject 888 Assets
       run: |
-        chmod +x $DIY_P2_SH
-        ./$DIY_P2_SH
-        make defconfig
-        # 物理修正：检查系统真实的 ATF 包名是否存在
-        grep -q "CONFIG_PACKAGE_trusted-firmware-a-mt7981-nor-ddr4=y" .config || { echo "!!! ATF Still Missing !!!"; exit 1; }
+        cd openwrt
+        # 1. 物理切除系统冲突包并注入 888 专属 Makefile
+        rm -rf package/boot/uboot-mediatek
+        rm -rf package/boot/arm-trusted-firmware-mediatek
+        mkdir -p package/boot/uboot-mediatek
+        cp -f ../888/uboot-Makefile package/boot/uboot-mediatek/Makefile
+        mkdir -p package/boot/arm-trusted-firmware-mediatek
+        cp -f ../888/atf-Makefile package/boot/arm-trusted-firmware-mediatek/Makefile
+        
+        # 2. 物理复刻底层 C 补丁到专用目录
+        mkdir -p package/boot/arm-trusted-firmware-mediatek/files
+        cp -f ../888/bl2_dev_spi_nor.c package/boot/arm-trusted-firmware-mediatek/files/
+        
+        # 3. 物理覆盖 6.6 内核硬件定义与镜像打包逻辑
+        cp -f ../888/mt7981-sl-3000-emmc.dts target/linux/mediatek/dts/mt7981-sl-3000-emmc.dts
+        cp -f ../888/filogic.mk target/linux/mediatek/image/filogic.mk
 
-    - name: Compile Firmware
-      working-directory: ./openwrt
+    - name: Load Custom Config & DIY2
       run: |
-        make download -j8
-        make -j$(nproc) || make -j1 V=s
+        [ -e $CONFIG_FILE ] && cp -f $CONFIG_FILE openwrt/.config
+        chmod +x $DIY_P2_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_P2_SH
+        make defconfig
+
+    - name: Compile the Firmware
+      id: compile
+      run: |
+        cd openwrt
+        echo -e "$(nproc) thread compile"
+        make -j$(nproc) || make -j1 || make -j1 V=s
+        echo "status=success" >> $GITHUB_OUTPUT
 
     - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v3
+      if: steps.compile.outputs.status == 'success'
       with:
-        name: SL3000_Firmware
-        path: openwrt/bin/targets/mediatek/filogic/*nor-programmer-dump.bin
+        name: SL3000-Rescue-Bundle
+        path: openwrt/bin/targets/mediatek/filogic/
