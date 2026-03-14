@@ -4,7 +4,7 @@ PKG_NAME:=uboot-mediatek
 PKG_VERSION:=24.10-sl3000
 PKG_RELEASE:=1
 
-# 物理对齐：使用你的底层源码
+# 物理溯源：锁定你的底层源码
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL:=https://github.com/ykm888/66.git
 PKG_SOURCE_VERSION:=sl3000-clean-source
@@ -17,14 +17,19 @@ define U-Boot/Default
   BUILD_TARGET:=mediatek
   BUILD_SUBTARGET:=filogic
   BUILD_DEVICES:=mediatek_mt7981-sl-3000
+  # 物理强制：救砖包必须使用原始 bin 格式进行 1MB 偏移注入
   UBOOT_IMAGE:=u-boot.bin
 endef
 
-# 物理定义：U-Boot 编译目标
 define U-Boot/mt7981_sl3000_nor
-  NAME:=SL-3000 (NOR)
-  BUILD_DEVICES:=mediatek_mt7981-sl-3000
+  NAME:=SL-3000 (NOR-DDR4)
   UBOOT_CONFIG:=mt7981_sl3000_defconfig
+  # 物理锚点：告知构建系统启用 NOR 启动逻辑
+  BL2_BOOTDEV:=nor
+  BL2_SOC:=mt7981
+  BL2_DDRTYPE:=ddr4
+  # 物理联动：强制要求先编译修复版的 ATF
+  DEPENDS:=+trusted-firmware-a-mt7981-sl3000-nor
 endef
 
 UBOOT_TARGETS:=mt7981_sl3000_nor
