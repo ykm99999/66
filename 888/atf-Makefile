@@ -1,46 +1,46 @@
-#
-# Copyright (C) 2021-2026 ykm888 (23.05 Optimized)
-#
-
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=arm-trusted-firmware-mediatek
+PKG_VERSION:=24.10-sl3000
 PKG_RELEASE:=1
 
-# 物理溯源：锁定救砖专用源码分支 (ykm888/66.git)
+# 物理溯源：锁定你的底层源码仓库与分支
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL:=https://github.com/ykm888/66.git
 PKG_SOURCE_VERSION:=sl3000-clean-source
-PKG_HASH:=skip
+PKG_MIRROR_HASH:=skip
 
+PKG_LICENSE:=BSD-3-Clause
+PKG_LICENSE_FILES:=docs/license.rst
+
+# 物理引用官方 ATF 构建框架
 include $(INCLUDE_DIR)/trusted-firmware-a.mk
 include $(INCLUDE_DIR)/package.mk
 
-# --- 1. 零件工厂默认配置 ---
 define Trusted-Firmware-A/Default
   BUILD_TARGET:=mediatek
   BUILD_SUBTARGET:=filogic
   PLAT:=mt7981
-  # 物理修正：必须包含 fip.bin，否则 U-Boot 无法打包
+endef
+
+# 物理定义：SL-3000 专属 NOR + DDR4 组合
+define Trusted-Firmware-A/mt7981-sl3000-nor
+  NAME:=SL-3000 (NOR-DDR4)
+  BUILD_DEVICES:=mediatek_mt7981-sl-3000
   TFA_IMAGE:=bl2.img fip.bin
+  TFA_MAKE_FLAGS:= \
+    BOOT_DEVICE=nor \
+    DRAM_USE_DDR4=1 \
+    DEBUG=0
 endef
 
-# --- 2. 司络 SL-3000 专属零件定义 ---
-# 物理执行三准则：VARIANT 名称必须与 U-Boot 中的 DEPENDS 像素级对应
-define Trusted-Firmware-A/mt7981-nor-ddr4
-  NAME:=SL-3000 (SPI-NOR/DDR4)
-  VARIANT:=mt7981-nor-ddr4
-  BOOT_DEVICE:=nor
-  DDR_TYPE:=ddr4
-endef
-
-TFA_TARGETS:= mt7981-nor-ddr4
-
-# 物理修正：在源码解压后，物理复刻补丁文件到指定驱动目录
+# 物理注入：强制覆盖源码中的 BL2 引导逻辑
 define Build/Prepare
 	$(call Build/Prepare/Default)
-	$(CP) $(TOPDIR)/888/bl2_dev_spi_nor.c $(PKG_BUILD_DIR)/drivers/mediatek/uart.c || \
-	$(CP) $(TOPDIR)/888/bl2_dev_spi_nor.c $(PKG_BUILD_DIR)/plat/mediatek/mt7981/bl2/
+	# 将工作流 cp 进来的 files 补丁物理覆盖到源码构建目录
+	$(CP) ./files/bl2_dev_spi_nor.c $(PKG_BUILD_DIR)/plat/mediatek/mt7981/bl2/bl2_dev_spi_nor.c
 endef
+
+TFA_TARGETS:=mt7981-sl3000-nor
 
 $(eval $(call BuildPackage/Trusted-Firmware-A))
