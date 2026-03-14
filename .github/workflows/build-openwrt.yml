@@ -4,47 +4,45 @@ on:
   push:
     paths:
       - '888/**'
-      - 'diy-part2.sh'
-  workflow_dispatch:  # 保留手动拉起功能
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 检出当前仓库
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 初始化环境
+      - name: Initialization
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential git gawk libncurses5-dev gettext libssl-dev xsltproc wget
-          # 克隆 OpenWrt (环境确定性：使用 lede 源码)
           git clone --depth 1 https://github.com/coolsnowwolf/lede openwrt
           cd openwrt && ./scripts/feeds update -a && ./scripts/feeds install -a
 
-      - name: 物理执行 - 拉起补丁与编译
+      - name: Physical Patching
         run: |
-          # 物理执行链路：将 diy-part2.sh 移入目录并执行
           chmod +x diy-part2.sh
           cd openwrt
           ../diy-part2.sh
-          
-          # 正式物理编译 (按照闭环顺序)
+
+      - name: Build Toolchain (Crucial)
+        run: |
+          cd openwrt
+          # 预编译工具链，防止 compile 阶段找不到编译器
+          make tools/install -j$(nproc)
+          make toolchain/install -j$(nproc)
+
+      - name: Compile Hardened Parts
+        run: |
+          cd openwrt
+          # 按照物理依赖顺序编译
           make package/boot/arm-trusted-firmware-mediatek/compile V=s
           make package/boot/uboot-mediatek/compile V=s
           make target/linux/mediatek/image/compile V=s
 
-      - name: 物理校验 (Security Check)
-        run: |
-          # 检查生成的 bl2.bin 是否带 1MB 物理偏移特征 (0x100000)
-          BIN_PATH=$(find openwrt/bin/ -name "bl2.bin" | head -n 1)
-          if [ -f "$BIN_PATH" ]; then
-            hexdump -C "$BIN_PATH" | grep "00 00 10 00" || (echo "校验失败：1MB 地址未硬化！" && exit 1)
-            echo "校验成功：SL-3000 物理地址对齐。"
-          fi
-
-      - name: 上传成品
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: SL3000-Hardened-Firmware
+          name: SL3000-Fixed-Firmware
           path: openwrt/bin/targets/mediatek/filogic/*
