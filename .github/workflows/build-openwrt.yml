@@ -1,139 +1,59 @@
-name: SL-3000 Firmware Build (Physical Aligned)
+name: SL-3000 Physical Hardening Build
 
 on:
-  repository_dispatch:
-  workflow_dispatch:
   push:
     paths:
       - '888/**'
-      - '.github/workflows/build-openwrt.yml'
-
-env:
-  REPO_URL: https://github.com/immortalwrt/immortalwrt
-  REPO_BRANCH: openwrt-24.10
-  FEEDS_CONF: feeds.conf.default
-  CONFIG_FILE: 888/sl3000.config
-  DIY_P1_SH: diy-part1.sh
-  DIY_P2_SH: diy-part2.sh
-  TZ: Asia/Shanghai
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
-
+    runs-on: ubuntu-latest
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: 检出 888 补丁仓库
+        uses: actions/checkout@v4
+        with:
+          path: 888
 
-    - name: Initialization environment
-      env:
-        DEBIAN_FRONTEND: noninteractive
-      run: |
-        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-        sudo -E apt-get -qq update
-        sudo -E apt-get -qq install $(curl -fsSL https://is.gd/depends_ubuntu_2204)
-        sudo -E apt-get -qq autoremove --purge
-        sudo -E apt-get -qq clean
-        sudo timedatectl set-timezone "$TZ"
-        mkdir -p bin
+      - name: 初始化 OpenWrt 环境
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential git gawk libncurses5-dev gettext libssl-dev xsltproc
+          git clone --depth 1 https://github.com/coolsnowwolf/lede openwrt
+          cd openwrt && ./scripts/feeds update -a && ./scripts/feeds install -a
 
-    - name: Clone source code
-      run: |
-        df -hT $PWD
-        git clone $REPO_URL -b $REPO_BRANCH openwrt
-        ln -sf $PWD/openwrt $PWD/bin/openwrt
+      - name: 准备源码 (Prepare Phase)
+        run: |
+          cd openwrt
+          # 物理对齐：仅执行下载和解压，不进行原厂编译
+          make package/boot/arm-trusted-firmware-mediatek/prepare V=s
+          make package/boot/uboot-mediatek/prepare V=s
 
-    - name: Load custom feeds
-      run: |
-        [ -e $FEEDS_CONF ] && cp -f $FEEDS_CONF openwrt/feeds.conf.default
-        chmod +x $DIY_P1_SH
-        cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P1_SH
+      - name: 执行物理注入 (Hardening Phase)
+        run: |
+          chmod +x ./888/patch_it.sh
+          ./888/patch_it.sh
 
-    - name: Update feeds
-      run: cd openwrt && ./scripts/feeds update -a
+      - name: 物理执行 - 最终编译
+        run: |
+          cd openwrt
+          # 准则：环境确定性 - 强制带参数启动
+          make package/boot/arm-trusted-firmware-mediatek/compile V=s
+          make package/boot/uboot-mediatek/compile V=s
+          make target/linux/mediatek/image/compile V=s
 
-    - name: Install feeds
-      run: cd openwrt && ./scripts/feeds install -a
+      - name: 物理校验 (Alignment Check)
+        run: |
+          # 验证生成的 bl2.bin 里的 FIP 偏移是否为 0x100000
+          BL2_PATH=$(find openwrt/bin/ -name "bl2.bin" | head -n 1)
+          if [ -f "$BL2_PATH" ]; then
+            echo "正在物理校验 $BL2_PATH..."
+            # 搜索 1MB 偏移标志位
+            hexdump -C "$BL2_PATH" | grep "00 00 10 00" || (echo "物理对齐失败：未检测到 1MB 偏移特征！" && exit 1)
+          fi
 
-    - name: Load custom configuration
-      run: |
-        [ -e files ] && mv files openwrt/files
-        [ -e $CONFIG_FILE ] && cp -f $CONFIG_FILE openwrt/.config
-        chmod +x $DIY_P2_SH
-        cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P2_SH
-
-    - name: Physical Inject 888 Assets (Force Alignment)
-      run: |
-        # 1. 物理注入 ATF 补丁与 Makefile
-        mkdir -p openwrt/package/boot/arm-trusted-firmware-mediatek/files
-        cp -v 888/atf-Makefile openwrt/package/boot/arm-trusted-firmware-mediatek/Makefile
-        cp -v 888/bl2_dev_spi_nor.c openwrt/package/boot/arm-trusted-firmware-mediatek/files/
-        
-        # 2. 物理注入 U-Boot Makefile
-        mkdir -p openwrt/package/boot/uboot-mediatek
-        cp -v 888/uboot-Makefile openwrt/package/boot/uboot-mediatek/Makefile
-
-        # 3. 物理注入设备定义 (filogic.mk)
-        cp -v 888/filogic.mk openwrt/target/linux/mediatek/image/filogic.mk
-
-        # 4. 物理注入 DTS 到 target 预置目录 (用于 6.6 内核 Patch 流程)
-        mkdir -p openwrt/target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek/
-        cp -v 888/mt7981-sl-3000-emmc.dts openwrt/target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek/
-
-    - name: Download package
-      id: package
-      run: |
-        cd openwrt
-        make defconfig
-        make download -j8
-        find dl -size -1024c -exec ls -l {} \;
-        find dl -size -1024c -exec rm -f {} \;
-
-    - name: Final Kernel DTS Patching (Direct Injection)
-      run: |
-        # 在内核源码解压后，再次强行覆盖以防遗漏
-        KERNEL_BUILD_DIR=$(ls -d openwrt/build_dir/target-*/linux-mediatek_filogic/linux-* 2>/dev/null || true)
-        if [ -d "$KERNEL_BUILD_DIR" ]; then
-          mkdir -p $KERNEL_BUILD_DIR/arch/arm64/boot/dts/mediatek/
-          cp -v 888/mt7981-sl-3000-emmc.dts $KERNEL_BUILD_DIR/arch/arm64/boot/dts/mediatek/
-          echo "Kernel DTS injected into $KERNEL_BUILD_DIR"
-        else
-          echo "Warning: Kernel build directory not found yet, relying on target/linux/files-6.6/ injection."
-        fi
-
-    - name: Compile the firmware
-      id: compile
-      run: |
-        cd openwrt
-        echo -e "$(nproc) thread compile"
-        make -j$(nproc) || make -j1 || make -j1 V=s
-        echo "status=success" >> $GITHUB_OUTPUT
-
-    - name: Check space usage
-      if: (!cancelled())
-      run: df -hT
-
-    - name: Upload bin directory
-      uses: actions/checkout@v4
-      if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
-      with:
-        name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
-        path: openwrt/bin
-
-    - name: Organize files
-      id: organize
-      if: steps.compile.outputs.status == 'success' && !cancelled()
-      run: |
-        cd openwrt/bin/targets/mediatek/filogic
-        rm -rf packages
-        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
-        echo "status=success" >> $GITHUB_OUTPUT
-
-    - name: Upload firmware directory
-      uses: actions/upload-artifact@v4
-      if: steps.organize.outputs.status == 'success' && !cancelled()
-      with:
-        name: SL3000_Firmware_${{ github.run_id }}
-        path: ${{ env.FIRMWARE }}
+      - name: 上传 SL-3000 救砖固件
+        uses: actions/upload-artifact@v4
+        with:
+          name: SL3000-SPI-NOR-Hardened
+          path: openwrt/bin/targets/mediatek/filogic/*
