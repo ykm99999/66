@@ -1,39 +1,33 @@
 #!/bin/bash
 
-# 获取主仓库的物理绝对路径
-MAIN_REPO_PATH=$1
+# 获取传入的零件库路径 (config_repo)
+PART_REPO=$1
 
-if [ -z "$MAIN_REPO_PATH" ]; then
-    echo "Error: Physical path not provided. Usage: ./diy-part2.sh [path_to_repo]"
+if [ -z "$PART_REPO" ]; then
+    echo "Error: Part repository path not provided."
     exit 1
 fi
 
-echo "--- [物理链路] 正在从 $MAIN_REPO_PATH/888 搬运零件 ---"
+echo "--- [物理链路诊断] ---"
+echo "正在从零件库搬运: $PART_REPO/888"
+echo "当前源码位置: $(pwd)"
 
-# --- 1. 物理清场 ---
+# --- 1. 物理清场 (斩草除根) ---
+# 删除底层仓库自带的、会导致编译冲突的 patches
 rm -rf package/boot/arm-trusted-firmware-mediatek/patches/*
 rm -rf package/boot/uboot-mediatek/patches/*
 
-# --- 2. 物理搬运：ATF ---
-if [ -f "$MAIN_REPO_PATH/888/atf-Makefile" ]; then
-    cp -f "$MAIN_REPO_PATH/888/atf-Makefile" package/boot/arm-trusted-firmware-mediatek/Makefile
-else
-    echo "!!! 物理缺失: atf-Makefile !!!" && exit 1
-fi
+# --- 2. 零件搬运：ATF 与 U-Boot ---
+cp -f "$PART_REPO/888/atf-Makefile" package/boot/arm-trusted-firmware-mediatek/Makefile
+cp -f "$PART_REPO/888/uboot-Makefile" package/boot/uboot-mediatek/Makefile
 
-# --- 3. 物理搬运：U-Boot ---
-if [ -f "$MAIN_REPO_PATH/888/uboot-Makefile" ]; then
-    cp -f "$MAIN_REPO_PATH/888/uboot-Makefile" package/boot/uboot-mediatek/Makefile
-else
-    echo "!!! 物理缺失: uboot-Makefile !!!" && exit 1
-fi
-
-# --- 4. 物理注入：DTS 与 镜像规则 ---
+# --- 3. 零件搬运：DTS 与 镜像规则 ---
 mkdir -p target/linux/mediatek/dts/
-cp -f "$MAIN_REPO_PATH/888/mt7981-sl-3000-emmc.dts" target/linux/mediatek/dts/
-cat "$MAIN_REPO_PATH/888/filogic.mk" >> target/linux/mediatek/image/filogic.mk
+cp -f "$PART_REPO/888/mt7981-sl-3000-emmc.dts" target/linux/mediatek/dts/
+cat "$PART_REPO/888/filogic.mk" >> target/linux/mediatek/image/filogic.mk
 
-# --- 5. 名称对齐修正 ---
+# --- 4. 物理修正：全局名称对齐 ---
+# 将 mk 文件中可能存在的 mt7981-sl3000 统一修正为你的 DTS 文件名
 find target/linux/mediatek/image/ -name "*.mk" -exec sed -i 's/mt7981-sl3000/mt7981-sl-3000-emmc/g' {} +
 
-echo "--- [物理链路] diy-part2 执行完毕，全链路就位 ---"
+echo "--- [物理注入] 零件已就位，补丁已清理 ---"
