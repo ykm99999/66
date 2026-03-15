@@ -1,4 +1,4 @@
-Include $(TOPDIR)/rules.mk
+include $(TOPDIR)/rules.mk
 include $(INCLUDE_DIR)/kernel.mk
 
 PKG_VERSION:=2024.10
@@ -10,6 +10,14 @@ UBOOT_USE_INTREE_DTC:=1
 include $(INCLUDE_DIR)/u-boot.mk
 include $(INCLUDE_DIR)/package.mk
 include $(INCLUDE_DIR)/host-build.mk
+
+# 物理保底：保留原厂 SRAM 下载定义，防止语法报错
+MT7621_LOWLEVEL_PRELOADER_URL:=https://raw.githubusercontent.com/mtk-openwrt/mt7621-lowlevel-preloader/a03b07c60bf1ba4add9b671d32caa102fe948180/
+define Download/mt7621-stage-sram-noprint
+  FILE:=mt7621_stage_sram_noprint.bin
+  URL:=$(MT7621_LOWLEVEL_PRELOADER_URL)
+  HASH:=8ee419275144fc298e9444d413d98e965a55d283152a74ea6a1f8de79eb516b6
+endef
 
 define U-Boot/Default
   BUILD_TARGET:=mediatek
@@ -30,7 +38,12 @@ define U-Boot/mt7981_sl3000_nor
   DEPENDS:=+trusted-firmware-a-mt7981-nor-ddr4
 endef
 
-# 物理导出开关
-UBOOT_TARGETS:=mt7981_sl3000_nor
+# 物理索引：只保留 SL-3000 以加快编译速度，或者使用 += 追加
+UBOOT_TARGETS := mt7981_sl3000_nor
+
+# 物理执行逻辑
+define Package/u-boot/install/default
+	$(CP) $(PKG_BUILD_DIR)/$(UBOOT_IMAGE) $(1)/
+endef
 
 $(eval $(call BuildPackage,u-boot))
