@@ -1,15 +1,13 @@
-name: Build SL-3000 (ykm888-2410-Branch)
+name: Build SL-3000 (Physical-Aligned)
 
 on:
   repository_dispatch:
   workflow_dispatch:
 
 env:
+  # 物理源：你的 2410 分支
   REPO_URL: https://github.com/ykm888/66
   REPO_BRANCH: 2410
-  FEEDS_CONF: feeds.conf.default
-  CONFIG_FILE: .config
-  DIY_P2_SH: 888/diy-part2.sh
   TZ: Asia/Shanghai
 
 jobs:
@@ -17,77 +15,61 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: 检出当前仓库
+    - name: 1. 检出当前配置仓库 (888目录)
       uses: actions/checkout@v4
 
-    - name: 物理环境筑基 (Hardened)
+    - name: 2. 物理环境筑基
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        # 1. 物理清场
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
-        
-        # 2. 物理锁定依赖包 (Ubuntu 22.04 标准集合)
         sudo -E apt-get -qq update
-        sudo -E apt-get -qq install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
-          bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib \
-          git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libglib2.0-dev libgpgme11-dev libltdl-dev \
-          libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs \
-          msmtp nano ninja-build p7zip p7zip-full patch pkgconf python3 python3-pyelftools python3-setuptools \
-          qemu-utils rsync scons squashfs-tools subversion swig texinfo u-boot-tools upx-ucl unzip vim wget \
-          xmlto xxd zlib1g-dev
-        
-        sudo -E apt-get -qq autoremove --purge
-        sudo -E apt-get -qq clean
+        sudo -E apt-get -qq install -y build-essential clang flex bison g++-multilib gawk \
+          gettext git libncurses-dev libssl-dev python3-distutils python3-pyelftools \
+          python3-setuptools rsync swig unzip zlib1g-dev wget
         sudo timedatectl set-timezone "$TZ"
-        sudo mkdir -p /workdir
-        sudo chown $USER:$GROUPS /workdir
 
-    - name: 克隆 2410 目标仓库
-      working-directory: /workdir
+    - name: 3. 克隆底层源码
       run: |
+        # 物理克隆到 'openwrt' 子目录
         git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
-        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
-    - name: 加载并安装 Feeds
+    - name: 4. 执行物理注入 (Diy-Part2)
+      run: |
+        # 关键修复：赋予绝对路径下的脚本执行权限
+        chmod +x $GITHUB_WORKSPACE/888/diy-part2.sh
+        
+        # 进入源码目录，并将主仓库的绝对路径作为参数传给脚本
+        cd openwrt
+        $GITHUB_WORKSPACE/888/diy-part2.sh $GITHUB_WORKSPACE
+
+    - name: 5. 加载 Feeds 并生成配置
       run: |
         cd openwrt
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a
-
-    - name: 执行物理注入 (Diy-Part2)
-      run: |
-        chmod +x $DIY_P2_SH
-        cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P2_SH
-
-    - name: 生成 .config 物理配置
-      run: |
-        cd openwrt
+        ./scripts/feeds update -a && ./scripts/feeds install -a
+        
+        # 强制物理锁定 SL-3000 救砖包条目
         echo "CONFIG_TARGET_mediatek=y" >> .config
         echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
         echo "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_sl_3000=y" >> .config
         echo "CONFIG_PACKAGE_arm-trusted-firmware-mediatek-mt7981-sl3000-nor=y" >> .config
         echo "CONFIG_PACKAGE_uboot-mediatek-mt7981_sl3000=y" >> .config
-        # 额外注入：确保 eMMC 驱动物理选中
-        echo "CONFIG_PACKAGE_kmod-mmc=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-mtk-sd=y" >> .config
         make defconfig
 
-    - name: 物理编译 (Multi-Core)
+    - name: 6. 物理编译
       run: |
         cd openwrt
         make -j$(nproc) || make -j1 V=s
 
-    - name: 整理产物
+    - name: 7. 整理并上传产物
       run: |
         cd openwrt/bin/targets/mediatek/filogic/
-        mkdir -p /workdir/upload
-        cp *nor-programmer-dump.bin /workdir/upload/ 2>/dev/null || true
-        cp *emmc-sysupgrade.bin /workdir/upload/ 2>/dev/null || true
+        mkdir -p $GITHUB_WORKSPACE/output
+        cp *nor-programmer-dump.bin $GITHUB_WORKSPACE/output/ 2>/dev/null || true
+        cp *emmc-sysupgrade.bin $GITHUB_WORKSPACE/output/ 2>/dev/null || true
 
     - name: 上传固件
       uses: actions/upload-artifact@v4
       with:
-        name: SL3000-2410-Recovery-Firmware
-        path: /workdir/upload/
+        name: SL3000-Recovery-$(date +%Y%m%d)
+        path: ${{ github.workspace }}/output/
