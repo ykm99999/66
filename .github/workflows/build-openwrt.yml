@@ -1,12 +1,15 @@
-name: Build SL-3000 (Main-Root-Aligned)
+name: Build SL-3000 Rescue Firmware
 
 on:
-  repository_dispatch:
   workflow_dispatch:
 
 env:
-  SOURCE_URL: https://github.com/ykm888/66
-  SOURCE_BRANCH: 2410
+  REPO_URL: https://github.com/padavanonly/immortalwrt-mt798x
+  REPO_BRANCH: openwrt-24.10
+  FEEDS_CONF: feeds.conf.default
+  CONFIG_FILE: 888/.config
+  DIY_P1_SH: diy-part1.sh
+  DIY_P2_SH: diy-part2.sh
   TZ: Asia/Shanghai
 
 jobs:
@@ -14,65 +17,68 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: 1. 物理检出配置 (Main 分支)
+    - name: 物理环境初始化
       uses: actions/checkout@v4
-      with:
-        ref: main
-        path: config_repo
 
-    - name: 2. 物理环境筑基
+    - name: 检查依赖并清理空间
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
         sudo -E apt-get -qq update
-        sudo -E apt-get -qq install -y build-essential clang flex bison g++-multilib gawk \
-          gettext git libncurses-dev libssl-dev python3-distutils python3-pyelftools \
-          python3-setuptools rsync swig unzip zlib1g-dev wget
+        sudo -E apt-get -qq install $(curl -fsSL https://is.gd/depends_ubuntu_2204)
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
 
-    - name: 3. 物理克隆源码 (2410 分支)
+    - name: 克隆上游源码 (成功案例基准)
       run: |
-        git clone --depth 1 $SOURCE_URL -b $SOURCE_BRANCH openwrt
+        git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
 
-    - name: 4. 执行物理注入 (Diy-Part2)
+    - name: 加载 Feeds 并运行 diy-part1.sh
+      working-directory: ./openwrt
       run: |
-        # 物理绝对路径：指向 main 分支根目录下的脚本
-        DIY_SH="$GITHUB_WORKSPACE/config_repo/diy-part2.sh"
-        PART_DIR="$GITHUB_WORKSPACE/config_repo/888"
-        
-        if [ ! -f "$DIY_SH" ]; then
-          echo "!!! 物理故障：在 config_repo 根目录找不到 diy-part2.sh !!!"
-          ls -R $GITHUB_WORKSPACE/config_repo
-          exit 1
-        fi
-        
-        chmod +x "$DIY_SH"
-        
-        # 进入源码目录，将 888 零件目录传给脚本
-        cd openwrt
-        $DIY_SH "$PART_DIR"
+        chmod +x ../$DIY_P1_SH
+        ../$DIY_P1_SH
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
 
-    - name: 5. 编译全流程 (Feeds/Config/Make)
+    - name: 物理注入：4文件覆盖并运行 diy-part2.sh
       run: |
+        # 物理注入开关配置
+        [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
+        chmod +x $DIY_P2_SH
         cd openwrt
-        ./scripts/feeds update -a && ./scripts/feeds install -a
-        echo "CONFIG_TARGET_mediatek=y" >> .config
-        echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-        echo "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_sl_3000=y" >> .config
-        echo "CONFIG_PACKAGE_arm-trusted-firmware-mediatek-mt7981-sl3000-nor=y" >> .config
-        echo "CONFIG_PACKAGE_uboot-mediatek-mt7981_sl3000=y" >> .config
+        $GITHUB_WORKSPACE/$DIY_P2_SH
+
+    - name: 下载软件包
+      working-directory: ./openwrt
+      run: |
         make defconfig
-        make -j$(nproc) || make -j1 V=s
+        make download -j8
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
 
-    - name: 6. 提取产物
+    - name: 物理编译 (单线程加固模式)
+      id: compile
+      working-directory: ./openwrt
       run: |
-        mkdir -p $GITHUB_WORKSPACE/output
-        find openwrt/bin/targets/ -name "*nor-programmer-dump.bin" -exec cp {} $GITHUB_WORKSPACE/output/ \;
-        find openwrt/bin/targets/ -name "*emmc-sysupgrade.bin" -exec cp {} $GITHUB_WORKSPACE/output/ \;
+        echo -e "$(nproc) thread compile"
+        # 物理策略：先尝试多线程，失败则转单线程诊断
+        make -j$(nproc) || make -j1 V=s
+        echo "status=success" >> $GITHUB_OUTPUT
 
-    - name: 上传 Artifacts
+    - name: 物理收集产物 (32MB 救砖固件)
+      if: steps.compile.outputs.status == 'success'
+      run: |
+        cd openwrt/bin/targets/mediatek/filogic
+        # 查找并重命名那个 32MB 的关键文件
+        find . -name "*nor-programmer-dump.bin" -exec mv {} SL-3000-Rescue-Full-Dump.bin \;
+        echo "FIRMWARE_PATH=$PWD" >> $GITHUB_ENV
+
+    - name: 上传救砖全家桶
       uses: actions/upload-artifact@v4
+      if: steps.compile.outputs.status == 'success'
       with:
-        name: SL3000-Recovery-Firmware
-        path: ${{ github.workspace }}/output/
+        name: SL-3000-Rescue-Pack
+        path: ${{ env.FIRMWARE_PATH }}/SL-3000-Rescue-Full-Dump.bin
