@@ -1,50 +1,16 @@
-# SPDX-License-Identifier: GPL-2.0-only
-# SL-3000 (MT7981) Physical Hardening Makefile
-
-include $(TOPDIR)/rules.mk
-
-PKG_NAME:=arm-trusted-firmware-mediatek
-PKG_VERSION:=24.10-sl3000
-PKG_RELEASE:=1
-
-# 物理溯源：直接锁定你的底层干净源码仓库
-PKG_SOURCE_PROTO:=git
-PKG_SOURCE_URL:=https://github.com/ykm888/66.git
-PKG_SOURCE_VERSION:=sl3000-clean-source
-PKG_MIRROR_HASH:=skip
-
-PKG_LICENSE:=BSD-3-Clause
-PKG_LICENSE_FILES:=docs/license.rst
-
-# 物理引用 ImmortalWrt 24.10 的 TFA 构建框架
-include $(INCLUDE_DIR)/trusted-firmware-a.mk
-include $(INCLUDE_DIR)/package.mk
-
-define Trusted-Firmware-A/Default
-  BUILD_TARGET:=mediatek
-  BUILD_SUBTARGET:=filogic
-  PLAT:=mt7981
-endef
-
-# 物理定义：SL-3000 专属救砖组合 (NOR + DDR4)
-define Trusted-Firmware-A/mt7981-sl3000-nor
-  NAME:=SL-3000 (NOR-DDR4-1MB-Fix)
-  BUILD_DEVICES:=mediatek_mt7981-sl-3000
-  TFA_IMAGE:=bl2.img fip.bin
-  TFA_MAKE_FLAGS:= \
-    BOOT_DEVICE=nor \
-    DRAM_USE_DDR4=1 \
-    DEBUG=0
-endef
-
-# 物理修复：重写 Prepare 逻辑
-# 不在这里执行任何 cp 操作，防止因为路径不存在导致 Error 1
-# 所有的零件注入将由外部 diy-part2.sh 物理拉起
 define Build/Prepare
 	$(call Build/Prepare/Default)
-	@echo "Makefile: Source code unpacked. Awaiting external injection by diy-part2.sh"
+	@echo "Physical Hardening: Correcting ATF Source Depth and Injecting Recovery Code..."
+	# 物理提拉嵌套目录
+	[ -f $(PKG_BUILD_DIR)/Makefile ] || ( \
+		SUB_DIR=$$(find $(PKG_BUILD_DIR) -name Makefile -printf '%h\n' | head -n 1); \
+		mv $(PKG_BUILD_DIR)/* $(PKG_BUILD_DIR)/.tmp_backup 2>/dev/null || true; \
+		cp -r $$$$SUB_DIR/* $(PKG_BUILD_DIR)/ \
+	)
+	# 物理覆盖救砖零件
+	$(CP) ./files/bl2_dev_spi_nor.c $(PKG_BUILD_DIR)/plat/mediatek/mt7981/bl2/
+	$(CP) ./files/bl2.mk $(PKG_BUILD_DIR)/plat/mediatek/mt7981/bl2/
+	$(CP) ./files/platform.mk $(PKG_BUILD_DIR)/plat/mediatek/mt7981/
+	$(CP) ./files/platform_def.h $(PKG_BUILD_DIR)/plat/mediatek/mt7981/include/
+	find $(PKG_BUILD_DIR) -name "mt7981-spi2.dts" -exec cp ./files/mt7981-spi2.dts {} \;
 endef
-
-TFA_TARGETS:=mt7981-sl3000-nor
-
-$(eval $(call BuildPackage/Trusted-Firmware-A))
