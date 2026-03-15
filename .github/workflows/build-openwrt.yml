@@ -29,24 +29,29 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: 物理零件预装 (注入 diy-part2.sh)
+      - name: 物理零件预装
         run: |
-          # 给予脚本执行权限
           chmod +x $DIY_P2_SH
           cd openwrt
-          # 执行完整版脚本，将 888 零件预埋到 package/.../files
+          # 执行脚本：将 888 目录下的零件预埋到 package/boot/.../files/
           ../$DIY_P2_SH
 
-      - name: 物理配置对齐 (生成 .config)
+      - name: 物理配置硬化
         run: |
           cd openwrt
-          # 这一步会将预埋的 sl3000.config 物理激活
+          # 1. 尝试应用种子配置
+          [ -f .config ] || cp ../888/sl3000.config .config
+          
+          # 2. 【核心修复】：强行锁定救砖包选中状态，防止 skipping
+          echo "CONFIG_PACKAGE_arm-trusted-firmware-mediatek=y" >> .config
+          echo "CONFIG_PACKAGE_uboot-mediatek-mt7981_sl3000_nor=y" >> .config
+          
+          # 3. 补全配置依赖
           make defconfig
 
       - name: 编译编译工具 (Tools)
         run: |
           cd openwrt
-          # tools 是物理基础，必须先行编译
           make tools/install -j$(nproc) || make tools/install -j1 V=s
 
       - name: 编译交叉编译器 (Toolchain)
@@ -54,20 +59,28 @@ jobs:
           cd openwrt
           make toolchain/install -j$(nproc) || make toolchain/install -j1 V=s
 
-      - name: 物理全链路编译 (救砖核心)
+      - name: 编译救砖版 ATF
         run: |
           cd openwrt
-          # 1. 编译硬化版 ATF (BL2 1MB 偏移核心)
+          # 触发 Makefile 中的 Build/Prepare 进行代码注入
           make package/boot/arm-trusted-firmware-mediatek/compile V=s
-          
-          # 2. 编译硬化版 U-Boot (FIP 1MB 偏移对齐)
-          make package/boot/uboot-mediatek/compile V=s
-          
-          # 3. 生成最终系统镜像
-          make target/linux/mediatek/image/compile V=s
 
-      - name: 归档物理产物
+      - name: 编译救砖版 U-Boot
+        run: |
+          cd openwrt
+          # 指向明确的 variant 路径，防止逻辑跳过
+          make package/boot/uboot-mediatek/mt7981_sl3000_nor/compile V=s
+
+      - name: 物理合成镜像
+        run: |
+          cd openwrt
+          # 修正 target 指令，24.10 标准镜像合成路径
+          make target/linux/mediatek/image/install V=s
+
+      - name: 上传救砖产物
         uses: actions/upload-artifact@v4
         with:
-          name: SL3000-Recovery-Firmware
-          path: openwrt/bin/targets/mediatek/filogic/*
+          name: SL3000-NOR-Recovery-Package
+          path: |
+            openwrt/bin/targets/mediatek/filogic/*.bin
+            openwrt/bin/targets/mediatek/filogic/*.img
