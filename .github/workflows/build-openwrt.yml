@@ -1,11 +1,10 @@
-name: Build SL-3000 (Multi-Branch-Fix)
+name: Build SL-3000 (Main-Root-Aligned)
 
 on:
   repository_dispatch:
   workflow_dispatch:
 
 env:
-  # 底层源码：ykm888/66 的 2410 分支
   SOURCE_URL: https://github.com/ykm888/66
   SOURCE_BRANCH: 2410
   TZ: Asia/Shanghai
@@ -19,7 +18,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         ref: main
-        path: config_repo  # 零件存放在这里，不被源码覆盖
+        path: config_repo
 
     - name: 2. 物理环境筑基
       env:
@@ -34,51 +33,46 @@ jobs:
 
     - name: 3. 物理克隆源码 (2410 分支)
       run: |
-        # 物理隔离：将源码放入独立的 openwrt 文件夹
         git clone --depth 1 $SOURCE_URL -b $SOURCE_BRANCH openwrt
 
     - name: 4. 执行物理注入 (Diy-Part2)
       run: |
-        # 锁定脚本的绝对路径
-        DIY_SH="$GITHUB_WORKSPACE/config_repo/888/diy-part2.sh"
+        # 物理绝对路径：指向 main 分支根目录下的脚本
+        DIY_SH="$GITHUB_WORKSPACE/config_repo/diy-part2.sh"
+        PART_DIR="$GITHUB_WORKSPACE/config_repo/888"
         
-        # 物理核验
         if [ ! -f "$DIY_SH" ]; then
-          echo "!!! 物理故障：在 config_repo/888 中找不到脚本 !!!"
+          echo "!!! 物理故障：在 config_repo 根目录找不到 diy-part2.sh !!!"
           ls -R $GITHUB_WORKSPACE/config_repo
           exit 1
         fi
         
         chmod +x "$DIY_SH"
         
-        # 进入源码目录执行注入，传入配置仓库的绝对路径作为零件来源
+        # 进入源码目录，将 888 零件目录传给脚本
         cd openwrt
-        $DIY_SH "$GITHUB_WORKSPACE/config_repo"
+        $DIY_SH "$PART_DIR"
 
-    - name: 5. 编译全流程
+    - name: 5. 编译全流程 (Feeds/Config/Make)
       run: |
         cd openwrt
         ./scripts/feeds update -a && ./scripts/feeds install -a
-        
-        # 强制选中 888 注入的救砖包定义
         echo "CONFIG_TARGET_mediatek=y" >> .config
         echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
         echo "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_sl_3000=y" >> .config
         echo "CONFIG_PACKAGE_arm-trusted-firmware-mediatek-mt7981-sl3000-nor=y" >> .config
         echo "CONFIG_PACKAGE_uboot-mediatek-mt7981_sl3000=y" >> .config
-        
         make defconfig
         make -j$(nproc) || make -j1 V=s
 
     - name: 6. 提取产物
       run: |
         mkdir -p $GITHUB_WORKSPACE/output
-        # 深度搜索生成的 32MB 编程器包
         find openwrt/bin/targets/ -name "*nor-programmer-dump.bin" -exec cp {} $GITHUB_WORKSPACE/output/ \;
         find openwrt/bin/targets/ -name "*emmc-sysupgrade.bin" -exec cp {} $GITHUB_WORKSPACE/output/ \;
 
     - name: 上传 Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: SL3000-Recovery-$(date +%Y%m%d)
+        name: SL3000-Recovery-Firmware
         path: ${{ github.workspace }}/output/
