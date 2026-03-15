@@ -1,16 +1,56 @@
+include $(TOPDIR)/rules.mk
+
+PKG_NAME:=arm-trusted-firmware-mediatek
+PKG_VERSION:=24.10-sl3000
+PKG_RELEASE:=1
+
+PKG_SOURCE_PROTO:=git
+PKG_SOURCE_URL:=https://github.com/ykm888/66.git
+PKG_SOURCE_VERSION:=sl3000-clean-source
+PKG_MIRROR_HASH:=skip
+
+PKG_MAINTAINER:=ImmortalWrt
+PKG_LICENSE:=BSD-3-Clause
+
+include $(INCLUDE_DIR)/package.mk
+
+define Package/arm-trusted-firmware-mediatek
+  SECTION:=boot
+  CATEGORY:=Boot Loaders
+  TITLE:=ARM Trusted Firmware for MediaTek
+  DEPENDS:=@TARGET_mediatek_filogic
+endef
+
+# --- 物理核心：硬化注入逻辑 ---
 define Build/Prepare
 	$(call Build/Prepare/Default)
-	@echo "Physical Hardening: Correcting ATF Source Depth and Injecting Recovery Code..."
-	# 物理提拉嵌套目录
+	@echo "Physical Hardening: Correcting Source Depth and Injecting Recovery Code..."
+	# 物理提拉：解决嵌套目录问题
 	[ -f $(PKG_BUILD_DIR)/Makefile ] || ( \
 		SUB_DIR=$$(find $(PKG_BUILD_DIR) -name Makefile -printf '%h\n' | head -n 1); \
 		mv $(PKG_BUILD_DIR)/* $(PKG_BUILD_DIR)/.tmp_backup 2>/dev/null || true; \
 		cp -r $$$$SUB_DIR/* $(PKG_BUILD_DIR)/ \
 	)
-	# 物理覆盖救砖零件
+	# 物理注入：从 ./files/ 目录强行覆盖救砖代码
 	$(CP) ./files/bl2_dev_spi_nor.c $(PKG_BUILD_DIR)/plat/mediatek/mt7981/bl2/
 	$(CP) ./files/bl2.mk $(PKG_BUILD_DIR)/plat/mediatek/mt7981/bl2/
 	$(CP) ./files/platform.mk $(PKG_BUILD_DIR)/plat/mediatek/mt7981/
 	$(CP) ./files/platform_def.h $(PKG_BUILD_DIR)/plat/mediatek/mt7981/include/
 	find $(PKG_BUILD_DIR) -name "mt7981-spi2.dts" -exec cp ./files/mt7981-spi2.dts {} \;
 endef
+
+define Build/Compile
+	$(MAKE) -C $(PKG_BUILD_DIR) \
+		CROSS_COMPILE=$(TARGET_CROSS) \
+		PLAT=mt7981 \
+		BOOT_DEVICE=nor \
+		all
+endef
+
+define Package/arm-trusted-firmware-mediatek/install
+	$(INSTALL_DIR) $(STAGING_DIR_IMAGE)
+	$(CP) $(PKG_BUILD_DIR)/build/mt7981/release/bl2.bin $(STAGING_DIR_IMAGE)/mt7981_bl2.bin
+	$(CP) $(PKG_BUILD_DIR)/build/mt7981/release/bl31.bin $(STAGING_DIR_IMAGE)/mt7981_bl31.bin
+endef
+
+$(eval $(call BuildPackage,arm-trusted-firmware-mediatek))
