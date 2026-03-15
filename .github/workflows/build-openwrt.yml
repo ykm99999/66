@@ -3,44 +3,71 @@ name: SL-3000 Recovery Build 24.10
 on:
   workflow_dispatch:
 
+env:
+  REPO_URL: https://github.com/immortalwrt/immortalwrt
+  REPO_BRANCH: openwrt-24.10
+  FEEDS_CONF: feeds.conf.default
+  DIY_P2_SH: diy-part2.sh
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+
     steps:
-      - name: 物理检出
+      - name: 物理检出代码
         uses: actions/checkout@v4
 
-      - name: 环境筑基
+      - name: 环境筑基 (Ubuntu 22.04)
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential git gawk libncurses5-dev gettext libssl-dev xsltproc wget zstd
-          git clone -b openwrt-24.10 --depth 1 https://github.com/immortalwrt/immortalwrt openwrt
-          cd openwrt && ./scripts/feeds update -a && ./scripts/feeds install -a
+          git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
 
-      - name: 零件注入
-        run: |
-          chmod +x diy-part2.sh
-          cd openwrt
-          ../diy-part2.sh
-
-      - name: 工具链编译 (物理硬化)
+      - name: 更新并安装 Feeds
         run: |
           cd openwrt
-          make tools/install -j$(nproc)
-          make toolchain/install -j$(nproc)
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
 
-      - name: 救砖固件合成
+      - name: 物理零件预装 (注入 diy-part2.sh)
+        run: |
+          # 给予脚本执行权限
+          chmod +x $DIY_P2_SH
+          cd openwrt
+          # 执行完整版脚本，将 888 零件预埋到 package/.../files
+          ../$DIY_P2_SH
+
+      - name: 物理配置对齐 (生成 .config)
         run: |
           cd openwrt
-          # 优先编译救砖版 ATF
+          # 这一步会将预埋的 sl3000.config 物理激活
+          make defconfig
+
+      - name: 编译编译工具 (Tools)
+        run: |
+          cd openwrt
+          # tools 是物理基础，必须先行编译
+          make tools/install -j$(nproc) || make tools/install -j1 V=s
+
+      - name: 编译交叉编译器 (Toolchain)
+        run: |
+          cd openwrt
+          make toolchain/install -j$(nproc) || make toolchain/install -j1 V=s
+
+      - name: 物理全链路编译 (救砖核心)
+        run: |
+          cd openwrt
+          # 1. 编译硬化版 ATF (BL2 1MB 偏移核心)
           make package/boot/arm-trusted-firmware-mediatek/compile V=s
-          # 编译救砖版 U-Boot
+          
+          # 2. 编译硬化版 U-Boot (FIP 1MB 偏移对齐)
           make package/boot/uboot-mediatek/compile V=s
-          # 生成最终镜像
+          
+          # 3. 生成最终系统镜像
           make target/linux/mediatek/image/compile V=s
 
-      - name: 上传物理产物
+      - name: 归档物理产物
         uses: actions/upload-artifact@v4
         with:
-          name: SL3000-NOR-Recovery
+          name: SL3000-Recovery-Firmware
           path: openwrt/bin/targets/mediatek/filogic/*
