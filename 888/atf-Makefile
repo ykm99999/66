@@ -6,9 +6,9 @@ PKG_RELEASE:=1
 
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL:=https://github.com/mtk-openwrt/arm-trusted-firmware.git
-PKG_SOURCE_DATE:=2024-03-12
-PKG_SOURCE_VERSION:=355938501255e0031846b0e9987823e59392e276
-PKG_MIRROR_HASH:=421e679a6136e053913009087524021200921008655443212001242312001242
+PKG_SOURCE_DATE:=2024-01-17
+PKG_SOURCE_VERSION:=f8a1c9377465355a297823e59392e276f7b11964
+PKG_MIRROR_HASH:=skip
 
 PKG_MAINTAINER:=Daniel Golle <daniel@makrotopia.org>
 PKG_LICENSE:=BSD-3-Clause
@@ -25,15 +25,7 @@ define Package/trusted-firmware-a/Default
   URL:=https://www.trustedfirmware.org/projects/tf-a/
 endef
 
-# 物理索引：加入 SL-3000 所需的 NOR+DDR4 编译目标
-TFA_TARGETS:= \
-	mt7981-nor-ddr4 \
-	mt7981-emmc-ddr3 \
-	mt7981-emmc-ddr4 \
-	mt7981-sdmmc-ddr3 \
-	mt7981-sdmmc-ddr4 \
-	mt7981-spim-nand-ddr3 \
-	mt7981-spim-nand-ddr4
+TFA_TARGETS:= mt7981-nor-ddr4
 
 define TFA/Default
   TITLE:=Trusted Firmware-A for MediaTek
@@ -42,7 +34,6 @@ define TFA/Default
   PLAT:=mt7981
 endef
 
-# 物理定义：SL-3000 (SPI-NOR + DDR4) 核心参数
 define TFA/mt7981-nor-ddr4
   NAME:=MediaTek MT7981 (SPI-NOR, DDR4)
   BOOT_DEVICE:=nor
@@ -59,6 +50,8 @@ define TfaTemplate
   define Package/trusted-firmware-a-$(1)/install
 	$$(INSTALL_DIR) $$(1)/lib/firmware/$(1)
 	$$(CP) $$(PKG_BUILD_DIR)/build/$(PLAT)/release/bl2.img $$(1)/lib/firmware/$(1)/bl2.img
+	$$(INSTALL_DIR) $$(STAGING_DIR_IMAGE)
+	$$(CP) $$(PKG_BUILD_DIR)/build/$(PLAT)/release/bl2.img $$(STAGING_DIR_IMAGE)/$(1)-bl2.img
   endef
 
   $$(eval $$(call BuildPackage,trusted-firmware-a-$(1)))
@@ -77,7 +70,6 @@ define Build/Compile
 	)
 endef
 
-# 物理循环：为每个目标生成安装包
 $(foreach target,$(TFA_TARGETS), \
 	$(eval $(TFA/$(target))) \
 	$(eval $(TFA_$(target)_BOOT_DEVICE:=$(BOOT_DEVICE))) \
