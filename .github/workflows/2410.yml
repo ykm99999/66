@@ -1,46 +1,56 @@
-name: Custom Source Physical Sync
+name: 物理克隆并创建2410补丁分支
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # 手动点击运行
 
 jobs:
-  sync:
+  sync_to_2410:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
     steps:
-    - name: Checkout Your Custom Files
-      uses: actions/checkout@v4
-      with:
-        ref: main # 从 main 分支提取你的 888 零件
+      - name: 1. 物理检出配置仓库
+        uses: actions/checkout@v4
+        with:
+          path: config_repo
 
-    - name: Physical Backup Customization
-      run: |
-        mkdir -p /tmp/custom_parts
-        cp -r 888 /tmp/custom_parts/
-        cp diy-part2.sh /tmp/custom_parts/
+      - name: 2. 物理同步上游 24.10 源码
+        run: |
+          # 物理锁定上游源
+          UPSTREAM_URL="https://github.com/padavanonly/immortalwrt-mt798x-24.10.git"
+          git clone --depth 1 -b 2410 $UPSTREAM_URL source_code
 
-    - name: Physical Core Sync (24.10 Foundation)
-      run: |
-        git config --global user.email "action@github.com"
-        git config --global user.name "GitHub Action"
-        
-        # 1. 物理溯源并拉取
-        git remote add upstream https://github.com/OpenWrt01/immortalwrt-mt798x-24.10.git || true
-        git fetch upstream 2410
-        
-        # 2. 强制切换至 2410 分支地基
-        git checkout -B 2410 FETCH_HEAD
+      - name: 3. 物理执行手术：注入 SL3000 硬件零件
+        run: |
+          SRC="source_code"
+          PATCH="config_repo/888"
 
-    - name: Physical Injection (Customization)
-      run: |
-        # 3. 物理缝合：将零件压入 24.10 源码
-        cp -rf /tmp/custom_parts/888 .
-        cp -f /tmp/custom_parts/diy-part2.sh .
-        
-        # 4. 物理对齐校验
-        [ -d "888" ] && [ -f "diy-part2.sh" ] || { echo "!!! Injection Failed !!!"; exit 1; }
+          # A. 物理投递 DTS (驱动 SL-3000 eMMC)
+          cp -v "$PATCH/mt7981-sl-3000-emmc.dts" "$SRC/target/linux/mediatek/dts/"
 
-    - name: Push To Your 2410 Branch
-      run: |
-        git add .
-        git commit -m "Build(Custom): Physically integrated 24.10 source with 888-hardened parts"
-        git push -f origin 2410
+          # B. 物理劫持 ATF/U-Boot (锁定 DDR4 救砖逻辑)
+          cp -v "$PATCH/atf-Makefile" "$SRC/package/boot/arm-trusted-firmware-mediatek/Makefile"
+          cp -v "$PATCH/uboot-Makefile" "$SRC/package/boot/uboot-mediatek/Makefile"
+
+          # C. 物理覆盖镜像规则 (锁定 1MB 偏移合成)
+          cp -v "$PATCH/filogic.mk" "$SRC/target/linux/mediatek/image/mt7981.mk"
+
+      - name: 4. 物理推送到本地 2410 分支
+        run: |
+          cd source_code
+          git remote remove origin
+          git remote add origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          
+          # 物理身份配置
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+          
+          # 物理提交并强制创建/覆盖 2410 分支
+          git add .
+          git commit -m "物理同步：基于 padavanonly 24.10 并注入 SL3000 DDR4 补丁"
+          git checkout -b 2410
+          git push -f origin 2410
+
+      - name: 5. 物理链路反馈
+        run: echo "成功！你的仓库已新增物理分支：2410。该分支已具备完整救砖编译环境。"
