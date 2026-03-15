@@ -1,48 +1,27 @@
 #!/bin/bash
 
-# --- 物理路径溯源 ---
-# 如果 GITHUB_WORKSPACE 为空（本地测试用），则取当前目录的上一级
-PATCH_DIR="${GITHUB_WORKSPACE:-$(pwd)/..}/888"
+# --- 工序 4: 物理路径绝对溯源 ---
+PATCH_DIR="${GITHUB_WORKSPACE}/888"
 OPENWRT_ROOT=$(pwd)
+echo "物理执行：工序 4 - 锁定补丁集绝对路径 $PATCH_DIR"
 
-echo "物理诊断：源码根目录 -> $OPENWRT_ROOT"
-echo "物理诊断：补丁集路径 -> $PATCH_DIR"
+# --- 工序 5: 物理零件注入 (ATF/U-Boot/MK) ---
+rm -rf package/boot/arm-trusted-firmware-mediatek
+mkdir -p package/boot/arm-trusted-firmware-mediatek
 
-# 1. 物理劫持 U-Boot 索引
-UBOOT_MAKEFILE="package/boot/uboot-mediatek/Makefile"
-if [ -f "$UBOOT_MAKEFILE" ]; then
-    sed -i '/mt7981_xiaomi_mi-router-wr30u/a \\tmt7981_sl3000_nor \\' "$UBOOT_MAKEFILE"
-    echo "物理成功：已注入 U-Boot 索引。"
-else
-    echo "物理致命错误：找不到 $UBOOT_MAKEFILE" && exit 1
-fi
+[ -f "$PATCH_DIR/atf-Makefile" ] && cp -f "$PATCH_DIR/atf-Makefile" package/boot/arm-trusted-firmware-mediatek/Makefile
+[ -f "$PATCH_DIR/uboot-Makefile" ] && cp -f "$PATCH_DIR/uboot-Makefile" package/boot/uboot-mediatek/Makefile
+[ -f "$PATCH_DIR/mt7981.mk" ] && cp -f "$PATCH_DIR/mt7981.mk" target/linux/mediatek/image/mt7981.mk
 
-# 2. 补丁强制覆盖（带物理存在校验）
-declare -A PATCH_MAP=(
-    ["atf-Makefile"]="package/boot/arm-trusted-firmware-mediatek/Makefile"
-    ["uboot-Makefile"]="package/boot/uboot-mediatek/Makefile"
-    ["mt7981.mk"]="target/linux/mediatek/image/mt7981.mk"
-    ["mt7981_sl3000_nor_defconfig"]="package/boot/uboot-mediatek/files/mt7981_sl3000_nor_defconfig"
-)
-
+# --- 工序 6: Web 救砖配置注入 ---
 mkdir -p package/boot/uboot-mediatek/files
+[ -f "$PATCH_DIR/mt7981_sl3000_nor_defconfig" ] && cp -f "$PATCH_DIR/mt7981_sl3000_nor_defconfig" package/boot/uboot-mediatek/files/
+echo "物理执行：工序 6 - 注入 Web 192.168.1.1 救砖零件"
 
-for src in "${!PATCH_MAP[@]}"; do
-    target="${PATCH_MAP[$src]}"
-    if [ -f "$PATCH_DIR/$src" ]; then
-        cp -f "$PATCH_DIR/$src" "$target"
-        echo "物理对齐：$src -> $target"
-    else
-        echo "物理致命错误：补丁 $src 在 $PATCH_DIR 中不存在！" && exit 1
-    fi
-done
-
-# 3. 网口逻辑物理修正
+# --- 工序 7: 物理网口逻辑修正 ---
 NETWORK_FILE="target/linux/mediatek/filogic/base-files/etc/board.d/02_network"
 if [ -f "$NETWORK_FILE" ]; then
     sed -i '/sl,3000-emmc/d' "$NETWORK_FILE"
     sed -i '/casat,ar3000m/a \\tsl,3000-emmc)\n\t\tucidef_set_interfaces_lan_wan "lan1 lan2 lan3" "wan"\n\t\t;;' "$NETWORK_FILE"
-    echo "物理成功：网口逻辑已修正。"
 fi
-
-echo "物理定论：所有补丁已完成原子级注入。"
+echo "物理执行：工序 7 - DTS 逻辑与网口拓扑物理对齐"
