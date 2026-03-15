@@ -14,6 +14,15 @@ PKG_BUILD_DEPENDS:=arm-trusted-firmware-mediatek
 include $(INCLUDE_DIR)/u-boot.mk
 include $(INCLUDE_DIR)/package.mk
 
+# 物理定义：确保在 menuconfig 中可见
+define Package/uboot-mediatek-$(1)
+  SECTION:=boot
+  CATEGORY:=Boot Loaders
+  TITLE:=U-Boot for $(1)
+  DEPENDS:=@TARGET_mediatek_filogic +arm-trusted-firmware-mediatek
+  VARIANT:=$(1)
+endef
+
 define U-Boot/Default
   BUILD_TARGET:=mediatek
   BUILD_SUBTARGET:=filogic
@@ -23,14 +32,13 @@ endef
 
 define U-Boot/mt7981_sl3000_nor
   NAME:=SL-3000 (NOR-1MB-Offset)
+  BUILD_DEVICES:=mediatek_mt7981-sl-3000
   UBOOT_CONFIG:=mt7981_sl3000_defconfig
-  DEPENDS:=+arm-trusted-firmware-mediatek
 endef
 
-# --- 物理核心：注入救砖 Defconfig ---
 define Build/Prepare
 	$(call Build/Prepare/Default)
-	@echo "Physical Linkage: Correcting U-Boot Source Depth and Injecting Config..."
+	@echo "Physical Hardening: Correcting U-Boot Source Depth..."
 	[ -f $(PKG_BUILD_DIR)/Makefile ] || ( \
 		SUB_DIR=$$(find $(PKG_BUILD_DIR) -name Makefile -printf '%h\n' | head -n 1); \
 		cp -r $$$$SUB_DIR/* $(PKG_BUILD_DIR)/ \
@@ -40,4 +48,6 @@ endef
 
 UBOOT_TARGETS:=mt7981_sl3000_nor
 
-$(eval $(call BuildPackage/U-Boot))
+$(foreach uint,$(UBOOT_TARGETS), \
+    $(eval $(call BuildPackage,uboot-mediatek-$(uint))) \
+)
