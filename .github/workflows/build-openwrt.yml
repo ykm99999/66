@@ -5,7 +5,6 @@ on:
   workflow_dispatch:
 
 env:
-  # 物理指向：你的 2410 分支仓库
   REPO_URL: https://github.com/ykm888/66
   REPO_BRANCH: 2410
   FEEDS_CONF: feeds.conf.default
@@ -21,15 +20,23 @@ jobs:
     - name: 检出当前仓库
       uses: actions/checkout@v4
 
-    - name: 物理环境筑基
+    - name: 物理环境筑基 (Hardened)
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
+        # 1. 物理清场
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
+        
+        # 2. 物理锁定依赖包 (Ubuntu 22.04 标准集合)
         sudo -E apt-get -qq update
-        sudo -E apt-get -qq install $(curl -fsSL https://is.gd/depends_ubuntu_2204)
-        # 补齐 MT7981 编译所需物理依赖
-        sudo -E apt-get -qq install python3-pyelftools swig python3-dev
+        sudo -E apt-get -qq install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+          bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib \
+          git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libglib2.0-dev libgpgme11-dev libltdl-dev \
+          libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs \
+          msmtp nano ninja-build p7zip p7zip-full patch pkgconf python3 python3-pyelftools python3-setuptools \
+          qemu-utils rsync scons squashfs-tools subversion swig texinfo u-boot-tools upx-ucl unzip vim wget \
+          xmlto xxd zlib1g-dev
+        
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
@@ -39,7 +46,6 @@ jobs:
     - name: 克隆 2410 目标仓库
       working-directory: /workdir
       run: |
-        # 物理克隆指定的 2410 分支
         git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
@@ -53,38 +59,34 @@ jobs:
       run: |
         chmod +x $DIY_P2_SH
         cd openwrt
-        # 调用 888 目录下的脚本执行补丁清理与零件搬运
         $GITHUB_WORKSPACE/$DIY_P2_SH
 
     - name: 生成 .config 物理配置
       run: |
         cd openwrt
-        # 强制锁定 SL-3000 相关包定义
         echo "CONFIG_TARGET_mediatek=y" >> .config
         echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
         echo "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_sl_3000=y" >> .config
         echo "CONFIG_PACKAGE_arm-trusted-firmware-mediatek-mt7981-sl3000-nor=y" >> .config
         echo "CONFIG_PACKAGE_uboot-mediatek-mt7981_sl3000=y" >> .config
+        # 额外注入：确保 eMMC 驱动物理选中
+        echo "CONFIG_PACKAGE_kmod-mmc=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-mtk-sd=y" >> .config
         make defconfig
 
-    - name: 物理编译
+    - name: 物理编译 (Multi-Core)
       run: |
         cd openwrt
-        echo -e "$(nproc) 线程加速编译中..."
         make -j$(nproc) || make -j1 V=s
 
-    - name: 提取救砖包产物
+    - name: 整理产物
       run: |
         cd openwrt/bin/targets/mediatek/filogic/
         mkdir -p /workdir/upload
-        # 提取 32MB 编程器全量包
         cp *nor-programmer-dump.bin /workdir/upload/ 2>/dev/null || true
-        # 提取 eMMC 升级包
         cp *emmc-sysupgrade.bin /workdir/upload/ 2>/dev/null || true
-        # 提取单独的 U-Boot 零件
-        cp *u-boot.bin /workdir/upload/ 2>/dev/null || true
 
-    - name: 上传至 Artifacts
+    - name: 上传固件
       uses: actions/upload-artifact@v4
       with:
         name: SL3000-2410-Recovery-Firmware
