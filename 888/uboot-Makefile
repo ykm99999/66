@@ -1,70 +1,11 @@
-include $(TOPDIR)/rules.mk
-
-PKG_NAME:=uboot-mediatek
-PKG_VERSION:=24.10-sl3000
-PKG_RELEASE:=1
-
-# 物理溯源：锁定你的底层源码，确保代码库支持 SL-3000 硬件定义
-PKG_SOURCE_PROTO:=git
-PKG_SOURCE_URL:=https://github.com/ykm888/66.git
-PKG_SOURCE_VERSION:=sl3000-clean-source
-PKG_MIRROR_HASH:=skip
-
-# 物理依赖：必须先编译 arm-trusted-firmware 以获取修复版的 bl2.bin
-PKG_BUILD_DEPENDS:=arm-trusted-firmware-mediatek
-
-include $(INCLUDE_DIR)/u-boot.mk
-include $(INCLUDE_DIR)/package.mk
-
-define U-Boot/Default
-  BUILD_TARGET:=mediatek
-  BUILD_SUBTARGET:=filogic
-  BUILD_DEVICES:=mediatek_mt7981-sl-3000
-  # 物理产出：输出原始 bin 文件用于后续打包
-  UBOOT_IMAGE:=u-boot.bin
-endef
-
-define U-Boot/mt7981_sl3000_nor
-  NAME:=SL-3000 (NOR-DDR4)
-  UBOOT_CONFIG:=mt7981_sl3000_defconfig
-  # 物理锚点：触发 ATF 编译时的逻辑对齐
-  BL2_BOOTDEV:=nor
-  BL2_SOC:=mt7981
-  BL2_DDRTYPE:=ddr4
-  # 物理联动：在运行时依赖修复版的 ATF
-  DEPENDS:=+arm-trusted-firmware-mediatek
-endef
-
-# --- 【物理加固：源码准备】 ---
 define Build/Prepare
 	$(call Build/Prepare/Default)
-	
-	@echo "Physical Hardening: Injecting U-Boot Config for SL-3000..."
-	# 确保 defconfig 被物理注入到源码目录
+	@echo "Physical Linkage: Correcting U-Boot Source Depth and Injecting Config..."
+	# 物理提拉嵌套目录
+	[ -f $(PKG_BUILD_DIR)/Makefile ] || ( \
+		SUB_DIR=$$(find $(PKG_BUILD_DIR) -name Makefile -printf '%h\n' | head -n 1); \
+		cp -r $$$$SUB_DIR/* $(PKG_BUILD_DIR)/ \
+	)
+	# 注入 1MB 偏移的 defconfig
 	$(CP) ./files/mt7981_sl3000_defconfig $(PKG_BUILD_DIR)/configs/
-	
-	# 如果有特殊的引脚初始化补丁，可在此处追加
 endef
-
-# --- 【物理核心：FIP 合成逻辑】 ---
-# 此步骤将 ATF 产生的 bl2.bin 与 U-Boot 产生的 u-boot.bin 合并
-# 确保 FIP 结构符合我们在 ATF 中定义的 1MB 偏移逻辑
-define Build/InstallDev
-	$(INSTALL_DIR) $(STAGING_DIR_IMAGE)
-	
-	@echo "Physical Linkage: Synthesizing FIP for SL-3000..."
-	
-	# 1. 拷贝原始 u-boot.bin 到镜像目录
-	$(CP) $(PKG_BUILD_DIR)/u-boot.bin $(STAGING_DIR_IMAGE)/$(BUILD_VARIANT)-u-boot.bin
-	
-	# 2. 调用 fiptool 合成 FIP 镜像 (BL31 + BL33)
-	# 注意：这里的逻辑确保了 BL2 加载 FIP 时能找到正确的入口
-	$(STAGING_DIR_HOST)/bin/fiptool create \
-		--soc-fw $(STAGING_DIR_IMAGE)/mt7981_bl31.bin \
-		--nt-fw $(PKG_BUILD_DIR)/u-boot.bin \
-		$(STAGING_DIR_IMAGE)/$(BUILD_VARIANT)-fip.bin
-endef
-
-UBOOT_TARGETS:=mt7981_sl3000_nor
-
-$(eval $(call BuildPackage/U-Boot))
