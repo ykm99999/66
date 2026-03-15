@@ -1,11 +1,43 @@
+include $(TOPDIR)/rules.mk
+
+PKG_NAME:=uboot-mediatek
+PKG_VERSION:=24.10-sl3000
+PKG_RELEASE:=1
+
+PKG_SOURCE_PROTO:=git
+PKG_SOURCE_URL:=https://github.com/ykm888/66.git
+PKG_SOURCE_VERSION:=sl3000-clean-source
+PKG_MIRROR_HASH:=skip
+
+PKG_BUILD_DEPENDS:=arm-trusted-firmware-mediatek
+
+include $(INCLUDE_DIR)/u-boot.mk
+include $(INCLUDE_DIR)/package.mk
+
+define U-Boot/Default
+  BUILD_TARGET:=mediatek
+  BUILD_SUBTARGET:=filogic
+  BUILD_DEVICES:=mediatek_mt7981-sl-3000
+  UBOOT_IMAGE:=u-boot.bin
+endef
+
+define U-Boot/mt7981_sl3000_nor
+  NAME:=SL-3000 (NOR-1MB-Offset)
+  UBOOT_CONFIG:=mt7981_sl3000_defconfig
+  DEPENDS:=+arm-trusted-firmware-mediatek
+endef
+
+# --- 物理核心：注入救砖 Defconfig ---
 define Build/Prepare
 	$(call Build/Prepare/Default)
 	@echo "Physical Linkage: Correcting U-Boot Source Depth and Injecting Config..."
-	# 物理提拉嵌套目录
 	[ -f $(PKG_BUILD_DIR)/Makefile ] || ( \
 		SUB_DIR=$$(find $(PKG_BUILD_DIR) -name Makefile -printf '%h\n' | head -n 1); \
 		cp -r $$$$SUB_DIR/* $(PKG_BUILD_DIR)/ \
 	)
-	# 注入 1MB 偏移的 defconfig
 	$(CP) ./files/mt7981_sl3000_defconfig $(PKG_BUILD_DIR)/configs/
 endef
+
+UBOOT_TARGETS:=mt7981_sl3000_nor
+
+$(eval $(call BuildPackage/U-Boot))
