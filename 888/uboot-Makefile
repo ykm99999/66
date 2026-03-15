@@ -11,7 +11,7 @@ include $(INCLUDE_DIR)/u-boot.mk
 include $(INCLUDE_DIR)/package.mk
 include $(INCLUDE_DIR)/host-build.mk
 
-# 物理保底：保留原厂 SRAM 下载定义，防止语法报错
+# 物理保底：保留原厂 SRAM 下载定义
 MT7621_LOWLEVEL_PRELOADER_URL:=https://raw.githubusercontent.com/mtk-openwrt/mt7621-lowlevel-preloader/a03b07c60bf1ba4add9b671d32caa102fe948180/
 define Download/mt7621-stage-sram-noprint
   FILE:=mt7621_stage_sram_noprint.bin
@@ -21,7 +21,7 @@ endef
 
 define U-Boot/Default
   BUILD_TARGET:=mediatek
-  UBOOT_IMAGE:=u-boot-mtk.bin
+  UBOOT_IMAGE:=u-boot.fip
   HIDDEN:=1
 endef
 
@@ -38,12 +38,16 @@ define U-Boot/mt7981_sl3000_nor
   DEPENDS:=+trusted-firmware-a-mt7981-nor-ddr4
 endef
 
-# 物理索引：只保留 SL-3000 以加快编译速度，或者使用 += 追加
 UBOOT_TARGETS := mt7981_sl3000_nor
 
-# 物理执行逻辑
+# 物理执行逻辑：修复安装路径
 define Package/u-boot/install/default
+	$(INSTALL_DIR) $(1)
 	$(CP) $(PKG_BUILD_DIR)/$(UBOOT_IMAGE) $(1)/
+	
+	# 物理导出：确保 mt7981.mk 的 append-image-stage 能找到这个文件
+	$(INSTALL_DIR) $(STAGING_DIR_IMAGE)
+	$(CP) $(PKG_BUILD_DIR)/$(UBOOT_IMAGE) $(STAGING_DIR_IMAGE)/$(BUILD_VARIANT)-fip.bin
 endef
 
 $(eval $(call BuildPackage,u-boot))
