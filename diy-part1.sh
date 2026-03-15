@@ -1,17 +1,24 @@
 #!/bin/bash
 #
-# Copyright (C) 2024-2026 ykm888
-# 物理修复 7 版：定义水源，确保依赖修正逻辑延迟触发
+# https://github.com/P3TERX/Actions-OpenWrt
+# File name: diy-part1.sh
+# Description: OpenWrt DIY script part 1 (Before Update feeds)
 #
 
-# --- 1. 注入自定义插件源 (物理水源定义) ---
-# 如果你有额外的插件仓库，在这里取消注释并修改
-# echo 'src-git small8 https://github.com/kenzok8/small-package' >> feeds.conf.default
-# echo 'src-git kenzo https://github.com/kenzok8/openwrt-packages' >> feeds.conf.default
+# --- 1. 物理源注入 (成功案例插件) ---
+# 添加 helloworld 插件源
+echo 'src-git helloworld https://github.com/fw876/helloworld' >>feeds.conf.default
+# 如果需要 Passwall，取消下一行的注释
+# echo 'src-git passwall https://github.com/xiaorouji/openwrt-passwall' >>feeds.conf.default
 
-# --- 2. 核心依赖预防 (物理占位) ---
-# 由于 feeds 尚未下载，我们无法直接修改 Makefile。
-# 所有的 sed 修改逻辑已经物理迁移到了 diy-part2.sh 中。
-# 这里仅保留对 feeds.conf 的操作。
+# --- 2. 物理依赖预修补 (针对 MT7981 系列) ---
+# 某些源码库中可能会有重复的 Makefile 导致编译冲突
+# 执行物理清理，确保后续 diy-part2.sh 注入的配置是全局唯一的
+rm -rf package/boot/uboot-mediatek
+rm -rf package/boot/arm-trusted-firmware-mediatek
 
-echo "DIY-Part1: Water sources configured."
+# --- 3. 物理内核版本对齐 (可选) ---
+# 如果你需要锁定特定的内核版本，可以在这里执行 sed 修改
+# 默认情况下 padavanonly 源码会自动处理，此处保持原样以延续成功案例
+
+echo "物理诊断：diy-part1.sh 执行完毕，插件源已就绪，物理冲突已清理。"
