@@ -10,9 +10,8 @@ define Device/sl_3000-emmc
   IMAGES := sysupgrade.bin nor-programmer-dump.bin
   IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
   
-  # 物理刻度精准对齐：
-  # 1. BL2 放在 0 处
-  # 2. FIP 强制跳过前面的 2MB (包含 env 和 factory) 放在 2M 处
+  # 物理拼接逻辑 (32MB 救砖镜像)
+  # BL2(1M) + ENV/FACTORY(1M) + FIP(2M处) + KERNEL(12M处)
   IMAGE/nor-programmer-dump.bin := \
 	append-image-stage mt7981-nor-ddr4-bl2.img | pad-to 2048k | \
 	append-image-stage mt7981_sl3000_nor-fip.bin | pad-to 4096k | \
