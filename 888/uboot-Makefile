@@ -1,42 +1,36 @@
-include $(TOPDIR)/rules.mk
+Include $(TOPDIR)/rules.mk
 include $(INCLUDE_DIR)/kernel.mk
 
-PKG_NAME:=uboot-mediatek
-PKG_RELEASE:=1
+PKG_VERSION:=2024.10
+PKG_HASH:=b28daf4ac17e43156363078bf510297584137f6df50fced9b12df34f61a92fb0
+PKG_BUILD_DEPENDS:=!(TARGET_ramips||TARGET_mediatek_mt7623):arm-trusted-firmware-tools/host
 
-# 物理同步：使用 ykm888 修正版 U-Boot 源码
-PKG_SOURCE_PROTO:=git
-PKG_SOURCE_URL:=https://github.com/ykm888/66.git
-PKG_SOURCE_BRANCH:=master
+UBOOT_USE_INTREE_DTC:=1
 
 include $(INCLUDE_DIR)/u-boot.mk
 include $(INCLUDE_DIR)/package.mk
+include $(INCLUDE_DIR)/host-build.mk
 
 define U-Boot/Default
   BUILD_TARGET:=mediatek
+  UBOOT_IMAGE:=u-boot-mtk.bin
+  HIDDEN:=1
+endef
+
+# --- 物理注入 SL-3000 核心配置 ---
+define U-Boot/mt7981_sl3000_nor
+  NAME:=SL-3000 (SPI-NOR)
   BUILD_SUBTARGET:=filogic
-  UBOOT_IMAGE:=u-boot.bin
+  BUILD_DEVICES:=sl_3000-emmc
+  UBOOT_CONFIG:=mt7981_sl3000_nor
+  UBOOT_IMAGE:=u-boot.fip
+  BL2_BOOTDEV:=nor
+  BL2_SOC:=mt7981
+  BL2_DDRTYPE:=ddr4
+  DEPENDS:=+trusted-firmware-a-mt7981-nor-ddr4
 endef
 
-# 定义 SL-3000 救砖配置
-define U-Boot/mt7981_sl3000
-  NAME:=SL-3000 Recovery (1MB Offset)
-  BUILD_DEVICES:=ykm888_sl-3000
-  UBOOT_CONFIG:=mt7981_sl3000
-  # 物理硬化：强制写入 1MB 分区偏移配置
-  UBOOT_CUSTOMIZE_CONFIG:= \
-	CONFIG_MTDPARTS_DEFAULT="nor0:1M(bl2),64k(u-boot-env),960k(factory),2M(fip),-(uboot)" \
-	CONFIG_DEFAULT_DEVICE_TREE="mt7981-sl-3000-emmc" \
-	CONFIG_OF_LIST="mt7981-sl-3000-emmc"
-endef
+# 物理导出开关
+UBOOT_TARGETS:=mt7981_sl3000_nor
 
-define Build/Prepare
-	$(call Build/Prepare/Default)
-	# 物理搬运：将 888 目录下的 DTS 和 Config 送入 U-Boot 源码树
-	$(CP) ../888/mt7981-sl-3000-emmc.dts $(PKG_BUILD_DIR)/arch/arm/dts/
-	$(CP) ../888/mt7981_sl3000_defconfig $(PKG_BUILD_DIR)/configs/
-endef
-
-UBOOT_TARGETS:=mt7981_sl3000
-
-$(eval $(call BuildPackage/U-Boot))
+$(eval $(call BuildPackage,u-boot))
