@@ -1,0 +1,52 @@
+name: 物理修复并生成全量配置
+
+on:
+  workflow_dispatch:
+
+env:
+  REPO_URL: https://github.com/padavanonly/immortalwrt-mt798x-24.10
+  REPO_BRANCH: 2410
+  CONFIG_FILE: 888/sl3000.config
+  TZ: Asia/Shanghai
+
+jobs:
+  repair:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: 物理检出当前仓库
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 物理环境初始化
+        run: |
+          sudo -E apt-get -qq update
+          sudo -E apt-get -qq install build-essential gawk git python3
+          sudo timedatectl set-timezone "$TZ"
+
+      - name: 源码溯源与Feeds补全
+        run: |
+          git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
+          cd openwrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: 执行全量补全 (Full Expand)
+        run: |
+          # 1. 物理注入原始种子
+          cp $CONFIG_FILE openwrt/.config
+          
+          cd openwrt
+          # 2. 物理膨胀：根据 MediaTek 5.4 内核树补齐所有 'is not set'
+          make defconfig
+          
+          # 3. 物理回填：覆盖 888 目录下的原文件
+          cp .config ../$CONFIG_FILE
+
+      - name: 物理推送到仓库
+        run: |
+          git config --global user.email "bot@github.com"
+          git config --global user.name "Config-Fix-Bot"
+          git add $CONFIG_FILE
+          git commit -m "物理修复：生成 SL3000 全量分区布局配置 $(date +'%Y-%m-%d')" || exit 0
+          git push
