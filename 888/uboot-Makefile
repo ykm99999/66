@@ -1,67 +1,42 @@
 include $(TOPDIR)/rules.mk
+include $(INCLUDE_DIR)/kernel.mk
 
 PKG_NAME:=uboot-mediatek
-PKG_VERSION:=24.10-sl3000
 PKG_RELEASE:=1
 
+# 物理同步：使用 ykm888 修正版 U-Boot 源码
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL:=https://github.com/ykm888/66.git
-PKG_SOURCE_VERSION:=sl3000-clean-source
-PKG_MIRROR_HASH:=skip
-
-PKG_BUILD_DEPENDS:=arm-trusted-firmware-mediatek
+PKG_SOURCE_BRANCH:=master
 
 include $(INCLUDE_DIR)/u-boot.mk
 include $(INCLUDE_DIR)/package.mk
 
-# 物理定义：确保在编译系统中可见并选中
-define Package/uboot-mediatek-$(1)
-  SECTION:=boot
-  CATEGORY:=Boot Loaders
-  TITLE:=U-Boot for $(1)
-  DEPENDS:=@TARGET_mediatek_filogic +arm-trusted-firmware-mediatek
-  VARIANT:=$(1)
-endef
-
 define U-Boot/Default
   BUILD_TARGET:=mediatek
   BUILD_SUBTARGET:=filogic
-  BUILD_DEVICES:=mediatek_mt7981-sl-3000
   UBOOT_IMAGE:=u-boot.bin
 endef
 
-define U-Boot/mt7981_sl3000_nor
-  NAME:=SL-3000 (1MB-Offset-Recovery)
-  BUILD_DEVICES:=mediatek_mt7981-sl-3000
-  UBOOT_CONFIG:=mt7981_sl3000_defconfig
+# 定义 SL-3000 救砖配置
+define U-Boot/mt7981_sl3000
+  NAME:=SL-3000 Recovery (1MB Offset)
+  BUILD_DEVICES:=ykm888_sl-3000
+  UBOOT_CONFIG:=mt7981_sl3000
+  # 物理硬化：强制写入 1MB 分区偏移配置
+  UBOOT_CUSTOMIZE_CONFIG:= \
+	CONFIG_MTDPARTS_DEFAULT="nor0:1M(bl2),64k(u-boot-env),960k(factory),2M(fip),-(uboot)" \
+	CONFIG_DEFAULT_DEVICE_TREE="mt7981-sl-3000-emmc" \
+	CONFIG_OF_LIST="mt7981-sl-3000-emmc"
 endef
 
-# --- 【物理核心：Build/Prepare 自动化修复逻辑】 ---
 define Build/Prepare
 	$(call Build/Prepare/Default)
-	@echo "Physical Hardening: Correcting Source Depth and Redirecting DTS..."
-
-	# 1. 物理提拉：处理嵌套目录结构
-	[ -f $(PKG_BUILD_DIR)/Makefile ] || ( \
-		SUB_DIR=$$(find $(PKG_BUILD_DIR) -name Makefile -printf '%h\n' | head -n 1); \
-		mv $(PKG_BUILD_DIR)/* $(PKG_BUILD_DIR)/.tmp_backup 2>/dev/null || true; \
-		cp -r $$$$SUB_DIR/* $(PKG_BUILD_DIR)/ \
-	)
-
-	# 2. 物理注入：从 ./files/ 目录抓取零件
-	# 将你命名的 emmc.dts 物理改名为编译器预期的 sl3000.dts
-	$(CP) ./files/mt7981-sl-3000-emmc.dts $(PKG_BUILD_DIR)/arch/arm/dts/mt7981-sl3000.dts
-	$(CP) ./files/mt7981_sl3000_defconfig $(PKG_BUILD_DIR)/configs/
-
-	# 3. 物理修正：确保 Defconfig 里的引用与文件名一致
-	sed -i 's/CONFIG_DEFAULT_DEVICE_TREE=.*/CONFIG_DEFAULT_DEVICE_TREE="mt7981-sl3000"/g' $(PKG_BUILD_DIR)/configs/mt7981_sl3000_defconfig
-	sed -i 's/CONFIG_OF_LIST=.*/CONFIG_OF_LIST="mt7981-sl3000"/g' $(PKG_BUILD_DIR)/configs/mt7981_sl3000_defconfig
-
-	@echo "Physical Ready: Source redirection and config hardening completed."
+	# 物理搬运：将 888 目录下的 DTS 和 Config 送入 U-Boot 源码树
+	$(CP) ../888/mt7981-sl-3000-emmc.dts $(PKG_BUILD_DIR)/arch/arm/dts/
+	$(CP) ../888/mt7981_sl3000_defconfig $(PKG_BUILD_DIR)/configs/
 endef
 
-UBOOT_TARGETS:=mt7981_sl3000_nor
+UBOOT_TARGETS:=mt7981_sl3000
 
-$(foreach uint,$(UBOOT_TARGETS), \
-    $(eval $(call BuildPackage,uboot-mediatek-$(uint))) \
-)
+$(eval $(call BuildPackage/U-Boot))
