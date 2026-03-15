@@ -1,100 +1,91 @@
-name: SL-3000 Recovery Build 24.10
+name: Build SL-3000 (ykm888-2410-Branch)
 
 on:
+  repository_dispatch:
   workflow_dispatch:
 
 env:
-  REPO_URL: https://github.com/immortalwrt/immortalwrt
-  REPO_BRANCH: openwrt-24.10
-  DIY_P2_SH: diy-part2.sh
+  # 物理指向：你的 2410 分支仓库
+  REPO_URL: https://github.com/ykm888/66
+  REPO_BRANCH: 2410
+  FEEDS_CONF: feeds.conf.default
+  CONFIG_FILE: .config
+  DIY_P2_SH: 888/diy-part2.sh
+  TZ: Asia/Shanghai
 
 jobs:
   build:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: 物理检出代码
-        uses: actions/checkout@v4
+    - name: 检出当前仓库
+      uses: actions/checkout@v4
 
-      - name: 环境筑基 (Ubuntu 22.04)
-        run: |
-          sudo apt-get update
-          # 物理补全：添加编译 U-Boot 和 Kernel 必需的物理依赖包
-          sudo apt-get install -y build-essential git gawk libncurses5-dev gettext \
-            libssl-dev xsltproc wget zstd python3 flex bison device-tree-compiler \
-            qemu-utils upx-ucl unzip
-          git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
+    - name: 物理环境筑基
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
+        sudo -E apt-get -qq update
+        sudo -E apt-get -qq install $(curl -fsSL https://is.gd/depends_ubuntu_2204)
+        # 补齐 MT7981 编译所需物理依赖
+        sudo -E apt-get -qq install python3-pyelftools swig python3-dev
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
+        sudo timedatectl set-timezone "$TZ"
+        sudo mkdir -p /workdir
+        sudo chown $USER:$GROUPS /workdir
 
-      - name: 更新并安装 Feeds
-        run: |
-          cd openwrt
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
+    - name: 克隆 2410 目标仓库
+      working-directory: /workdir
+      run: |
+        # 物理克隆指定的 2410 分支
+        git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
+        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
-      - name: 物理零件注入 (DTS & Makefile)
-        run: |
-          chmod +x $DIY_P2_SH
-          cd openwrt
-          # 执行零件搬运与身份重定向
-          ../$DIY_P2_SH
-          
-          # 物理链路自检：确认关键 DTS 零件已送达缓冲区
-          if [ ! -f package/boot/uboot-mediatek/files/mt7981-sl-3000-emmc.dts ]; then
-            echo "错误：DTS 零件未物理送达！请检查 diy-part2.sh 路径。"
-            exit 1
-          fi
+    - name: 加载并安装 Feeds
+      run: |
+        cd openwrt
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
 
-      - name: 物理配置硬化
-        run: |
-          cd openwrt
-          # 1. 注入种子配置 (如果 888 目录下存在)
-          [ -f ../888/sl3000.config ] && cp ../888/sl3000.config .config
-          
-          # 2. 【核心锁定】：强行选中救砖零件，防止因默认配置导致的 Skipping
-          echo "CONFIG_PACKAGE_arm-trusted-firmware-mediatek=y" >> .config
-          echo "CONFIG_PACKAGE_uboot-mediatek-mt7981_sl3000_nor=y" >> .config
-          
-          # 3. 补全配置依赖并生成最终 .config
-          make defconfig
+    - name: 执行物理注入 (Diy-Part2)
+      run: |
+        chmod +x $DIY_P2_SH
+        cd openwrt
+        # 调用 888 目录下的脚本执行补丁清理与零件搬运
+        $GITHUB_WORKSPACE/$DIY_P2_SH
 
-      - name: 编译编译工具 (Tools & Toolchain)
-        run: |
-          cd openwrt
-          # 救砖包需要 aarch64 交叉编译器，先编译环境
-          make tools/install -j$(nproc) || make tools/install -j1 V=s
-          make toolchain/install -j$(nproc) || make toolchain/install -j1 V=s
+    - name: 生成 .config 物理配置
+      run: |
+        cd openwrt
+        # 强制锁定 SL-3000 相关包定义
+        echo "CONFIG_TARGET_mediatek=y" >> .config
+        echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
+        echo "CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_sl_3000=y" >> .config
+        echo "CONFIG_PACKAGE_arm-trusted-firmware-mediatek-mt7981-sl3000-nor=y" >> .config
+        echo "CONFIG_PACKAGE_uboot-mediatek-mt7981_sl3000=y" >> .config
+        make defconfig
 
-      - name: 编译救砖版 ATF (BL2)
-        run: |
-          cd openwrt
-          # 编译 1MB 偏移逻辑的启动引导
-          make package/boot/arm-trusted-firmware-mediatek/compile V=s
+    - name: 物理编译
+      run: |
+        cd openwrt
+        echo -e "$(nproc) 线程加速编译中..."
+        make -j$(nproc) || make -j1 V=s
 
-      - name: 编译救砖版 U-Boot (FIP)
-        run: |
-          cd openwrt
-          # 触发 uboot-Makefile 执行 DTS 身份替换和编译
-          make package/boot/uboot-mediatek/mt7981_sl3000_nor/compile V=s
+    - name: 提取救砖包产物
+      run: |
+        cd openwrt/bin/targets/mediatek/filogic/
+        mkdir -p /workdir/upload
+        # 提取 32MB 编程器全量包
+        cp *nor-programmer-dump.bin /workdir/upload/ 2>/dev/null || true
+        # 提取 eMMC 升级包
+        cp *emmc-sysupgrade.bin /workdir/upload/ 2>/dev/null || true
+        # 提取单独的 U-Boot 零件
+        cp *u-boot.bin /workdir/upload/ 2>/dev/null || true
 
-      - name: 物理合成全量镜像
-        run: |
-          cd openwrt
-          # 合成包含 Kernel 和 Rootfs 的全功能固件
-          make target/linux/mediatek/image/install V=s
-
-      - name: 整理物理产物 (Recovery Artifacts)
-        run: |
-          mkdir -p recovery_out
-          # 提取分体零件：BL2 (引导) 和 FIP (U-Boot 核心)
-          find openwrt/bin/targets/mediatek/filogic/ -name "*bl2*" -exec cp {} recovery_out/ \;
-          find openwrt/bin/targets/mediatek/filogic/ -name "*fip*" -exec cp {} recovery_out/ \;
-          # 提取全量 Factory 镜像
-          find openwrt/bin/targets/mediatek/filogic/ -name "*-factory.bin" -exec cp {} recovery_out/ \;
-          # 物理校验：生成 MD5 列表
-          cd recovery_out && md5sum * > md5.txt
-
-      - name: 上传救砖工具包
-        uses: actions/upload-artifact@v4
-        with:
-          name: SL3000-Recovery-Build-Pack
-          path: recovery_out/
+    - name: 上传至 Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: SL3000-2410-Recovery-Firmware
+        path: /workdir/upload/
