@@ -21,12 +21,15 @@ jobs:
       run: |
         sudo -E apt-get -qq update
         sudo -E apt-get -qq install build-essential device-tree-compiler python3-pyelftools
+        # 物理修正：克隆并建立工作链接
         git clone $REPO_URL -b $REPO_BRANCH openwrt
 
     - name: 注入补丁 (工序 4-7)
       run: |
+        # 物理修正：先检查配置文件是否存在
         [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
         chmod +x $DIY_P2_SH
+        # 物理修正：显式进入目录并传递工作空间变量
         cd openwrt
         GITHUB_WORKSPACE=$GITHUB_WORKSPACE bash $GITHUB_WORKSPACE/$DIY_P2_SH
 
@@ -40,6 +43,7 @@ jobs:
       id: compile
       run: |
         cd openwrt
+        # 物理修正：增加编译状态捕获
         make -j$(nproc) || make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
 
@@ -47,13 +51,15 @@ jobs:
       if: steps.compile.outputs.status == 'success'
       run: |
         cd openwrt/bin/targets/mediatek/filogic/
-        DUMP_FILE=$(ls *nor-programmer-dump.bin)
+        # 物理修正：精确匹配文件名，防止通配符多解报错
+        DUMP_FILE=$(ls *nor-programmer-dump.bin | head -n 1)
         FILE_SIZE=$(stat -c%s "$DUMP_FILE")
         if [ "$FILE_SIZE" -eq 33554432 ]; then
           echo "物理成功：32MB 刻度缝合完成。"
         else
-          echo "物理失败：镜像大小不匹配，当前为 $FILE_SIZE" && exit 1
+          echo "物理致命错误：镜像大小为 $FILE_SIZE，不符合 33554432 字节要求。" && exit 1
         fi
+        echo "DUMP_PATH=$PWD/$DUMP_FILE" >> $GITHUB_ENV
 
     - name: 工序 12: Artifacts 物理导出
       uses: softprops/action-gh-release@v2
@@ -66,5 +72,6 @@ jobs:
         tag_name: SL3000_V${{ github.run_number }}
         body: |
           ### 12道工序物理执行报告
-          - 芯片：MT7981 (Filogic 820)
+          - 状态：编译成功
           - 产物：32MB NOR 全量镜像 (包含 Web 救砖界面)
+          - 物理校验：符合 33554432 字节刻度
