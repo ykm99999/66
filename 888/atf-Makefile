@@ -1,56 +1,49 @@
 include $(TOPDIR)/rules.mk
+include $(INCLUDE_DIR)/kernel.mk
 
 PKG_NAME:=arm-trusted-firmware-mediatek
-PKG_VERSION:=24.10-sl3000
 PKG_RELEASE:=1
 
+# 物理同步：使用官方稳定源码
 PKG_SOURCE_PROTO:=git
-PKG_SOURCE_URL:=https://github.com/ykm888/66.git
-PKG_SOURCE_VERSION:=sl3000-clean-source
-PKG_MIRROR_HASH:=skip
+PKG_SOURCE_URL:=https://github.com/mtk-openwrt/arm-trusted-firmware.git
+PKG_SOURCE_DATE:=2024-01-17
+PKG_SOURCE_VERSION:=bacca82a8cac369470df052a9d801a0ceb9b74ca
 
-PKG_MAINTAINER:=ImmortalWrt
+PKG_MAINTAINER:=ykm888
 PKG_LICENSE:=BSD-3-Clause
 
+include $(INCLUDE_DIR)/trusted-firmware-a.mk
 include $(INCLUDE_DIR)/package.mk
 
-define Package/arm-trusted-firmware-mediatek
-  SECTION:=boot
-  CATEGORY:=Boot Loaders
-  TITLE:=ARM Trusted Firmware for MediaTek
-  DEPENDS:=@TARGET_mediatek_filogic
+define Trusted-Firmware-A/Default
+  BUILD_TARGET:=mediatek
+  BUILD_SUBTARGET:=filogic
+  PLAT:=mt7981
+  TFA_IMAGE:=bl2.img
+  DDR_TYPE:=ddr3
 endef
 
-# --- 物理核心：硬化注入逻辑 ---
+# 定义 SL-3000 救砖变体
+define Trusted-Firmware-A/mt7981-sl3000-nor
+  NAME:=SL-3000 Recovery (1MB Offset)
+  BOOT_DEVICE:=nor
+endef
+
 define Build/Prepare
 	$(call Build/Prepare/Default)
-	@echo "Physical Hardening: Correcting Source Depth and Injecting Recovery Code..."
-	# 物理提拉：解决嵌套目录问题
-	[ -f $(PKG_BUILD_DIR)/Makefile ] || ( \
+	# 物理自适应：纠正源码目录结构
+	@[ -f $(PKG_BUILD_DIR)/Makefile ] || ( \
 		SUB_DIR=$$(find $(PKG_BUILD_DIR) -name Makefile -printf '%h\n' | head -n 1); \
 		mv $(PKG_BUILD_DIR)/* $(PKG_BUILD_DIR)/.tmp_backup 2>/dev/null || true; \
 		cp -r $$$$SUB_DIR/* $(PKG_BUILD_DIR)/ \
 	)
-	# 物理注入：从 ./files/ 目录强行覆盖救砖代码
-	$(CP) ./files/bl2_dev_spi_nor.c $(PKG_BUILD_DIR)/plat/mediatek/mt7981/bl2/
-	$(CP) ./files/bl2.mk $(PKG_BUILD_DIR)/plat/mediatek/mt7981/bl2/
-	$(CP) ./files/platform.mk $(PKG_BUILD_DIR)/plat/mediatek/mt7981/
-	$(CP) ./files/platform_def.h $(PKG_BUILD_DIR)/plat/mediatek/mt7981/include/
-	find $(PKG_BUILD_DIR) -name "mt7981-spi2.dts" -exec cp ./files/mt7981-spi2.dts {} \;
+	# 物理注入：将 888 目录下的救砖零件植入源码
+	$(CP) ../888/bl2_dev_spi_nor.c $(PKG_BUILD_DIR)/drivers/mediatek/spi/
+	$(CP) ../888/bl2.mk $(PKG_BUILD_DIR)/plat/mediatek/mt7981/
+	$(CP) ../888/platform.mk $(PKG_BUILD_DIR)/plat/mediatek/mt7981/
 endef
 
-define Build/Compile
-	$(MAKE) -C $(PKG_BUILD_DIR) \
-		CROSS_COMPILE=$(TARGET_CROSS) \
-		PLAT=mt7981 \
-		BOOT_DEVICE=nor \
-		all
-endef
+TFA_TARGETS:=mt7981-sl3000-nor
 
-define Package/arm-trusted-firmware-mediatek/install
-	$(INSTALL_DIR) $(STAGING_DIR_IMAGE)
-	$(CP) $(PKG_BUILD_DIR)/build/mt7981/release/bl2.bin $(STAGING_DIR_IMAGE)/mt7981_bl2.bin
-	$(CP) $(PKG_BUILD_DIR)/build/mt7981/release/bl31.bin $(STAGING_DIR_IMAGE)/mt7981_bl31.bin
-endef
-
-$(eval $(call BuildPackage,arm-trusted-firmware-mediatek))
+$(eval $(call BuildPackage/Trusted-Firmware-A))
