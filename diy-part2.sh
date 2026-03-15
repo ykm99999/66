@@ -1,61 +1,25 @@
 #!/bin/bash
-# SL-3000 救砖全家桶：全链路物理对齐脚本
+# 物理溯源硬化：零件预埋脚本
 
-echo "--- 物理执行：开始全链路救砖零件注入 ---"
+# 1. 清理并创建物理预埋目录
+rm -rf package/boot/arm-trusted-firmware-mediatek/files
+rm -rf package/boot/uboot-mediatek/files
+mkdir -p package/boot/arm-trusted-firmware-mediatek/files
+mkdir -p package/boot/uboot-mediatek/files
 
-# 1. 屏蔽官方干扰 (防止补丁冲突)
-rm -rf package/boot/arm-trusted-firmware-mediatek/patches
-rm -rf package/boot/uboot-mediatek/patches
+# 2. 劫持 Makefile (核心总闸)
+cp -f ../888/atf-Makefile package/boot/arm-trusted-firmware-mediatek/Makefile
+cp -f ../888/uboot-Makefile package/boot/uboot-mediatek/Makefile
+cp -f ../888/sl3000.config .config
 
-# 2. 注入推荐版 Makefile (从 888 目录提取)
-cp -v ../888/atf-Makefile package/boot/arm-trusted-firmware-mediatek/Makefile
-cp -v ../888/uboot-Makefile package/boot/uboot-mediatek/Makefile
+# 3. 物理预埋 ATF 零件
+cp -f ../888/bl2_dev_spi_nor.c package/boot/arm-trusted-firmware-mediatek/files/
+cp -f ../888/bl2.mk package/boot/arm-trusted-firmware-mediatek/files/
+cp -f ../888/platform.mk package/boot/arm-trusted-firmware-mediatek/files/
+cp -f ../888/platform_def.h package/boot/arm-trusted-firmware-mediatek/files/
+cp -f ../888/mt7981-spi2.dts package/boot/arm-trusted-firmware-mediatek/files/
 
-# 3. 系统级配置对齐
-if [ -f ../888/sl3000.config ]; then
-    cp -v ../888/sl3000.config .config
-    make defconfig
-fi
+# 4. 物理预埋 U-Boot 零件
+cp -f ../888/mt7981_sl3000_defconfig package/boot/uboot-mediatek/files/
 
-# 4. 【ATF 物理注入】
-make package/boot/arm-trusted-firmware-mediatek/prepare V=s || true
-ATF_SRC=$(find build_dir -name "arm-trusted-firmware-*" -type d | head -n 1)
-if [ -n "$ATF_SRC" ]; then
-    echo "注入 ATF 零件至: $ATF_SRC"
-    # 物理提升 (处理嵌套)
-    if [ ! -f "$ATF_SRC/Makefile" ]; then
-        SUB=$(find $ATF_SRC -name "Makefile" -printf '%h\n' | head -n 1)
-        [ -n "$SUB" ] && mv $SUB/* $ATF_SRC/
-    fi
-    mkdir -p $ATF_SRC/plat/mediatek/mt7981/bl2
-    cp -v ../888/bl2_dev_spi_nor.c $ATF_SRC/plat/mediatek/mt7981/bl2/
-    cp -v ../888/bl2.mk $ATF_SRC/plat/mediatek/mt7981/bl2/
-    cp -v ../888/platform.mk $ATF_SRC/plat/mediatek/mt7981/
-    cp -v ../888/platform_def.h $ATF_SRC/plat/mediatek/mt7981/include/
-    find $ATF_SRC -name "mt7981-spi2.dts" -exec cp -v ../888/mt7981-spi2.dts {} \;
-    touch $ATF_SRC/.prepared*
-fi
-
-# 5. 【U-Boot 物理注入】
-make package/boot/uboot-mediatek/prepare V=s || true
-UBOOT_SRC=$(find build_dir -name "uboot-mediatek-*" -type d | head -n 1)
-if [ -n "$UBOOT_SRC" ]; then
-    echo "注入 U-Boot 零件至: $UBOOT_SRC"
-    # 物理提升 (处理嵌套)
-    if [ ! -f "$UBOOT_SRC/Makefile" ]; then
-        SUB=$(find $UBOOT_SRC -name "Makefile" -printf '%h\n' | head -n 1)
-        [ -n "$SUB" ] && mv $SUB/* $UBOOT_SRC/
-    fi
-    # 注入 1MB 偏移的专属 defconfig
-    mkdir -p $UBOOT_SRC/configs
-    cp -v ../888/mt7981_sl3000_defconfig $UBOOT_SRC/configs/
-    
-    # 物理补位：U-Boot DTS (防止 Error 1)
-    mkdir -p $UBOOT_SRC/arch/arm/dts/
-    # 尝试寻找并覆盖，若 888 有专版则覆盖，否则沿用源码
-    [ -f ../888/mt7981-sl3000.dts ] && cp -v ../888/mt7981-sl3000.dts $UBOOT_SRC/arch/arm/dts/
-    
-    touch $UBOOT_SRC/.prepared*
-fi
-
-echo "--- 零件注入成功：物理链路已闭环 ---"
+echo "物理零件已落位，全链路闭环就绪。"
