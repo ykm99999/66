@@ -1,38 +1,26 @@
 #!/bin/bash
-# =========================================================
-# SL-3000 救砖全家桶：零件物理预埋与名称同步脚本 (修复版)
-# =========================================================
 
-# 1. 物理目录初始化：清理并建立预埋区
-rm -rf package/boot/arm-trusted-firmware-mediatek/files
-rm -rf package/boot/uboot-mediatek/files
-mkdir -p package/boot/arm-trusted-firmware-mediatek/files
-mkdir -p package/boot/uboot-mediatek/files
+# --- 1. 物理清场：移除所有会导致 Patch failed 的旧补丁 ---
+# 既然你已经手动删除了，这里作为自动化脚本的强制二次核验
+rm -rf package/boot/arm-trusted-firmware-mediatek/patches/*
+rm -rf package/boot/uboot-mediatek/patches/*
 
-# 2. 物理劫持：强制替换 Makefile 为我们的救砖硬化版本
+# --- 2. 物理注入：ATF 生产线劫持 ---
+# 将 888 目录下的 atf-Makefile 覆盖到源码中
 cp -f ../888/atf-Makefile package/boot/arm-trusted-firmware-mediatek/Makefile
+
+# --- 3. 物理注入：U-Boot 生产线劫持 ---
 cp -f ../888/uboot-Makefile package/boot/uboot-mediatek/Makefile
 
-# 3. ATF 零件预埋 (实现 1MB 偏移的核心代码)
-cp -f ../888/bl2_dev_spi_nor.c package/boot/arm-trusted-firmware-mediatek/files/
-cp -f ../888/bl2.mk package/boot/arm-trusted-firmware-mediatek/files/
-cp -f ../888/platform.mk package/boot/arm-trusted-firmware-mediatek/files/
-cp -f ../888/platform_def.h package/boot/arm-trusted-firmware-mediatek/files/
-cp -f ../888/mt7981-spi2.dts package/boot/arm-trusted-firmware-mediatek/files/
+# --- 4. 物理注入：固件镜像生成规则 ---
+cat ../888/filogic.mk >> target/linux/mediatek/image/filogic.mk
 
-# 4. U-Boot 零件预埋 (含专属 eMMC DTS)
-cp -f ../888/mt7981_sl3000_defconfig package/boot/uboot-mediatek/files/
-# 必须搬运此文件，uboot-Makefile 才能进行身份重定向
-cp -f ../888/mt7981-sl-3000-emmc.dts package/boot/uboot-mediatek/files/
-
-# 5. 内核 (Kernel) 镜像合成物理劫持
-# 物理欺骗：在内核源码目录注入同名 DTS，确保 .mk 合成镜像时不报 Error 1
+# --- 5. 物理注入：内核设备树 (DTS) ---
 mkdir -p target/linux/mediatek/dts/
-cp -f ../888/mt7981-sl-3000-emmc.dts target/linux/mediatek/dts/mt7981-sl3000.dts
+cp -f ../888/mt7981-sl-3000-emmc.dts target/linux/mediatek/dts/
 
-# 6. 系统配置预设
-if [ -f ../888/sl3000.config ]; then
-    cp -f ../888/sl3000.config .config
-fi
+# --- 6. 物理修正：全局名称统一 ---
+# 确保所有的编译脚本都指向最新的 DTS 名称
+find target/linux/mediatek/image/ -name "*.mk" -exec sed -i 's/mt7981-sl3000/mt7981-sl-3000-emmc/g' {} +
 
-echo "--- [物理溯源]：全链路零件（含 eMMC DTS）已落位 ---"
+echo "--- [物理链路] diy-part2 执行完毕，零件已完全就位 ---"
