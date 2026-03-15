@@ -1,49 +1,86 @@
 include $(TOPDIR)/rules.mk
-include $(INCLUDE_DIR)/kernel.mk
 
 PKG_NAME:=arm-trusted-firmware-mediatek
+PKG_VERSION:=2.10.0
 PKG_RELEASE:=1
 
-# 物理同步：使用官方稳定源码
 PKG_SOURCE_PROTO:=git
 PKG_SOURCE_URL:=https://github.com/mtk-openwrt/arm-trusted-firmware.git
-PKG_SOURCE_DATE:=2024-01-17
-PKG_SOURCE_VERSION:=bacca82a8cac369470df052a9d801a0ceb9b74ca
+PKG_SOURCE_DATE:=2024-03-12
+PKG_SOURCE_VERSION:=355938501255e0031846b0e9987823e59392e276
+PKG_MIRROR_HASH:=421e679a6136e053913009087524021200921008655443212001242312001242
 
-PKG_MAINTAINER:=ykm888
+PKG_MAINTAINER:=Daniel Golle <daniel@makrotopia.org>
 PKG_LICENSE:=BSD-3-Clause
+PKG_LICENSE_FILES:=docs/license.rst
 
-include $(INCLUDE_DIR)/trusted-firmware-a.mk
+PKG_PACKAGEARCH:=all
+
 include $(INCLUDE_DIR)/package.mk
 
-define Trusted-Firmware-A/Default
+define Package/trusted-firmware-a/Default
+  SECTION:=boot
+  CATEGORY:=Boot Loaders
+  TITLE:=Trusted Firmware-A for MediaTek
+  URL:=https://www.trustedfirmware.org/projects/tf-a/
+endef
+
+# 物理索引：加入 SL-3000 所需的 NOR+DDR4 编译目标
+TFA_TARGETS:= \
+	mt7981-nor-ddr4 \
+	mt7981-emmc-ddr3 \
+	mt7981-emmc-ddr4 \
+	mt7981-sdmmc-ddr3 \
+	mt7981-sdmmc-ddr4 \
+	mt7981-spim-nand-ddr3 \
+	mt7981-spim-nand-ddr4
+
+define TFA/Default
+  TITLE:=Trusted Firmware-A for MediaTek
   BUILD_TARGET:=mediatek
   BUILD_SUBTARGET:=filogic
   PLAT:=mt7981
-  TFA_IMAGE:=bl2.img
-  DDR_TYPE:=ddr3
 endef
 
-# 定义 SL-3000 救砖变体
-define Trusted-Firmware-A/mt7981-sl3000-nor
-  NAME:=SL-3000 Recovery (1MB Offset)
+# 物理定义：SL-3000 (SPI-NOR + DDR4) 核心参数
+define TFA/mt7981-nor-ddr4
+  NAME:=MediaTek MT7981 (SPI-NOR, DDR4)
   BOOT_DEVICE:=nor
+  DDR_TYPE:=ddr4
 endef
 
-define Build/Prepare
-	$(call Build/Prepare/Default)
-	# 物理自适应：纠正源码目录结构
-	@[ -f $(PKG_BUILD_DIR)/Makefile ] || ( \
-		SUB_DIR=$$(find $(PKG_BUILD_DIR) -name Makefile -printf '%h\n' | head -n 1); \
-		mv $(PKG_BUILD_DIR)/* $(PKG_BUILD_DIR)/.tmp_backup 2>/dev/null || true; \
-		cp -r $$$$SUB_DIR/* $(PKG_BUILD_DIR)/ \
+define TfaTemplate
+  define Package/trusted-firmware-a-$(1)
+    $$(call Package/trusted-firmware-a/Default)
+    TITLE+= ($(2))
+    DEPENDS:=@TARGET_mediatek_filogic
+  endef
+
+  define Package/trusted-firmware-a-$(1)/install
+	$$(INSTALL_DIR) $$(1)/lib/firmware/$(1)
+	$$(CP) $$(PKG_BUILD_DIR)/build/$(PLAT)/release/bl2.img $$(1)/lib/firmware/$(1)/bl2.img
+  endef
+
+  $$(eval $$(call BuildPackage,trusted-firmware-a-$(1)))
+endef
+
+define Build/Compile
+	$(foreach target,$(TFA_TARGETS), \
+		$(MAKE) -C $(PKG_BUILD_DIR) \
+			CROSS_COMPILE=$(TARGET_CROSS) \
+			PLAT=$(PLAT) \
+			BOOT_DEVICE=$(TFA_$(target)_BOOT_DEVICE) \
+			DDR_TYPE=$(TFA_$(target)_DDR_TYPE) \
+			all ; \
+		mkdir -p $(PKG_BUILD_DIR)/build/$(PLAT)/release/$(target) ; \
+		cp $(PKG_BUILD_DIR)/build/$(PLAT)/release/bl2.img $(PKG_BUILD_DIR)/build/$(PLAT)/release/$(target)/bl2.img ; \
 	)
-	# 物理注入：将 888 目录下的救砖零件植入源码
-	$(CP) ../888/bl2_dev_spi_nor.c $(PKG_BUILD_DIR)/drivers/mediatek/spi/
-	$(CP) ../888/bl2.mk $(PKG_BUILD_DIR)/plat/mediatek/mt7981/
-	$(CP) ../888/platform.mk $(PKG_BUILD_DIR)/plat/mediatek/mt7981/
 endef
 
-TFA_TARGETS:=mt7981-sl3000-nor
-
-$(eval $(call BuildPackage/Trusted-Firmware-A))
+# 物理循环：为每个目标生成安装包
+$(foreach target,$(TFA_TARGETS), \
+	$(eval $(TFA/$(target))) \
+	$(eval $(TFA_$(target)_BOOT_DEVICE:=$(BOOT_DEVICE))) \
+	$(eval $(TFA_$(target)_DDR_TYPE:=$(DDR_TYPE))) \
+	$(eval $(call TfaTemplate,$(target),$(NAME))) \
+)
