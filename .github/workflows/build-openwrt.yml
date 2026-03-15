@@ -1,9 +1,4 @@
-#
-# https://github.com/P3TERX/Actions-OpenWrt
-# 针对 司洛 SL-3000 EMMC 特别优化版
-#
-
-name: 司洛SL-3000 EMMC 救砖固件编译
+name: 司洛SL-3000 EMMC 最终修正版
 
 on:
   repository_dispatch:
@@ -16,9 +11,6 @@ env:
   CONFIG_FILE: sl3000.config
   DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
-  UPLOAD_BIN_DIR: false
-  UPLOAD_FIRMWARE: true
-  UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
 
 jobs:
@@ -26,119 +18,55 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: 物理检出本地仓库 (包含 888 补丁)
-      uses: actions/checkout@main
+    - name: 1. 物理检出当前仓库
+      uses: actions/checkout@v4
 
-    - name: 初始化物理环境
+    - name: 2. 初始化编译环境
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-        sudo docker image prune --all --force
         sudo -E apt-get -qq update
         sudo -E apt-get -qq install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
-        sudo -E apt-get -qq autoremove --purge
-        sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
-        sudo mkdir -p /workdir
-        sudo chown $USER:$GROUPS /workdir
 
-    - name: 物理克隆上游源码
-      working-directory: /workdir
+    - name: 3. 物理克隆上游源码
       run: |
-        df -hT $PWD
         git clone $REPO_URL -b $REPO_BRANCH openwrt
-        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
-    - name: 加载自定义 Feeds
-      run: |
-        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
-        chmod +x $DIY_P1_SH
-        cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P1_SH
-
-    - name: 更新并安装 Feeds
+    - name: 4. 更新 & 安装 Feeds
       run: |
         cd openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: 执行物理注入 (DIY-Part2)
+    - name: 5. 执行物理注入补丁
       run: |
-        [ -e files ] && mv files openwrt/files
-        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
+        [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
         chmod +x $DIY_P2_SH
         
-        # 核心逻辑：确保 diy-part2.sh 能够物理访问到根目录下的 888 文件夹
-        # 我们直接在根目录执行，或者在脚本内引用相对路径
+        # 核心修复：进入 openwrt 目录执行脚本，并显式传入工作区绝对路径
         cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P2_SH
+        GITHUB_WORKSPACE=$GITHUB_WORKSPACE $GITHUB_WORKSPACE/$DIY_P2_SH
 
-    - name: 下载依赖包
-      id: package
+    - name: 6. 下载依赖并编译
+      id: compile
       run: |
         cd openwrt
         make defconfig
         make download -j8
-        find dl -size -1024c -exec ls -l {} \;
-        find dl -size -1024c -exec rm -f {} \;
-
-    - name: 物理编译固件
-      id: compile
-      run: |
-        cd openwrt
-        echo -e "$(nproc) thread compile"
-        # 首次尝试多线程，失败则进入单线程并打印详细日志
-        make -j$(nproc) || make -j1 || make -j1 V=s
-        echo "status=success" >> $GITHUB_OUTPUT
-        grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
-        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
-        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
-
-    - name: 检查存储空间
-      if: (!cancelled())
-      run: df -hT
-
-    - name: 整理物理产物
-      id: organize
-      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
-      run: |
-        cd openwrt/bin/targets/*/*
-        # 物理删除没用的安装包，只保留固件镜像和 32MB Dump
-        rm -rf packages
-        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+        make -j$(nproc) || make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
 
-    - name: 上传固件至 Artifacts
-      uses: actions/upload-artifact@main
-      if: steps.organize.outputs.status == 'success' && !cancelled()
-      with:
-        name: OpenWrt_SL3000_Firmware${{ env.FILE_DATE }}
-        path: ${{ env.FIRMWARE }}
-
-    - name: 生成 Release 标签
-      id: tag
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
-      run: |
-        echo "release_tag=SL3000-$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-        echo "## 司洛 SL-3000 救砖固件包" >> release.txt
-        echo "- 包含 32MB 编程器固件 (nor-programmer-dump.bin)" >> release.txt
-        echo "- 包含 Web 救砖升级包 (sysupgrade.bin)" >> release.txt
-        echo "status=success" >> $GITHUB_OUTPUT
-
-    - name: 发布至 GitHub Release
+    - name: 7. 发布至 Release
       uses: softprops/action-gh-release@v2
-      if: steps.tag.outputs.status == 'success' && !cancelled()
+      if: steps.compile.outputs.status == 'success'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        files: ${{ env.FIRMWARE }}/*
-        name: SL-3000 eMMC 救砖专用版 [${{ env.FILE_DATE }}]
-        tag_name: ${{ steps.tag.outputs.release_tag }}
-        body_path: release.txt
-
-    - name: 自动清理运行记录
-      uses: Mattraks/delete-workflow-runs@main
-      with:
-        retain_days: 0
-        keep_minimum_runs: 2
+        files: openwrt/bin/targets/mediatek/filogic/*
+        name: SL-3000-救砖包-${{ github.run_id }}
+        tag_name: SL3000_V${{ github.run_number }}
+        body: |
+          司洛 SL-3000 EMMC 32MB 救砖专用固件
+          - 包含全量编程器固件 (dump.bin)
+          - 包含 Web 救砖 Failsafe 界面
