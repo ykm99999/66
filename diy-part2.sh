@@ -1,31 +1,28 @@
 #!/bin/bash
+# =========================================================
+# 物理执行：SL-3000 4核心文件强制覆盖脚本
+# =========================================================
 
-# $1 接收的是 888 目录的物理绝对路径
-PART_DIR=$1
+# 1. 物理覆盖 ATF (确保 DDR4 驱动)
+if [ -f "../888/atf-Makefile" ]; then
+    cp -f ../888/atf-Makefile package/boot/arm-trusted-firmware-mediatek/Makefile
+    echo "物理诊断：ATF Makefile 已覆盖。"
+fi
 
-echo "--- [物理注入启动] ---"
-echo "零件仓库 (888) 路径: $PART_DIR"
-echo "当前源码工作空间: $(pwd)"
+# 2. 物理覆盖 U-Boot (确保 NOR 启动灵魂)
+if [ -f "../888/uboot-Makefile" ]; then
+    cp -f ../888/uboot-Makefile package/boot/uboot-mediatek/Makefile
+    echo "物理诊断：U-Boot Makefile 已注入。"
+fi
 
-# --- 1. 物理清场 ---
-# 移除会导致 Patch Failed 的底层冲突补丁
-rm -rf package/boot/arm-trusted-firmware-mediatek/patches/*
-rm -rf package/boot/uboot-mediatek/patches/*
+# 3. 物理覆盖 Image MK (确保 32MB 拼装逻辑)
+if [ -f "../888/filogic.mk" ]; then
+    cp -f ../888/filogic.mk target/linux/mediatek/image/filogic.mk
+    echo "物理诊断：filogic.mk 组装逻辑已覆盖。"
+fi
 
-# --- 2. 物理搬运核心零件 ---
-# 搬运 Makefile 到对应包目录
-cp -f "$PART_DIR/atf-Makefile" package/boot/arm-trusted-firmware-mediatek/Makefile
-cp -f "$PART_DIR/uboot-Makefile" package/boot/uboot-mediatek/Makefile
+# 4. 物理对齐设备名与生产开关 (加固项)
+echo "CONFIG_PACKAGE_arm-trusted-firmware-mediatek-mt7981-nor-ddr4=y" >> .config
+echo "CONFIG_PACKAGE_uboot-mediatek-mt7981_sl3000_nor=y" >> .config
 
-# 搬运 DTS 硬件定义
-mkdir -p target/linux/mediatek/dts/
-cp -f "$PART_DIR/mt7981-sl-3000-emmc.dts" target/linux/mediatek/dts/
-
-# 注入固件生成规则
-cat "$PART_DIR/filogic.mk" >> target/linux/mediatek/image/filogic.mk
-
-# --- 3. 像素级名称修正 ---
-# 确保 filogic.mk 里的 mt7981-sl3000 与你的 DTS 文件名完全一致
-find target/linux/mediatek/image/ -name "*.mk" -exec sed -i 's/mt7981-sl3000/mt7981-sl-3000-emmc/g' {} +
-
-echo "--- [物理链路] 注入已完成 ---"
+echo "物理定论：救砖全家桶生产环境已锁定。"
