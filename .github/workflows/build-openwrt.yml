@@ -1,4 +1,4 @@
-name: SL-3000 Final Build (ImmortalWrt 24.10)
+name: SL-3000 Recovery Build 24.10
 
 on:
   workflow_dispatch:
@@ -7,41 +7,40 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 检出当前仓库
+      - name: 物理检出
         uses: actions/checkout@v4
 
-      - name: 物理环境初始化
+      - name: 环境筑基
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential git gawk libncurses5-dev gettext libssl-dev xsltproc wget
-          # 克隆指定分支
+          sudo apt-get install -y build-essential git gawk libncurses5-dev gettext libssl-dev xsltproc wget zstd
           git clone -b openwrt-24.10 --depth 1 https://github.com/immortalwrt/immortalwrt openwrt
           cd openwrt && ./scripts/feeds update -a && ./scripts/feeds install -a
 
-      - name: 物理注入与零件拉起
+      - name: 零件注入
         run: |
           chmod +x diy-part2.sh
           cd openwrt
           ../diy-part2.sh
 
-      - name: 预编译工具链 (物理硬化)
+      - name: 工具链编译 (物理硬化)
         run: |
           cd openwrt
           make tools/install -j$(nproc)
           make toolchain/install -j$(nproc)
 
-      - name: 正式物理编译
+      - name: 救砖固件合成
         run: |
           cd openwrt
-          # 编译 ATF
+          # 优先编译救砖版 ATF
           make package/boot/arm-trusted-firmware-mediatek/compile V=s
-          # 编译 U-Boot
+          # 编译救砖版 U-Boot
           make package/boot/uboot-mediatek/compile V=s
-          # 合成最终镜像
+          # 生成最终镜像
           make target/linux/mediatek/image/compile V=s
 
-      - name: 上传救砖固件
+      - name: 上传物理产物
         uses: actions/upload-artifact@v4
         with:
-          name: SL3000-Recovery-Firmware
+          name: SL3000-NOR-Recovery
           path: openwrt/bin/targets/mediatek/filogic/*
