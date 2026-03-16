@@ -1,4 +1,4 @@
-name: 司洛SL-3000 EMMC 路径修复版
+name: SL3000-Build-Final-All-Fix
 
 on:
   workflow_dispatch:
@@ -33,8 +33,8 @@ jobs:
         run: |
           [ -e $FEEDS_CONF ] && cp -f $FEEDS_CONF openwrt/feeds.conf.default
           chmod +x $DIY_P1_SH
-          # 物理执行：工序 1-3
           cd openwrt
+          # 物理路径修复：去掉 ./ 防止 // 报错
           $GITHUB_WORKSPACE/$DIY_P1_SH
 
       - name: Update & Install feeds
@@ -45,13 +45,22 @@ jobs:
 
       - name: Load custom configuration
         run: |
+          # 1. 注入你的 3000 行种子配置
           [ -e $CONFIG_FILE ] && cp -f $CONFIG_FILE openwrt/.config
           chmod +x $DIY_P2_SH
           cd openwrt
-          # 彻底解决：先补全，再执行 diy-part2.sh 覆盖分区表
-          make defconfig
+          
+          # 2. 第一次干预：执行脚本切除冲突零件并锁定架构
           bash $GITHUB_WORKSPACE/$DIY_P2_SH
-          make oldconfig
+          
+          # 3. 物理自动补全：无交互模式补全缺失零件，忽略递归残余报错
+          printf '\n' | make defconfig || true
+          
+          # 4. 第二次干预：强行改回由于补全导致的 PARTSIZE 变动
+          bash $GITHUB_WORKSPACE/$DIY_P2_SH
+          
+          # 5. 最终物理锁定
+          printf '\n' | make oldconfig
 
       - name: Download package
         run: |
@@ -61,15 +70,16 @@ jobs:
       - name: Compile the firmware
         run: |
           cd openwrt
+          # 物理强力构建
           make -j$(nproc) || make -j1 || make -j1 V=s
 
       - name: Organize files
         run: |
-          cd openwrt/bin/targets/*/*
+          cd openwrt/bin/targets/mediatek/filogic/
           echo "FIRMWARE=$PWD" >> $GITHUB_ENV
 
       - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
-          name: SL3000_Firmware
+          name: SL3000_32M_Recovery_Firmware
           path: ${{ env.FIRMWARE }}/*nor-programmer-dump.bin
