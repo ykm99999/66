@@ -1,16 +1,6 @@
-#
-# https://github.com/P3TERX/Actions-OpenWrt
-#
-# File: .github/workflows/openwrt-builder.yml
-# Description: Build OpenWrt using GitHub Actions
-#
-# Copyright (c) 2019-2024 P3TERX <https://p3terx.com>
-#
-
-name: 司洛SL-3000 EMMC 物理全量构建
+name: SL3000-Build-Final-Fix
 
 on:
-  repository_dispatch:
   workflow_dispatch:
 
 env:
@@ -20,121 +10,73 @@ env:
   CONFIG_FILE: 888/sl3000.config
   DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
-  UPLOAD_BIN_DIR: false
-  UPLOAD_FIRMWARE: true
-  UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-
     steps:
-    - name: Checkout
-      uses: actions/checkout@main
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Initialization environment
-      env:
-        DEBIAN_FRONTEND: noninteractive
-      run: |
-        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-        sudo docker image prune --all --force
-        sudo -E apt-get -qq update
-        sudo -E apt-get -qq install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
-        sudo -E apt-get -qq autoremove --purge
-        sudo -E apt-get -qq clean
-        sudo timedatectl set-timezone "$TZ"
-        sudo mkdir -p /workdir
-        sudo chown $USER:$GROUPS /workdir
+      - name: Initialization environment
+        run: |
+          sudo -E apt-get -qq update
+          sudo -E apt-get -qq install build-essential gawk git python3
+          sudo timedatectl set-timezone "$TZ"
 
-    - name: Clone source code
-      working-directory: /workdir
-      run: |
-        df -hT $PWD
-        git clone $REPO_URL -b $REPO_BRANCH openwrt
-        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+      - name: Clone source code
+        run: |
+          git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
 
-    - name: Load custom feeds
-      run: |
-        [ -e $FEEDS_CONF ] && cp -f $FEEDS_CONF openwrt/feeds.conf.default
-        chmod +x $DIY_P1_SH
-        cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P1_SH
+      - name: Load custom feeds
+        run: |
+          [ -e $FEEDS_CONF ] && cp -f $FEEDS_CONF openwrt/feeds.conf.default
+          chmod +x $DIY_P1_SH
+          cd openwrt
+          ./$GITHUB_WORKSPACE/$DIY_P1_SH
 
-    - name: Update feeds
-      run: cd openwrt && ./scripts/feeds update -a
+      - name: Update & Install feeds
+        run: |
+          cd openwrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
 
-    - name: Install feeds
-      run: cd openwrt && ./scripts/feeds install -a
+      - name: Load custom configuration
+        run: |
+          # 1. 注入种子配置 (3000行全量版)
+          [ -e $CONFIG_FILE ] && cp -f $CONFIG_FILE openwrt/.config
+          chmod +x $DIY_P2_SH
+          cd openwrt
+          
+          # 2. 物理自动补全 (彻底解决 [NEW] 交互提问)
+          # defconfig 会自动给所有新包选 N，不会卡死，不会报 Broken pipe
+          make defconfig
+          
+          # 3. 物理二次覆盖 (彻底解决分区被冲掉)
+          # 在补全后运行脚本，确保 PARTSIZE 和 eMMC 驱动被强制设为正确值
+          GITHUB_WORKSPACE=$GITHUB_WORKSPACE bash $GITHUB_WORKSPACE/$DIY_P2_SH
+          
+          # 4. 锁定最终配置
+          make oldconfig
 
-    - name: Load custom configuration
-      run: |
-        [ -e files ] && mv files openwrt/files
-        # 物理注入几千行的全量配置文件
-        [ -e $CONFIG_FILE ] && cp -f $CONFIG_FILE openwrt/.config
-        chmod +x $DIY_P2_SH
-        cd openwrt
-        # 执行包含工序4-9的物理脚本
-        GITHUB_WORKSPACE=$GITHUB_WORKSPACE bash $GITHUB_WORKSPACE/$DIY_P2_SH
-        
-        # --- 物理核心修复点 ---
-        # 使用 yes "" 自动回答所有 [NEW] 提问为默认值(N)，防止交互式卡死
-        yes "" | make oldconfig
+      - name: Download package
+        run: |
+          cd openwrt
+          make download -j8
 
-    - name: Download package
-      id: package
-      run: |
-        cd openwrt
-        # 已经通过 oldconfig 完成对齐，直接开始下载
-        make download -j8
-        find dl -size -1024c -exec ls -l {} \;
-        find dl -size -1024c -exec rm -f {} \;
+      - name: Compile the firmware
+        run: |
+          cd openwrt
+          make -j$(nproc) || make -j1 || make -j1 V=s
 
-    - name: Compile the firmware
-      id: compile
-      run: |
-        cd openwrt
-        echo -e "$(nproc) thread compile"
-        # 物理强力构建
-        make -j$(nproc) || make -j1 || make -j1 V=s
-        echo "status=success" >> $GITHUB_OUTPUT
-        echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+      - name: Organize files
+        run: |
+          cd openwrt/bin/targets/*/*
+          echo "FIRMWARE=$PWD" >> $GITHUB_ENV
 
-    - name: Check space usage
-      if: (!cancelled())
-      run: df -hT
-
-    - name: Organize files
-      id: organize
-      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
-      run: |
-        cd openwrt/bin/targets/*/*
-        rm -rf packages
-        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
-        echo "status=success" >> $GITHUB_OUTPUT
-
-    - name: Upload firmware directory
-      uses: actions/upload-artifact@main
-      if: steps.organize.outputs.status == 'success' && !cancelled()
-      with:
-        name: SL3000_Full_Images_${{ env.FILE_DATE }}
-        path: ${{ env.FIRMWARE }}
-
-    - name: Generate release tag
-      id: tag
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
-      run: |
-        echo "release_tag=SL3000_$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-        echo "司洛 SL-3000 EMMC 32MB 物理全量救砖固件" >> release.txt
-        echo "status=success" >> $GITHUB_OUTPUT
-
-    - name: 发布固件至Release
-      uses: softprops/action-gh-release@v2
-      if: steps.tag.outputs.status == 'success' && !cancelled()
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        files: ${{ env.FIRMWARE }}/*nor-programmer-dump.bin
-        name: SL-3000-救砖包-${{ env.FILE_DATE }}
-        tag_name: ${{ steps.tag.outputs.release_tag }}
-        body_path: release.txt
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: SL3000_Firmware
+          path: ${{ env.FIRMWARE }}/*nor-programmer-dump.bin
