@@ -1,15 +1,12 @@
 name: Build SL3000 Recovery Firmware
 
 on:
-  repository_dispatch:
   workflow_dispatch:
 
 env:
   REPO_URL: https://github.com/coolsnowwolf/lede
   REPO_BRANCH: master
-  FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: sl3000.config
-  DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
   TZ: Asia/Shanghai
 
@@ -37,29 +34,27 @@ jobs:
     - name: Clone source code
       working-directory: /workdir
       run: |
+        df -hT $PWD
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
-    - name: Load custom feeds & scripts
-      run: |
-        chmod +x $DIY_P1_SH
-        cd openwrt
-        $GITHUB_WORKSPACE/$DIY_P1_SH
-
     - name: Update & Install feeds
-      run: cd openwrt && ./scripts/feeds update -a && ./scripts/feeds install -a
+      run: |
+        cd openwrt
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
 
     - name: Load custom configuration
       run: |
-        [ -e files ] && mv files openwrt/files
-        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
+        # 物理保留：将你仓库中的 config 和自定义脚本移动到编译目录
+        [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
         chmod +x $DIY_P2_SH
         cd openwrt
+        # 物理执行：运行精简后的 Makefile 锁定脚本
         $GITHUB_WORKSPACE/$DIY_P2_SH
         make defconfig
 
     - name: Download package
-      id: package
       run: |
         cd openwrt
         make download -j8
@@ -67,32 +62,24 @@ jobs:
         find dl -size -1024c -exec rm -f {} \;
 
     - name: Compile the firmware
-      id: compile
       run: |
         cd openwrt
-        echo -e "$(nproc) thread compile"
-        # 物理修正：先行编译 ATF 和 U-Boot 确保依赖闭环
+        # 核心锁定：优先物理编译引导零件
         make package/boot/arm-trusted-firmware-mediatek/compile V=s -j1
         make package/boot/uboot-mediatek/compile V=s -j1
         make -j$(nproc) || make -j1 V=s
-        echo "status=success" >> $GITHUB_OUTPUT
-
-    - name: Check space usage
-      if: (!cancelled())
-      run: df -hT
 
     - name: Organize files
-      id: organize
-      if: steps.compile.outputs.status == 'success' && !cancelled()
       run: |
         cd openwrt/bin/targets/mediatek/filogic
-        rm -rf packages
-        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
-        echo "status=success" >> $GITHUB_OUTPUT
+        # 提取救砖三件套：factory.bin, bl2.img, fip.bin
+        mkdir -p $GITHUB_WORKSPACE/release
+        cp *factory.bin $GITHUB_WORKSPACE/release/
+        cp *bl2.img $GITHUB_WORKSPACE/release/ || true
+        cp *u-boot.fip $GITHUB_WORKSPACE/release/ || true
 
-    - name: Upload firmware directory
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
-      if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
-        name: OpenWrt_SL3000_Recovery_Firmware
-        path: ${{ env:FIRMWARE }}
+        name: SL3000-DDR4-Recovery-Pack
+        path: release/*
