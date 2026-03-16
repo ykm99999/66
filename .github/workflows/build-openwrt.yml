@@ -1,71 +1,133 @@
-name: SL3000-旗舰固件生产线-V23-Final
+#
+# 司洛SL-3000 EMMC 物理救砖构建流水线
+# 核心源: https://github.com/ykm888/66
+# 分支: 2410
+#
+
+name: 司洛SL-3000 EMMC
 
 on:
+  repository_dispatch:
   workflow_dispatch:
 
 env:
-  REPO_URL: https://github.com/padavanonly/immortalwrt-mt798x-24.10
+  # 【物理修正】改为你的仓库源
+  REPO_URL: https://github.com/ykm888/66.git
   REPO_BRANCH: 2410
+  FEEDS_CONF: feeds.conf.default
+  # 【物理修正】指向你仓库中的 888 目录下的 config
   CONFIG_FILE: 888/sl3000.config
   DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
+  UPLOAD_BIN_DIR: false
+  UPLOAD_FIRMWARE: true
+  UPLOAD_RELEASE: true
+  TZ: Asia/Shanghai
 
 jobs:
-  build_firmware:
+  build:
     runs-on: ubuntu-22.04
+
     steps:
-      - name: 物理检出本地仓库
-        uses: actions/checkout@v4
+    - name: Checkout
+      uses: actions/checkout@main
 
-      - name: 部署工业级编译环境
-        run: |
-          sudo -E apt-get -qq update
-          sudo -E apt-get -qq install build-essential gawk git python3 curl
-          sudo timedatectl set-timezone "Asia/Shanghai"
+    - name: Initialization environment
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+        sudo docker image prune --all --force
+        sudo -E apt-get -qq update
+        sudo -E apt-get -qq install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python2.7 python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
+        sudo timedatectl set-timezone "$TZ"
+        sudo mkdir -p /workdir
+        sudo chown $USER:$GROUPS /workdir
 
-      - name: 源码克隆与 Feeds 同步
-        run: |
-          git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
-          cd openwrt
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
+    - name: Clone source code
+      working-directory: /workdir
+      run: |
+        df -hT $PWD
+        # 【物理执行】克隆私有 2410 分支
+        git clone $REPO_URL -b $REPO_BRANCH openwrt
+        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
-      - name: 执行物理架构强攻与截肢 (diy-part2)
-        run: |
-          chmod +x $DIY_P2_SH
-          cd openwrt && ../$DIY_P2_SH
+    - name: Load custom feeds
+      run: |
+        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
+        chmod +x $DIY_P1_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_P1_SH
 
-      - name: 加载已捕获的物理种子
-        run: |
-          cp $CONFIG_FILE openwrt/.config
+    - name: Update feeds
+      run: cd openwrt && ./scripts/feeds update -a
 
-      - name: 执行插件补全与分区锁定 (diy-part1)
-        run: |
-          chmod +x $DIY_P1_SH
-          cd openwrt && ../$DIY_P1_SH
-          # 执行原子化依赖补全
-          make defconfig
+    - name: Install feeds
+      run: cd openwrt && ./scripts/feeds install -a
 
-      - name: 预下载依赖包 (Download)
-        run: |
-          cd openwrt
-          make download -j8
-          find dl -size -1024c -exec rm -f {} \;
+    - name: Load custom configuration
+      run: |
+        [ -e files ] && mv files openwrt/files
+        # 【物理修正】确保从 888 目录搬运种子配置到根目录
+        [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
+        chmod +x $DIY_P2_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_P2_SH
 
-      - name: 生产级全量编译 (Compile)
-        run: |
-          cd openwrt
-          # 物理隔离：先用多线程，失败则自动切换单线程展示错误
-          make -j$(nproc) || make -j1 V=s
+    - name: Download package
+      id: package
+      run: |
+        cd openwrt
+        make defconfig
+        make download -j8
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
 
-      - name: 物理提取产物
-        run: |
-          mkdir -p ./output
-          cp openwrt/bin/targets/mediatek/filogic/*.bin ./output/ 2>/dev/null || echo "未找到 bin 文件"
-          echo "BUILD_TIME=$(date +'%Y%m%d_%H%M')" >> $GITHUB_ENV
+    - name: Compile the firmware
+      id: compile
+      run: |
+        cd openwrt
+        echo -e "$(nproc) thread compile"
+        # 针对 MT7981 优化编译参数
+        make -j$(nproc) || make -j1 || make -j1 V=s
+        echo "status=success" >> $GITHUB_OUTPUT
+        grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
-      - name: 发布 SL3000 救砖固件
-        uses: actions/upload-artifact@v4
-        with:
-          name: SL3000-eMMC-V23-${{ env.BUILD_TIME }}
-          path: ./output/
+    - name: Organize files
+      id: organize
+      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+      run: |
+        cd openwrt/bin/targets/mediatek/mt7981
+        rm -rf packages
+        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: Upload firmware directory
+      uses: actions/upload-artifact@main
+      if: steps.organize.outputs.status == 'success' && !cancelled()
+      with:
+        name: SL3000_Recovery${{ env.FILE_DATE }}
+        path: ${{ env.FIRMWARE }}
+
+    - name: Generate release tag
+      id: tag
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      run: |
+        echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
+        echo "SL-3000 EMMC 专用救砖固件" >> release.txt
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 发布至 Release
+      uses: softprops/action-gh-release@v2.1.0
+      if: steps.tag.outputs.status == 'success' && !cancelled()
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        files: ${{ env.FIRMWARE }}/*
+        name: SL3000-Recovery-${{ env.FILE_DATE }}
+        tag_name: ${{ steps.tag.outputs.release_tag }}
+        body_path: release.txt
