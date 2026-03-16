@@ -18,7 +18,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Initialization environment
+    - name: Initialization Environment
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
@@ -31,55 +31,57 @@ jobs:
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
 
-    - name: Clone source code
+    - name: Clone Source Code
       working-directory: /workdir
       run: |
-        df -hT $PWD
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
-    - name: Update & Install feeds
+    - name: Update & Install Feeds
       run: |
         cd openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Load custom configuration
+    - name: Load Custom Configuration
       run: |
-        # 物理保留：将你仓库中的 config 和自定义脚本移动到编译目录
+        # 物理操作：将你仓库中的 config 和脚本拷贝到编译环境
         [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
         chmod +x $DIY_P2_SH
         cd openwrt
-        # 物理执行：运行精简后的 Makefile 锁定脚本
+        # 执行 Makefile 物理锁定脚本
         $GITHUB_WORKSPACE/$DIY_P2_SH
         make defconfig
 
-    - name: Download package
+    - name: Download Package
       run: |
         cd openwrt
         make download -j8
-        find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
 
-    - name: Compile the firmware
+    - name: Compile the Firmware
       run: |
         cd openwrt
-        # 核心锁定：优先物理编译引导零件
+        # 【物理路径修复点】：必须使用 uboot-mediatek
+        echo "Starting Pre-compile for ATF and U-Boot..."
         make package/boot/arm-trusted-firmware-mediatek/compile V=s -j1
         make package/boot/uboot-mediatek/compile V=s -j1
+        
+        echo "Starting Global Compilation..."
         make -j$(nproc) || make -j1 V=s
 
-    - name: Organize files
+    - name: Organize Files
+      if: success()
       run: |
         cd openwrt/bin/targets/mediatek/filogic
-        # 提取救砖三件套：factory.bin, bl2.img, fip.bin
         mkdir -p $GITHUB_WORKSPACE/release
-        cp *factory.bin $GITHUB_WORKSPACE/release/
-        cp *bl2.img $GITHUB_WORKSPACE/release/ || true
-        cp *u-boot.fip $GITHUB_WORKSPACE/release/ || true
+        # 物理提取：针对 SL3000 的救砖关键文件
+        cp *sl_3000*factory.bin $GITHUB_WORKSPACE/release/ 2>/dev/null || cp *factory.bin $GITHUB_WORKSPACE/release/
+        cp *bl2.img $GITHUB_WORKSPACE/release/ 2>/dev/null || true
+        cp *u-boot.fip $GITHUB_WORKSPACE/release/ 2>/dev/null || true
 
-    - name: Upload artifacts
+    - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: SL3000-DDR4-Recovery-Pack
+        name: SL3000-DDR4-Recovery-Bundle
         path: release/*
