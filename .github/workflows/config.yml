@@ -1,4 +1,4 @@
-name: SL3000-V20-物理渗透-最终锁定
+name: SL3000-V21-净化收割-最终版
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ env:
   CONFIG_FILE: 888/sl3000.config
 
 jobs:
-  fix_v20:
+  harvest_v21:
     runs-on: ubuntu-22.04
     steps:
       - name: 物理检出
@@ -27,41 +27,39 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a || true
 
-      - name: 物理渗透执行 (V20)
+      - name: 物理渗透与净化 (V21)
         run: |
           chmod +x diy-part2.sh
           cd openwrt && ../diy-part2.sh
 
-      - name: 物理强制锁定提取
+      - name: 物理种子收割
         run: |
           cd openwrt
-          # 执行补全，即使它报错我们也继续
-          make oldconfig < /dev/null || true
+          # 物理补全依赖
+          make oldconfig < /dev/null
           
-          # 提取前进行物理确认，如果标识符丢了，强制补回
-          if ! grep -q "DEVICE_sl_3000-emmc=y" .config; then
-             echo "检测到系统尝试抹除标识符，执行物理强制回灌..."
-             echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
-          fi
+          # 【二次净化】物理抹除 oldconfig 偷偷加上的 MT7622 残留
+          sed -i '/CONFIG_TARGET_mediatek_mt7622/d' .config
+          echo "# CONFIG_TARGET_mediatek_mt7622 is not set" >> .config
           
+          # 提取纯净 diffconfig
           ./scripts/diffconfig.sh > ../$CONFIG_FILE
 
-      - name: 物理终极审计
+      - name: 物理最终审计
         run: |
-          echo "执行 V20 物理终极校验..."
-          if grep -q "DEVICE_sl_3000-emmc=y" $CONFIG_FILE; then
-             echo "✅ 物理定论：标识符已通过渗透逻辑锁定！"
+          echo "执行 V21 物理终极校验..."
+          if grep -q "DEVICE_sl_3000-emmc=y" $CONFIG_FILE && ! grep -q "mt7622=y" $CONFIG_FILE; then
+             echo "✅ 物理定论：SL3000 标识符已达成纯净锁定，无任何寄生架构！"
           else
-             echo "❌ 物理报错：标识符在种子中依然缺失！"
-             echo "--- 深度诊断：寻找标识符在全源码的位置 ---"
-             grep -r "sl_3000-emmc" openwrt/target/linux/mediatek/
+             echo "❌ 物理报错：种子中发现非法残留！内容如下："
+             cat $CONFIG_FILE
              exit 1
           fi
 
-      - name: 原子化推送
+      - name: 原子化同步推送
         run: |
           git config --global user.email "bot@github.com"
           git config --global user.name "Physical-Bot"
           git add $CONFIG_FILE
-          git commit -m "Ultimate Fix: V20 Physical Penetration" || exit 0
+          git commit -m "Ultimate Fix: V21 Pure Harvest" || exit 0
           git push
