@@ -1,4 +1,4 @@
-name: SL3000-Build-Final-Fix
+name: 司洛SL-3000 EMMC 路径修复版
 
 on:
   workflow_dispatch:
@@ -33,8 +33,9 @@ jobs:
         run: |
           [ -e $FEEDS_CONF ] && cp -f $FEEDS_CONF openwrt/feeds.conf.default
           chmod +x $DIY_P1_SH
+          # 物理执行：工序 1-3
           cd openwrt
-          ./$GITHUB_WORKSPACE/$DIY_P1_SH
+          $GITHUB_WORKSPACE/$DIY_P1_SH
 
       - name: Update & Install feeds
         run: |
@@ -44,20 +45,12 @@ jobs:
 
       - name: Load custom configuration
         run: |
-          # 1. 注入种子配置 (3000行全量版)
           [ -e $CONFIG_FILE ] && cp -f $CONFIG_FILE openwrt/.config
           chmod +x $DIY_P2_SH
           cd openwrt
-          
-          # 2. 物理自动补全 (彻底解决 [NEW] 交互提问)
-          # defconfig 会自动给所有新包选 N，不会卡死，不会报 Broken pipe
+          # 彻底解决：先补全，再执行 diy-part2.sh 覆盖分区表
           make defconfig
-          
-          # 3. 物理二次覆盖 (彻底解决分区被冲掉)
-          # 在补全后运行脚本，确保 PARTSIZE 和 eMMC 驱动被强制设为正确值
-          GITHUB_WORKSPACE=$GITHUB_WORKSPACE bash $GITHUB_WORKSPACE/$DIY_P2_SH
-          
-          # 4. 锁定最终配置
+          bash $GITHUB_WORKSPACE/$DIY_P2_SH
           make oldconfig
 
       - name: Download package
