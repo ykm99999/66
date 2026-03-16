@@ -1,13 +1,18 @@
-name: OpenWrt-Build-SL3000-Stable
+name: 司洛SL-3000 eMMC 救砖全家桶构建
 
 on:
   workflow_dispatch:
 
 env:
-  REPO_URL: https://github.com/ykm888/66.git
+  REPO_URL: https://github.com/padavanonly/immortalwrt-mt798x-24.10
   REPO_BRANCH: 2410
-  CONFIG_FILE: 888/sl3000.config
+  FEEDS_CONF: feeds.conf.default
+  CONFIG_FILE: sl3000.config
+  DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
+  UPLOAD_BIN_DIR: false
+  UPLOAD_FIRMWARE: true
+  UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
 
 jobs:
@@ -16,38 +21,79 @@ jobs:
 
     steps:
     - name: 物理环境准备
-      uses: actions/checkout@v3
+      uses: actions/checkout@main
 
-    - name: 物理安装依赖 (无损稳定版)
+    - name: Initialization environment
+      env:
+        DEBIAN_FRONTEND: noninteractive
       run: |
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
         sudo -E apt-get -qq update
-        # 这里的列表涵盖了编译所需的全部依赖，不再依赖任何外部 is.gd 链接
-        sudo -E apt-get -qq install build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
-        gettext git libncurses5-dev libssl-dev python3-setuptools python3-pyelftools swig zlib1g-dev \
-        libelf-dev lrzsz scons autopoint qemu-utils upx-ucl rename antlr3 gperf wget curl device-tree-compiler
+        sudo -E apt-get -qq install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp ninja-build p7zip p7zip-full patch pkgconf python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
-        sudo mkdir -p /workdir
-        sudo chown $USER:$GROUPS /workdir
 
-    - name: 物理克隆源码
+    - name: Clone source code
       run: |
-        git clone $REPO_URL -b $REPO_BRANCH /workdir/openwrt
+        git clone $REPO_URL -b $REPO_BRANCH openwrt
+        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
-    - name: 物理执行 Feeds & DIY
+    - name: Update & Install feeds
       run: |
-        cd /workdir/openwrt
+        cd openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
-        # 赋予脚本执行权限并从项目根目录调用
-        chmod +x $GITHUB_WORKSPACE/$DIY_P2_SH
-        $GITHUB_WORKSPACE/$DIY_P2_SH
 
-    - name: 物理编译
+    - name: Load custom configuration (物理注入)
       run: |
-        cd /workdir/openwrt
-        [ -e $GITHUB_WORKSPACE/$CONFIG_FILE ] && cp $GITHUB_WORKSPACE/$CONFIG_FILE .config
+        [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
+        chmod +x $DIY_P2_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_P2_SH
         make defconfig
+
+    - name: Download package
+      run: |
+        cd openwrt
+        make download -j8
+        find dl -size -1024c -exec rm -f {} \;
+
+    - name: Compile the firmware (救砖全家桶强制编译)
+      id: compile
+      run: |
+        cd openwrt
+        echo -e "$(nproc) thread compile"
+        # 强制物理编译 U-Boot 与 Preloader
+        make package/boot/uboot-mtk/compile V=s
         make -j$(nproc) || make -j1 V=s
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: Organize files (物理提取救砖套装)
+      id: organize
+      if: steps.compile.outputs.status == 'success'
+      run: |
+        cd openwrt/bin/targets/mediatek/mt7981/
+        mkdir -p SL3000_RECOVERY_KIT
+        # 物理提取：系统包/工厂包/引导包
+        cp *sysupgrade.bin SL3000_RECOVERY_KIT/ 2>/dev/null || true
+        cp *factory.bin SL3000_RECOVERY_KIT/ 2>/dev/null || true
+        cp *preloader*.bin SL3000_RECOVERY_KIT/ 2>/dev/null || true
+        cp *u-boot*.fip SL3000_RECOVERY_KIT/ 2>/dev/null || true
+        echo "FIRMWARE=$PWD/SL3000_RECOVERY_KIT" >> $GITHUB_ENV
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: Upload firmware to Release
+      uses: softprops/action-gh-release@v1
+      if: steps.organize.outputs.status == 'success'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: SL3000-EMMC-Recovery-${{ env.FILE_DATE }}
+        files: ${{ env.FIRMWARE }}/*
+        body: |
+          司洛 SL3000 eMMC 救砖全家桶
+          - preloader: 底层引导 (炸机修复)
+          - u-boot.fip: 引导程序
+          - factory.bin: U-Boot 救砖专用镜像
+          - sysupgrade.bin: 后台升级包
