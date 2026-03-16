@@ -1,4 +1,4 @@
-name: SL3000-终极解决-V12全物理强占
+name: SL3000-物理克隆-V15终极版
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ env:
   CONFIG_FILE: 888/sl3000.config
 
 jobs:
-  ultimate_fix:
+  clone_fix:
     runs-on: ubuntu-22.04
     steps:
       - name: 物理检出
@@ -18,7 +18,7 @@ jobs:
       - name: 环境部署
         run: |
           sudo -E apt-get -qq update
-          sudo -E apt-get -qq install build-essential gawk git python3
+          sudo -E apt-get -qq install build-essential gawk git python3 curl
 
       - name: 源码溯源
         run: |
@@ -27,7 +27,7 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a || true
 
-      - name: 物理强占执行 (DIY Step)
+      - name: 物理克隆执行 (V15)
         run: |
           chmod +x diy-part2.sh
           cd openwrt && ../diy-part2.sh
@@ -35,18 +35,18 @@ jobs:
       - name: 物理提取 (Diffconfig)
         run: |
           cd openwrt
-          # 物理补全必需依赖 (静默模式)
+          # 物理原子化补全
           make oldconfig < /dev/null
-          # 提取种子
+          # 产生静态种子
           ./scripts/diffconfig.sh > ../$CONFIG_FILE
 
-      - name: 物理最终审计 (核弹级校验)
+      - name: 物理最终审计
         run: |
           echo "执行物理终极校验..."
           if grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" $CONFIG_FILE; then
-             echo "✅ 物理定论：架构已彻底锁死，SL3000 身份已通过物理强占获得！"
+             echo "✅ 物理定论：架构已彻底锁死。DTS 和 MK 零件已物理对齐上游！"
           else
-             echo "❌ 物理报错：请检查 888/mt7981.mk 文件内的定义是否包含 Device/sl_3000-emmc"
+             echo "❌ 物理报错：标识符未在种子中出现！"
              exit 1
           fi
 
@@ -55,5 +55,5 @@ jobs:
           git config --global user.email "bot@github.com"
           git config --global user.name "Physical-Bot"
           git add $CONFIG_FILE
-          git commit -m "Ulitmate Fix: SL3000 V12 物理强占闭环" || exit 0
+          git commit -m "Ultimate Fix: V15 Clone DTS & MK" || exit 0
           git push
