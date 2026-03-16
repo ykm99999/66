@@ -25,3 +25,20 @@ if [ -f "$NETWORK_FILE" ]; then
     sed -i '/casat,ar3000m/a \\tsl,3000-emmc)\n\t\tucidef_set_interfaces_lan_wan "lan1 lan2 lan3" "wan"\n\t\t;;' "$NETWORK_FILE"
 fi
 echo "物理执行：工序 7 - DTS 逻辑与网口拓扑物理对齐"
+
+# --- 工序 8: 物理分区锁定 (针对 32MB NOR 修复) ---
+# 准则 3 诊断：强制注入分区大小，确保在 3000 行配置中物理生效
+sed -i '/CONFIG_TARGET_KERNEL_PARTSIZE/d' .config
+echo "CONFIG_TARGET_KERNEL_PARTSIZE=6" >> .config
+
+sed -i '/CONFIG_TARGET_ROOTFS_PARTSIZE/d' .config
+echo "CONFIG_TARGET_ROOTFS_PARTSIZE=20" >> .config
+
+# --- 工序 9: 核心驱动补全 ---
+# 物理锁定 eMMC 驱动，防止在几千行配置中被误删
+sed -i '/CONFIG_PACKAGE_kmod-mmc/d' .config
+echo "CONFIG_PACKAGE_kmod-mmc=y" >> .config
+sed -i '/CONFIG_PACKAGE_kmod-mtk-sd/d' .config
+echo "CONFIG_PACKAGE_kmod-mtk-sd=y" >> .config
+
+echo "物理执行：工序 8 & 9 - 32MB 分区布局与存储驱动物理锁定完成"
