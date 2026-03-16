@@ -1,4 +1,4 @@
-name: SL3000-旗舰工厂-种子净化-V4终极版
+name: SL3000-旗舰工厂-种子净化-V6.1终极版
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ jobs:
   factory_audit:
     runs-on: ubuntu-22.04
     steps:
-      - name: 物理检出仓库 (Factory Checkout)
+      - name: 物理检出仓库
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -24,62 +24,56 @@ jobs:
           sudo -E apt-get -qq install build-essential gawk git python3
           sudo timedatectl set-timezone "$TZ"
 
-      - name: 源码与全量 Feeds 溯源
+      - name: 源码与 Feeds 溯源
         run: |
           git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
           cd openwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a || true
 
-      - name: 旗舰工程：V4 路径全对齐重构
+      - name: 旗舰工程：V6.1 精准重构 (真名对齐)
         run: |
           cd openwrt
-          # 1. 物理切除冲突包
+          # 1. 物理切除递归冲突包
           find package/ -name "*rd05a1*" -exec rm -rf {} + || true
           
-          # 2. 物理注入：全路径覆盖注入，封死 MT7622 漂移路径
+          # 2. 物理精准注入 (基于上游真名: sl_3000-emmc)
           [ -f ../$CONFIG_FILE ] && cp ../$CONFIG_FILE .config
           sed -i '/CONFIG_TARGET/d' .config
           {
             echo "CONFIG_TARGET_mediatek=y"
             echo "CONFIG_TARGET_mediatek_filogic=y"
-            echo "CONFIG_TARGET_mediatek_filogic_DEVICE_casat_sl3000-emmc=y"
-            echo "CONFIG_TARGET_mediatek_mt7981=y"
-            echo "CONFIG_TARGET_mediatek_mt7981_DEVICE_casat_sl3000-emmc=y"
+            echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y"
           } >> .config
           
-          # 3. 物理膨胀：使用 oldconfig 强制应用注入的预设
+          # 3. 物理锁定：强制应用 oldconfig
           printf '\n' | make oldconfig
           
-          # 4. 救砖红线二次锁定 (防止被 oldconfig 重置)
+          # 4. 救砖红线：32MB 窄空间物理约束
           sed -i '/CONFIG_TARGET_KERNEL_PARTSIZE/d' .config
           sed -i '/CONFIG_TARGET_ROOTFS_PARTSIZE/d' .config
           echo "CONFIG_TARGET_KERNEL_PARTSIZE=6" >> .config
           echo "CONFIG_TARGET_ROOTFS_PARTSIZE=20" >> .config
           
-          # 5. 执行全量补全并收割静态种子
+          # 5. 执行全量补全并生成静态种子 (diffconfig)
           make defconfig
           ./scripts/diffconfig.sh > ../$CONFIG_FILE
 
-      - name: 旗舰级物理审计 (V4 Audit)
+      - name: 旗舰级物理审计
         run: |
-          echo "执行 100% 像素级物理校验..."
-          # 校验 Target: 支持 filogic 或 mt7981 两种物理路径定义
-          if grep -qE "CONFIG_TARGET_(mediatek_filogic|mediatek_mt7981)_DEVICE_casat_sl3000-emmc=y" $CONFIG_FILE; then
-            echo "✅ 旗舰工厂架构对齐通过"
+          echo "执行 V6.1 像素级真名校验..."
+          if grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" $CONFIG_FILE; then
+            echo "✅ 旗舰工厂：真名 [sl_3000-emmc] 锁定成功"
           else
-            echo "❌ 物理错误：目标架构漂移！(当前配置未锁定 SL3000)"
-            exit 1
+            echo "❌ 物理错误：架构依然漂移！" && exit 1
           fi
           
-          # 校验分区表
-          grep -q "CONFIG_TARGET_ROOTFS_PARTSIZE=20" $CONFIG_FILE || (echo "❌ 物理错误：分区表溢出！" && exit 1)
-          echo "✅ 旗舰工厂审计全部通过"
+          grep -q "CONFIG_TARGET_ROOTFS_PARTSIZE=20" $CONFIG_FILE || (echo "❌ 物理错误：空间约束失败！" && exit 1)
 
       - name: 原子化同步推送
         run: |
           git config --global user.email "factory-bot@github.com"
           git config --global user.name "Flagship-Factory-Bot"
           git add $CONFIG_FILE
-          git commit -m "Factory: SL3000 种子 V4 路径全对齐物理闭环" || exit 0
+          git commit -m "Factory: SL3000 救砖种子 V6.1 物理闭环" || exit 0
           git push
