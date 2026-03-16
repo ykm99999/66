@@ -1,112 +1,46 @@
 #!/bin/bash
 
-# 1. 【延续 V2 逻辑】物理净空：彻底切除导致循环依赖的 5G 故障包
+# --- V6 物理清理：切除故障源 ---
 rm -rf package/5g-modem
 rm -rf package/feeds/packages/rd05a1
 
-# 2. 【延续 V3 逻辑】物理注入：锁定 ATF (DDR4 训练核心)
-cat << 'EOF' > package/boot/arm-trusted-firmware-mediatek/Makefile
-include $(TOPDIR)/rules.mk
-include $(INCLUDE_DIR)/kernel.mk
+# --- V6 物理注入 ATF Makefile ---
+# 锁定路径并确保目录存在
+mkdir -p package/boot/arm-trusted-firmware-mediatek
+ATF_PATH="package/boot/arm-trusted-firmware-mediatek/Makefile"
 
-PKG_NAME:=arm-trusted-firmware-mediatek
-PKG_VERSION:=2024.10
-PKG_RELEASE:=1
+printf 'include $(TOPDIR)/rules.mk\ninclude $(INCLUDE_DIR)/kernel.mk\n\n' > $ATF_PATH
+printf 'PKG_NAME:=arm-trusted-firmware-mediatek\nPKG_VERSION:=2024.10\nPKG_RELEASE:=1\n\n' >> $ATF_PATH
+printf 'PKG_SOURCE_PROTO:=git\nPKG_SOURCE_URL:=https://github.com/ykm888/66.git\n' >> $ATF_PATH
+printf 'PKG_SOURCE_VERSION:=sl3000-clean-source\nPKG_MIRROR_HASH:=skip\n\n' >> $ATF_PATH
+printf 'include $(INCLUDE_DIR)/package.mk\n\n' >> $ATF_PATH
+printf 'define Package/arm-trusted-firmware-mediatek/Default\n  SECTION:=boot\n  CATEGORY:=Boot Loaders\n  TITLE:=ATF for MediaTek SL3000 (DDR4)\n  DEPENDS:=@TARGET_mediatek\nendef\n\n' >> $ATF_PATH
+printf 'define Trusted-Firmware-A/mt7981-sl3000-emmc\n  NAME:=SL-3000 (eMMC, DDR4)\n  PLAT:=mt7981\n  BOOT_DEVICE:=emmc\n  DRAM_TYPE_NAME:=ddr4\nendef\n\nTFA_TARGETS:=mt7981-sl3000-emmc\n\n' >> $ATF_PATH
 
-PKG_SOURCE_PROTO:=git
-PKG_SOURCE_URL:=https://github.com/ykm888/66.git
-PKG_SOURCE_VERSION:=sl3000-clean-source
-PKG_MIRROR_HASH:=skip
+# 关键：使用 __TAB__ 占位符，彻底解决第 47 行报错
+printf 'define Build/Compile\n' >> $ATF_PATH
+printf '__TAB__$(foreach target,$(TFA_TARGETS), \\\n' >> $ATF_PATH
+printf '__TAB____TAB__$(MAKE) -C $(PKG_BUILD_DIR) \\\n' >> $ATF_PATH
+printf '__TAB____TAB__CROSS_COMPILE=$(TARGET_CROSS) \\\n' >> $ATF_PATH
+printf '__TAB____TAB__PLAT=mt7981 \\\n' >> $ATF_PATH
+printf '__TAB____TAB__BOOT_DEVICE=emmc \\\n' >> $ATF_PATH
+printf '__TAB____TAB__DRAM_TYPE_NAME=ddr4 \\\n' >> $ATF_PATH
+printf '__TAB____TAB__all \\\n' >> $ATF_PATH
+printf '__TAB__)\n' >> $ATF_PATH
+printf 'endef\n\n' >> $ATF_PATH
 
-include $(INCLUDE_DIR)/package.mk
+printf 'define Package/arm-trusted-firmware-mediatek/install/default\n' >> $ATF_PATH
+printf '__TAB__$(INSTALL_DIR) $(STAGING_DIR_IMAGE)\n' >> $ATF_PATH
+printf '__TAB__$(CP) $(PKG_BUILD_DIR)/build/mt7981/release/bl2.img $(STAGING_DIR_IMAGE)/$(1)-bl2.img\n' >> $ATF_PATH
+printf 'endef\n\n' >> $ATF_PATH
 
-define Package/arm-trusted-firmware-mediatek/Default
-  SECTION:=boot
-  CATEGORY:=Boot Loaders
-  TITLE:=ATF for MediaTek SL3000 (DDR4)
-  DEPENDS:=@TARGET_mediatek
-endef
+printf '$(foreach target,$(TFA_TARGETS), \\\n  $(eval $(call Package/arm-trusted-firmware-mediatek/Default)) \\\n  $(eval $(call Package/arm-trusted-firmware-mediatek/install/default,$(target))) \\\n  $(eval $(call BuildPackage,arm-trusted-firmware-mediatek-$(target))) \\\n)\n' >> $ATF_PATH
 
-define Trusted-Firmware-A/mt7981-sl3000-emmc
-  NAME:=SL-3000 (eMMC, DDR4)
-  PLAT:=mt7981
-  BOOT_DEVICE:=emmc
-  DRAM_TYPE_NAME:=ddr4
-endef
+# --- 物理修正：执行占位符替换 (核心修复动作) ---
+sed -i 's/__TAB__/\t/g' $ATF_PATH
 
-TFA_TARGETS:=mt7981-sl3000-emmc
+# --- V6 物理对齐 DTS ---
+mkdir -p package/boot/uboot-mediatek/files/arch/arm/dts
+printf '/dts-v1/;\n#include "mt7981.dtsi"\n/ {\n  model = "SL-3000 (ykm888 Hardened)";\n  compatible = "mediatek,mt7981-sl3000", "mediatek,mt7981";\n  memory@40000000 {\n    device_type = "memory";\n    reg = <0x40000000 0x20000000>;\n  };\n  chosen { stdout-path = &uart0; };\n};\n&uart0 { status = "okay"; };\n&mmc0 { status = "okay"; bus-width = <8>; cap-mmc-highspeed; non-removable; };\n&spi0 { status = "okay"; };\n' > package/boot/uboot-mediatek/files/arch/arm/dts/mt7981-sl3000.dts
 
-define Build/Compile
-	$(foreach target,$(TFA_TARGETS), \
-		$(MAKE) -C $(PKG_BUILD_DIR) \
-		CROSS_COMPILE=$(TARGET_CROSS) \
-		PLAT=mt7981 \
-		BOOT_DEVICE=emmc \
-		DRAM_TYPE_NAME=ddr4 \
-		all \
-	)
-endef
-
-define Package/arm-trusted-firmware-mediatek/install/default
-	$(INSTALL_DIR) $(STAGING_DIR_IMAGE)
-	$(CP) $(PKG_BUILD_DIR)/build/mt7981/release/bl2.img $(STAGING_DIR_IMAGE)/$(1)-bl2.img
-endef
-
-$(foreach target,$(TFA_TARGETS), \
-  $(eval $(call Package/arm-trusted-firmware-mediatek/Default)) \
-  $(eval $(call Package/arm-trusted-firmware-mediatek/install/default,$(target))) \
-  $(eval $(call BuildPackage,arm-trusted-firmware-mediatek-$(target))) \
-)
-EOF
-
-# 3. 【延续 V3 逻辑】物理注入：锁定 U-Boot (eMMC 引导核心)
-cat << 'EOF' > package/boot/uboot-mediatek/Makefile
-include $(TOPDIR)/rules.mk
-include $(INCLUDE_DIR)/kernel.mk
-
-PKG_VERSION:=2024.10
-PKG_RELEASE:=1
-
-PKG_SOURCE_PROTO:=git
-PKG_SOURCE_URL:=https://github.com/ykm888/66.git
-PKG_SOURCE_VERSION:=sl3000-clean-source
-PKG_MIRROR_HASH:=skip
-
-PKG_BUILD_DEPENDS:=arm-trusted-firmware-tools/host
-
-include $(INCLUDE_DIR)/u-boot.mk
-include $(INCLUDE_DIR)/package.mk
-include $(INCLUDE_DIR)/host-build.mk
-
-define U-Boot/Default
-  BUILD_TARGET:=mediatek
-  BUILD_SUBTARGET:=filogic
-  UBOOT_IMAGE:=u-boot.fip
-  HIDDEN:=1
-endef
-
-define U-Boot/mt7981_sl3000_emmc
-  NAME:=SL-3000 (Private u-boot, eMMC, DDR4)
-  BUILD_DEVICES:=sl_3000-emmc
-  UBOOT_CONFIG:=mt7981_sl-3000-emmc
-  BL2_SOC:=mt7981
-  BL2_BOOTDEV:=emmc
-  BL2_DDRTYPE:=ddr4
-  DEPENDS:=+arm-trusted-firmware-mediatek-mt7981-sl3000-emmc
-endef
-
-UBOOT_TARGETS:=mt7981_sl3000_emmc
-
-$(eval $(call BuildPackage/U-Boot))
-EOF
-
-# 4. 【关键 V4 物理增强】强制将所有 Makefile 命令行的空格修复为物理 Tab 键
-# 这将彻底解决 "recipe commences before first target" 报错
-sed -i 's/^	//g' package/boot/arm-trusted-firmware-mediatek/Makefile
-sed -i 's/^	//g' package/boot/uboot-mediatek/Makefile
-sed -i 's/^    /\t/g' package/boot/arm-trusted-firmware-mediatek/Makefile
-sed -i 's/^    /\t/g' package/boot/uboot-mediatek/Makefile
-sed -i 's/^	/\t/g' package/boot/arm-trusted-firmware-mediatek/Makefile
-sed -i 's/^	/\t/g' package/boot/uboot-mediatek/Makefile
-
-echo "SL3000 延续版 V4 物理修复脚本执行完毕。"
+echo "V6 物理加固脚本执行完毕：Makefile 语法死穴已消除。"
