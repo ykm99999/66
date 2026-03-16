@@ -1,4 +1,4 @@
-name: SL3000-Build-Final-All-Fix
+name: SL3000-Physical-Final-Solution
 
 on:
   workflow_dispatch:
@@ -34,7 +34,6 @@ jobs:
           [ -e $FEEDS_CONF ] && cp -f $FEEDS_CONF openwrt/feeds.conf.default
           chmod +x $DIY_P1_SH
           cd openwrt
-          # 物理路径修复：去掉 ./ 防止 // 报错
           $GITHUB_WORKSPACE/$DIY_P1_SH
 
       - name: Update & Install feeds
@@ -45,22 +44,24 @@ jobs:
 
       - name: Load custom configuration
         run: |
-          # 1. 注入你的 3000 行种子配置
+          # 步骤 A: 物理注入种子配置
           [ -e $CONFIG_FILE ] && cp -f $CONFIG_FILE openwrt/.config
           chmod +x $DIY_P2_SH
           cd openwrt
           
-          # 2. 第一次干预：执行脚本切除冲突零件并锁定架构
+          # 步骤 B: 第一次脚本执行 (切除 rd05a1 癌细胞，防止 defconfig 崩溃)
           bash $GITHUB_WORKSPACE/$DIY_P2_SH
           
-          # 3. 物理自动补全：无交互模式补全缺失零件，忽略递归残余报错
-          printf '\n' | make defconfig || true
+          # 步骤 C: 彻底消除交互 (使用 sh -c 配合默认应答)
+          # 这一步会自动补全 3000 行配置中缺失的所有新选项
+          make defconfig
           
-          # 4. 第二次干预：强行改回由于补全导致的 PARTSIZE 变动
+          # 步骤 D: 第二次脚本执行 (强制物理回滚)
+          # 确保 defconfig 补全过程中没把 Target 架构和 20MB 分区表改掉
           bash $GITHUB_WORKSPACE/$DIY_P2_SH
           
-          # 5. 最终物理锁定
-          printf '\n' | make oldconfig
+          # 步骤 E: 物理锁定
+          make oldconfig
 
       - name: Download package
         run: |
@@ -70,7 +71,6 @@ jobs:
       - name: Compile the firmware
         run: |
           cd openwrt
-          # 物理强力构建
           make -j$(nproc) || make -j1 || make -j1 V=s
 
       - name: Organize files
@@ -78,8 +78,12 @@ jobs:
           cd openwrt/bin/targets/mediatek/filogic/
           echo "FIRMWARE=$PWD" >> $GITHUB_ENV
 
-      - name: Upload firmware
-        uses: actions/upload-artifact@v4
+      - name: Upload firmware to Release
+        uses: softprops/action-gh-release@v2
+        if: (!cancelled())
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          name: SL3000_32M_Recovery_Firmware
-          path: ${{ env.FIRMWARE }}/*nor-programmer-dump.bin
+          files: ${{ env.FIRMWARE }}/*nor-programmer-dump.bin
+          name: SL3000-32M-Final-Recovery
+          tag_name: SL3000_v1.0
