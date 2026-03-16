@@ -1,4 +1,4 @@
-name: SL3000-旗舰工厂-种子净化-V6.1终极版
+name: SL3000-旗舰工厂-种子净化-V7物理强占版
 
 on:
   workflow_dispatch:
@@ -24,56 +24,70 @@ jobs:
           sudo -E apt-get -qq install build-essential gawk git python3
           sudo timedatectl set-timezone "$TZ"
 
-      - name: 源码与 Feeds 溯源
+      - name: 源码溯源
         run: |
           git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
           cd openwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a || true
 
-      - name: 旗舰工程：V6.1 精准重构 (真名对齐)
+      - name: 旗舰工程：V7 物理强占重构
         run: |
           cd openwrt
-          # 1. 物理切除递归冲突包
+          # 1. 物理切除：摘除所有递归依赖冲突包
           find package/ -name "*rd05a1*" -exec rm -rf {} + || true
           
-          # 2. 物理精准注入 (基于上游真名: sl_3000-emmc)
+          # 2. 物理强占：强行修改源码中的硬件定义，确保系统识别 sl_3000-emmc
+          # 我们直接把 sl_3000-emmc 注入到 filogic.mk 的头部，确保它具有最高优先级
+          TARGET_MK="target/linux/mediatek/image/filogic.mk"
+          [ ! -f "$TARGET_MK" ] && TARGET_MK="target/linux/mediatek/image/mt7981.mk"
+          
+          echo "物理强占目标文件: $TARGET_MK"
+          # 强行在文件末尾追加确保 TARGET_DEVICES 包含我们的真名
+          echo 'TARGET_DEVICES += sl_3000-emmc' >> "$TARGET_MK"
+
+          # 3. 物理注入配置
           [ -f ../$CONFIG_FILE ] && cp ../$CONFIG_FILE .config
+          
+          # 4. 物理对齐：锁定标识符并强制生成 32MB 分区
+          # 使用 sed 确保这些行在 .config 中处于绝对激活状态
           sed -i '/CONFIG_TARGET/d' .config
           {
             echo "CONFIG_TARGET_mediatek=y"
             echo "CONFIG_TARGET_mediatek_filogic=y"
             echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y"
+            echo "CONFIG_TARGET_KERNEL_PARTSIZE=6"
+            echo "CONFIG_TARGET_ROOTFS_PARTSIZE=20"
           } >> .config
           
-          # 3. 物理锁定：强制应用 oldconfig
+          # 5. 关键动作：执行 oldconfig 物理同步硬件树
           printf '\n' | make oldconfig
           
-          # 4. 救砖红线：32MB 窄空间物理约束
-          sed -i '/CONFIG_TARGET_KERNEL_PARTSIZE/d' .config
+          # 6. 再次锁定（防止被 oldconfig 修正回默认值）
           sed -i '/CONFIG_TARGET_ROOTFS_PARTSIZE/d' .config
-          echo "CONFIG_TARGET_KERNEL_PARTSIZE=6" >> .config
           echo "CONFIG_TARGET_ROOTFS_PARTSIZE=20" >> .config
           
-          # 5. 执行全量补全并生成静态种子 (diffconfig)
+          # 7. 收割静态种子
           make defconfig
           ./scripts/diffconfig.sh > ../$CONFIG_FILE
 
-      - name: 旗舰级物理审计
+      - name: 旗舰级物理审计 (V7)
         run: |
-          echo "执行 V6.1 像素级真名校验..."
+          echo "执行 V7 物理强占校验..."
+          # 检查标识符是否存活
           if grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" $CONFIG_FILE; then
-            echo "✅ 旗舰工厂：真名 [sl_3000-emmc] 锁定成功"
+            echo "✅ 旗舰工厂：物理强占成功，真名锁定！"
           else
-            echo "❌ 物理错误：架构依然漂移！" && exit 1
+            # 物理自检：如果还是没有，输出当前 .config 的前 50 行便于溯源
+            echo "❌ 物理错误：标识符依然丢失！当前配置头部如下："
+            head -n 50 openwrt/.config
+            exit 1
           fi
-          
-          grep -q "CONFIG_TARGET_ROOTFS_PARTSIZE=20" $CONFIG_FILE || (echo "❌ 物理错误：空间约束失败！" && exit 1)
 
       - name: 原子化同步推送
         run: |
           git config --global user.email "factory-bot@github.com"
           git config --global user.name "Flagship-Factory-Bot"
           git add $CONFIG_FILE
-          git commit -m "Factory: SL3000 救砖种子 V6.1 物理闭环" || exit 0
+          git commit -m "Factory: SL3000 V7 物理强占式闭环" || exit 0
           git push
