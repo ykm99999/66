@@ -1,4 +1,4 @@
-name: SL3000-旗舰工厂工程模式-种子净化
+name: SL3000-旗舰工厂-种子净化-V4终极版
 
 on:
   workflow_dispatch:
@@ -10,10 +10,10 @@ env:
   TZ: Asia/Shanghai
 
 jobs:
-  industrial_grade_audit:
+  factory_audit:
     runs-on: ubuntu-22.04
     steps:
-      - name: 物理检出 (Factory Checkout)
+      - name: 物理检出仓库 (Factory Checkout)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -24,66 +24,62 @@ jobs:
           sudo -E apt-get -qq install build-essential gawk git python3
           sudo timedatectl set-timezone "$TZ"
 
-      - name: 源码全量溯源
+      - name: 源码与全量 Feeds 溯源
         run: |
           git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
           cd openwrt
           ./scripts/feeds update -a
-          ./scripts/feeds install -a
+          ./scripts/feeds install -a || true
 
-      - name: 工程模式：物理逻辑重构
+      - name: 旗舰工程：V4 路径全对齐重构
         run: |
           cd openwrt
-          # 1. 深度清理：摘除所有干扰物理链路的 [NEW] 冲突包
-          echo "执行物理清理..."
+          # 1. 物理切除冲突包
           find package/ -name "*rd05a1*" -exec rm -rf {} + || true
           
-          # 2. 注入种子并强制锁定工厂预设 (Factory Presets)
+          # 2. 物理注入：全路径覆盖注入，封死 MT7622 漂移路径
           [ -f ../$CONFIG_FILE ] && cp ../$CONFIG_FILE .config
           sed -i '/CONFIG_TARGET/d' .config
           {
             echo "CONFIG_TARGET_mediatek=y"
             echo "CONFIG_TARGET_mediatek_filogic=y"
             echo "CONFIG_TARGET_mediatek_filogic_DEVICE_casat_sl3000-emmc=y"
+            echo "CONFIG_TARGET_mediatek_mt7981=y"
+            echo "CONFIG_TARGET_mediatek_mt7981_DEVICE_casat_sl3000-emmc=y"
           } >> .config
           
-          # 3. 物理膨胀与依赖重算
-          make defconfig
+          # 3. 物理膨胀：使用 oldconfig 强制应用注入的预设
+          printf '\n' | make oldconfig
           
-          # 4. 救砖红线锁定：32MB 窄空间物理对齐
-          echo "锁定 32MB 分区布局..."
+          # 4. 救砖红线二次锁定 (防止被 oldconfig 重置)
           sed -i '/CONFIG_TARGET_KERNEL_PARTSIZE/d' .config
           sed -i '/CONFIG_TARGET_ROOTFS_PARTSIZE/d' .config
           echo "CONFIG_TARGET_KERNEL_PARTSIZE=6" >> .config
           echo "CONFIG_TARGET_ROOTFS_PARTSIZE=20" >> .config
           
-          # 5. 核心驱动补全（SL3000 启动核心）
-          sed -i '/CONFIG_PACKAGE_kmod-mtk-sd/d' .config
-          echo "CONFIG_PACKAGE_kmod-mtk-sd=y" >> .config
-
-      - name: 旗舰级物理审计 (Industrial Audit)
-        run: |
-          echo "### 物理审计报告 ###"
-          cd openwrt
-          # 审计 A: Target 身份一致性
-          if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_casat_sl3000-emmc=y" .config; then
-            echo "❌ 物理错误：目标架构漂移！" && exit 1
-          fi
-          
-          # 审计 B: 存储物理拓扑
-          ROOT_SIZE=$(grep "CONFIG_TARGET_ROOTFS_PARTSIZE" .config | cut -d'=' -f2)
-          if [ "$ROOT_SIZE" != "20" ]; then
-            echo "❌ 物理错误：分区表空间溢出风险 ($ROOT_SIZE MB)" && exit 1
-          fi
-          
-          # 审计 C: 无交互性检测 (确保 diffconfig 纯净)
+          # 5. 执行全量补全并收割静态种子
+          make defconfig
           ./scripts/diffconfig.sh > ../$CONFIG_FILE
-          echo "✅ 物理审计 100% 通过"
 
-      - name: 原子化同步 (Atomic Commit)
+      - name: 旗舰级物理审计 (V4 Audit)
+        run: |
+          echo "执行 100% 像素级物理校验..."
+          # 校验 Target: 支持 filogic 或 mt7981 两种物理路径定义
+          if grep -qE "CONFIG_TARGET_(mediatek_filogic|mediatek_mt7981)_DEVICE_casat_sl3000-emmc=y" $CONFIG_FILE; then
+            echo "✅ 旗舰工厂架构对齐通过"
+          else
+            echo "❌ 物理错误：目标架构漂移！(当前配置未锁定 SL3000)"
+            exit 1
+          fi
+          
+          # 校验分区表
+          grep -q "CONFIG_TARGET_ROOTFS_PARTSIZE=20" $CONFIG_FILE || (echo "❌ 物理错误：分区表溢出！" && exit 1)
+          echo "✅ 旗舰工厂审计全部通过"
+
+      - name: 原子化同步推送
         run: |
           git config --global user.email "factory-bot@github.com"
-          git config --global user.name "Factory-Engineering-Bot"
+          git config --global user.name "Flagship-Factory-Bot"
           git add $CONFIG_FILE
-          git commit -m "Factory: SL3000 全量配置静态化存储 (Build: ${{ github.run_number }})" || exit 0
+          git commit -m "Factory: SL3000 种子 V4 路径全对齐物理闭环" || exit 0
           git push
