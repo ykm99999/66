@@ -1,23 +1,9 @@
 #!/bin/bash
 
-# 1. 物理粉碎临时文件
-rm -rf tmp
+# 物理锁定 ATF Makefile (强制 DDR4 分支与参数)
+printf 'include $(TOPDIR)/rules.mk\ninclude $(INCLUDE_DIR)/kernel.mk\n\nPKG_NAME:=arm-trusted-firmware-mediatek\nPKG_VERSION:=2024.10\nPKG_RELEASE:=1\n\nPKG_SOURCE_PROTO:=git\nPKG_SOURCE_URL:=https://github.com/ykm888/66.git\nPKG_SOURCE_VERSION:=sl3000-clean-source\nPKG_MIRROR_HASH:=skip\n\ninclude $(INCLUDE_DIR)/package.mk\n\ndefine Package/arm-trusted-firmware-mediatek/Default\n  SECTION:=boot\n  CATEGORY:=Boot Loaders\n  TITLE:=ATF for MediaTek SL3000 (DDR4)\n  DEPENDS:=@TARGET_mediatek\nendef\n\ndefine Trusted-Firmware-A/mt7981-sl3000-emmc\n  NAME:=SL-3000 (eMMC, DDR4)\n  PLAT:=mt7981\n  BOOT_DEVICE:=emmc\n  DRAM_TYPE_NAME:=ddr4\nendef\n\nTFA_TARGETS:=mt7981-sl3000-emmc\n\ndefine Build/Compile\n\t$(foreach target,$(TFA_TARGETS), \\\n\t\t$(MAKE) -C $(PKG_BUILD_DIR) \\\n\t\tCROSS_COMPILE=$(TARGET_CROSS) \\\n\t\tPLAT=mt7981 \\\n\t\tBOOT_DEVICE=emmc \\\n\t\tDRAM_TYPE_NAME=ddr4 \\\n\t\tall \\\n\t)\nendef\n\ndefine Package/arm-trusted-firmware-mediatek/install/default\n\t$(INSTALL_DIR) $(STAGING_DIR_IMAGE)\n\t$(CP) $(PKG_BUILD_DIR)/build/mt7981/release/bl2.img $(STAGING_DIR_IMAGE)/$(1)-bl2.img\nendef\n\n$(foreach target,$(TFA_TARGETS), \\\n  $(eval $(call Package/arm-trusted-firmware-mediatek/Default)) \\\n  $(eval $(call Package/arm-trusted-firmware-mediatek/install/default,$(target))) \\\n  $(eval $(call BuildPackage,arm-trusted-firmware-mediatek-$(target))) \\\n)\n' > package/boot/arm-trusted-firmware-mediatek/Makefile
 
-# 2. 物理语法热修复 (解决 mediatek-ge.c 编译报错)
-echo "正在物理执行：全域化解 NVMEM 语法冲突..."
-grep -rl "static inline int nvmem_cell_read_variable_le_u64" target/linux/generic/ | xargs sed -i 's/static inline int nvmem_cell_read_variable_le_u64/int __maybe_unused nvmem_cell_read_variable_le_u64/g' 2>/dev/null || true
+# 物理锁定 U-Boot Makefile (强制 DDR4 参数)
+printf 'include $(TOPDIR)/rules.mk\ninclude $(INCLUDE_DIR)/kernel.mk\n\nPKG_VERSION:=2024.10\nPKG_RELEASE:=1\n\nPKG_SOURCE_PROTO:=git\nPKG_SOURCE_URL:=https://github.com/ykm888/66.git\nPKG_SOURCE_VERSION:=sl3000-clean-source\nPKG_MIRROR_HASH:=skip\n\nPKG_BUILD_DEPENDS:=arm-trusted-firmware-tools/host\n\ninclude $(INCLUDE_DIR)/u-boot.mk\ninclude $(INCLUDE_DIR)/package.mk\ninclude $(INCLUDE_DIR)/host-build.mk\n\ndefine U-Boot/Default\n  BUILD_TARGET:=mediatek\n  BUILD_SUBTARGET:=filogic\n  UBOOT_IMAGE:=u-boot.fip\n  HIDDEN:=1\nendef\n\ndefine U-Boot/mt7981_sl3000_emmc\n  NAME:=SL-3000 (Private u-boot, eMMC, DDR4)\n  BUILD_DEVICES:=sl_3000-emmc\n  UBOOT_CONFIG:=mt7981_sl-3000-emmc\n  BL2_SOC:=mt7981\n  BL2_BOOTDEV:=emmc\n  BL2_DDRTYPE:=ddr4\n  DEPENDS:=+arm-trusted-firmware-mediatek-mt7981-sl3000-emmc\nendef\n\nUBOOT_TARGETS:=mt7981_sl3000_emmc\n\n$(eval $(call BuildPackage/U-Boot))\n' > package/boot/uboot-mediatek/Makefile
 
-# 3. 物理残留清理 (彻底抹除 701-712 段冲突)
-echo "正在物理执行：清理博通/DSA 冲突补丁..."
-find target/linux/generic/backport-5.4/ -name "70[1-9]-*.patch" -delete
-find target/linux/generic/backport-5.4/ -name "71[0-2]-*.patch" -delete
-
-# 4. 物理对齐 SL3000 eMMC 分区布局
-# 针对 eMMC 版，内核与文件系统空间可以适当放大，但为了稳定，我们保持 10M/20M 经典对齐
-sed -i 's/CONFIG_TARGET_KERNEL_PARTSIZE=.*/CONFIG_TARGET_KERNEL_PARTSIZE=10/' .config
-sed -i 's/CONFIG_TARGET_ROOTFS_PARTSIZE=.*/CONFIG_TARGET_ROOTFS_PARTSIZE=20/' .config
-
-# 5. 修改默认 IP 为 192.168.31.1
-sed -i 's/192.168.1.1/192.168.31.1/g' package/base-files/files/bin/config_generate
-
-echo "### 物理定论：SL3000 救砖种子逻辑已注入 ###"
+echo "SL3000 引导链条物理加固完成。"
