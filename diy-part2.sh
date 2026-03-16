@@ -1,32 +1,39 @@
 #!/bin/bash
 
-# --- 旗舰工厂：物理路径锁定 ---
-PATCH_DIR="${GITHUB_WORKSPACE}/888"
+# --- 旗舰工厂：物理路径锁定 V10 ---
+# 自动识别 PATCH 路径（兼容本地与 Actions 环境）
+[ -d "${GITHUB_WORKSPACE}/888" ] && PATCH_DIR="${GITHUB_WORKSPACE}/888" || PATCH_DIR="../888"
 
-# 1. 物理摘除递归包
+echo "物理自检：正在清理递归冲突包..."
 find package/ -name "*rd05a1*" -exec rm -rf {} + || true
 
-# 2. 物理校准 Target 真名 (sl_3000-emmc)
+echo "物理强占：正在抹除 MT7622 干扰..."
+# 修改 Mediatek 主 Makefile，强制只允许编译 filogic
+sed -i 's/SUBTARGETS:=.*/SUBTARGETS:=filogic/' target/linux/mediatek/Makefile
+
+echo "物理注入：覆盖硬件定义并强制注册..."
+# 1. 物理覆盖硬件定义文件
+if [ -f "$PATCH_DIR/mt7981.mk" ]; then
+    cp -f "$PATCH_DIR/mt7981.mk" target/linux/mediatek/image/mt7981.mk
+    # 2. 物理强行关联：确保主 Makefile 引用此定义
+    # 查找 filogic.mk 或 mt7981.mk 并注入真名注册
+    TARGET_MK="target/linux/mediatek/image/filogic.mk"
+    [ ! -f "$TARGET_MK" ] && TARGET_MK="target/linux/mediatek/image/mt7981.mk"
+    echo 'TARGET_DEVICES += sl_3000-emmc' >> "$TARGET_MK"
+fi
+
+echo "物理对齐：原子化配置注入..."
+# 强制覆盖当前 .config，不留漂移余地
 sed -i '/CONFIG_TARGET/d' .config
 {
   echo "CONFIG_TARGET_mediatek=y"
   echo "CONFIG_TARGET_mediatek_filogic=y"
   echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y"
+  echo "CONFIG_TARGET_KERNEL_PARTSIZE=6"
+  echo "CONFIG_TARGET_ROOTFS_PARTSIZE=20"
 } >> .config
 
-# 3. 物理零件注入 (ATF/U-Boot/MK)
-# 必须覆盖 target/linux/mediatek/image/filogic.mk 
-# 确保里面包含能够生成 nor-programmer-dump.bin 的定义
-rm -rf package/boot/arm-trusted-firmware-mediatek
-mkdir -p package/boot/arm-trusted-firmware-mediatek
-[ -f "$PATCH_DIR/atf-Makefile" ] && cp -f "$PATCH_DIR/atf-Makefile" package/boot/arm-trusted-firmware-mediatek/Makefile
-[ -f "$PATCH_DIR/uboot-Makefile" ] && cp -f "$PATCH_DIR/uboot-Makefile" package/boot/uboot-mediatek/Makefile
-[ -f "$PATCH_DIR/mt7981.mk" ] && cp -f "$PATCH_DIR/mt7981.mk" target/linux/mediatek/image/mt7981.mk
+# 锁定 20MB 救砖空间
+sed -i 's/CONFIG_TARGET_ROOTFS_PARTSIZE=.*/CONFIG_TARGET_ROOTFS_PARTSIZE=20/' .config
 
-# 4. 强力锁定分区表 (解决救砖溢出问题)
-sed -i '/CONFIG_TARGET_KERNEL_PARTSIZE/d' .config
-sed -i '/CONFIG_TARGET_ROOTFS_PARTSIZE/d' .config
-echo "CONFIG_TARGET_KERNEL_PARTSIZE=6" >> .config
-echo "CONFIG_TARGET_ROOTFS_PARTSIZE=20" >> .config
-
-echo "物理定论：V6.1 生产线已就绪，标识符已锁定为 sl_3000-emmc。"
+echo "物理定论：V10 脚本已完成源码层级强占。"
