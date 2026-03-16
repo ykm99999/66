@@ -1,6 +1,7 @@
-name: 司洛SL-3000 EMMC 物理修复版
+name: OpenWrt-Build-SL3000
 
 on:
+  repository_dispatch:
   workflow_dispatch:
 
 env:
@@ -15,60 +16,38 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: 检出当前仓库
-      uses: actions/checkout@main
+    - name: Checkout
+      uses: actions/checkout@v3
 
-    - name: 部署物理编译环境
-      env:
-        DEBIAN_FRONTEND: noninteractive
+    - name: 安装编译环境 (物理修复 404 版)
       run: |
+        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
         sudo -E apt-get -qq update
-        sudo -E apt-get -qq install $(curl -fsSL https://is.gd/depends_ubuntu_2204)
+        sudo -E apt-get -qq install build-essential clang flex bison g++ gawk gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev python3-setuptools python3-pyelftools swig zlib1g-dev libelf-dev lrzsz scons compile-mirror autopoint qemu-utils upx-ucl rename antlr3 gperf wget curl device-tree-compiler
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
 
-    - name: 克隆底层源码 (2410 分支)
+    - name: 克隆源码
       working-directory: /workdir
       run: |
+        df -hT $PWD
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
-    - name: 更新并安装 Feeds
+    - name: 加载 Feeds & DIY 脚本
       run: |
         cd openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
-
-    - name: 执行物理修复与配置注入
-      run: |
-        # 搬运你的种子配置
-        [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
-        chmod +x $DIY_P2_SH
-        # 在 openwrt 根目录下运行脚本
-        cd openwrt
+        chmod +x $GITHUB_WORKSPACE/$DIY_P2_SH
         $GITHUB_WORKSPACE/$DIY_P2_SH
 
-    - name: 下载源码包与物理校验
+    - name: 启动编译
       run: |
         cd openwrt
+        [ -e $CONFIG_FILE ] && cp $CONFIG_FILE .config
         make defconfig
-        make download -j8
-
-    - name: 启动物理熔炼 (核心编译)
-      id: compile
-      run: |
-        cd openwrt
-        # 第一次尝试使用多线程，如果失败会自动切换单线程输出详细错误
         make -j$(nproc) || make -j1 V=s
-        echo "status=success" >> $GITHUB_OUTPUT
-
-    - name: 上传固件 Release
-      uses: softprops/action-gh-release@v2
-      if: steps.compile.outputs.status == 'success'
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        files: openwrt/bin/targets/mediatek/mt7981/*
-        name: SL3000-Recovery-${{ github.run_id }}
-        tag_name: ${{ github.run_id }}
