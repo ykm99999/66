@@ -1,4 +1,4 @@
-name: Build SL3000 Recovery V6
+name: Build SL3000 Recovery V9
 
 on:
   workflow_dispatch:
@@ -47,6 +47,10 @@ jobs:
         chmod +x $DIY_P2_SH
         cd openwrt
         $GITHUB_WORKSPACE/$DIY_P2_SH
+        
+        echo "=== 物理审计：Makefile 二进制结构 (期待看到 ^I) ==="
+        cat -A package/boot/arm-trusted-firmware-mediatek/Makefile | head -n 50
+        
         make defconfig
 
     - name: Download Package
@@ -58,14 +62,14 @@ jobs:
     - name: Compile the Firmware
       run: |
         cd openwrt
-        # 物理隔离编译：强制单线程编译引导，捕捉所有语法错误
-        echo "物理编译：ATF 引导层..."
+        echo "物理编译：ATF 引导零件..."
+        # 强制单线程编译以捕捉物理报错位置
         make package/boot/arm-trusted-firmware-mediatek/compile V=s -j1
         
-        echo "物理编译：U-Boot 引导层..."
+        echo "物理编译：U-Boot 引导零件..."
         make package/boot/uboot-mediatek/compile V=s -j1
         
-        echo "物理编译：完整固件层..."
+        echo "物理编译：完整固件..."
         make -j$(nproc) || make -j1 V=s
 
     - name: Organize Files
@@ -80,5 +84,5 @@ jobs:
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: SL3000-V6-Recovery-Firmware
+        name: SL3000-V9-Recovery
         path: release/*
