@@ -1,42 +1,36 @@
 #!/bin/bash
 
-# --- 旗舰工厂：物理路径锁定 V18 ---
+# --- 旗舰工厂：物理路径锁定 V19 ---
+UPSTREAM_REPO="https://github.com/padavanonly/immortalwrt-mt798x-6.6"
+UPSTREAM_BRANCH="2410"
+
+echo "### 物理执行：V19 架构级全量置换 ###"
+
+# 1. 物理删除本地已经损坏的架构树
+rm -rf target/linux/mediatek
+
+# 2. 从已知正常运行的上游仓库物理克隆 MediaTek 架构
+git clone --depth 1 -b $UPSTREAM_BRANCH $UPSTREAM_REPO /tmp/upstream_repo
+cp -r /tmp/upstream_repo/target/linux/mediatek target/linux/
+
+# 3. 物理抓取并强制注入 SL3000 的专属 DTS
 RAW_URL="https://raw.githubusercontent.com/padavanonly/immortalwrt-mt798x-6.6/2410"
 DTS_SOURCE="$RAW_URL/target/linux/mediatek/files-5.4/arch/arm64/boot/dts/mediatek/mt7981-sl-3000-emmc.dts"
-MK_SOURCE="$RAW_URL/target/linux/mediatek/image/mt7981.mk"
 
-echo "### 物理执行：V18 核弹级物理强占 ###"
-
-# 1. 物理清空除 MediaTek 以外的所有架构（彻底断掉回退 x86 的路）
-find target/linux/ -maxdepth 1 -mindepth 1 -not -name "mediatek" -not -name "Makefile" -exec rm -rf {} +
-
-# 2. 物理抓取并地毯式注入核心零件
-curl -sL "$DTS_SOURCE" -o /tmp/sl3000.dts
-curl -sL "$MK_SOURCE" -o /tmp/sl3000.mk
-
-# 注入 DTS
+# 确保 DTS 注入到每一个可能的 files 目录下
 find target/linux/mediatek/ -type d -name "files*" | while read dir; do
     dest="$dir/arch/arm64/boot/dts/mediatek/mt7981-sl-3000-emmc.dts"
     mkdir -p $(dirname "$dest")
-    cp /tmp/sl3000.dts "$dest"
+    curl -sL "$DTS_SOURCE" -o "$dest"
 done
 
-# 3. 物理重写子架构定义，强行关联
-echo "SUBTARGETS:=filogic" > target/linux/mediatek/Makefile
-cat >> target/linux/mediatek/Makefile <<EOF
-include \$(INCLUDE_DIR)/target.mk
-\$(eval \$(call BuildTarget))
-EOF
-
-# 4. 物理强制镜像定义
-cat /tmp/sl3000.mk > target/linux/mediatek/image/filogic.mk
+# 4. 物理强制镜像 Makefile 锁定 SL3000
+# 直接重置 filogic.mk，确保它不再 include 其他干扰项
+MK_SOURCE="$RAW_URL/target/linux/mediatek/image/mt7981.mk"
+curl -sL "$MK_SOURCE" > target/linux/mediatek/image/filogic.mk
 echo -e "\nTARGET_DEVICES := sl_3000-emmc" >> target/linux/mediatek/image/filogic.mk
 
-# 5. 物理锁定内核 Config (5.4 专供)
-# 强制让 MediaTek 成为全局唯一默认值
-sed -i 's/default "x86"/default "mediatek"/' target/config/Config-build.in
-
-# 6. 生成物理不可逃逸的 .config
+# 5. 物理锁定 .config
 cat > .config <<EOF
 CONFIG_TARGET_mediatek=y
 CONFIG_TARGET_mediatek_filogic=y
@@ -45,4 +39,4 @@ CONFIG_TARGET_KERNEL_PARTSIZE=6
 CONFIG_TARGET_ROOTFS_PARTSIZE=20
 EOF
 
-echo "物理定论：V18 架构已物理唯一化。系统已无处可逃。"
+echo "物理定论：V19 架构置换已完成。SL3000 标识符现在具有物理原生合法性。"
