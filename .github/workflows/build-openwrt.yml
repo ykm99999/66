@@ -1,12 +1,11 @@
-name: Build SL3000 Recovery Firmware (2410 Branch)
+name: Build SL3000 Recovery V3
 
 on:
   workflow_dispatch:
 
 env:
-  # 物理锁定：你的个人源码库
+  # 物理锁定：你的个人源码库 2410 分支
   REPO_URL: https://github.com/ykm888/66
-  # 物理锁定：你手动改好 DTS/MK 的分支
   REPO_BRANCH: 2410
   CONFIG_FILE: sl3000.config
   DIY_P2_SH: diy-part2.sh
@@ -33,10 +32,10 @@ jobs:
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
 
-    - name: Clone Your Custom Source
+    - name: Clone Custom Source
       working-directory: /workdir
       run: |
-        # 物理操作：直接克隆 2410 分支，确保 DTS 和 MK 无缝接入
+        # 物理操作：克隆 2410 分支，直接继承你改好的 MK/DTS
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
@@ -48,11 +47,10 @@ jobs:
 
     - name: Load Custom Configuration
       run: |
-        # 注入种子配置
         [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
         chmod +x $DIY_P2_SH
         cd openwrt
-        # 物理注入：强行锁定 ATF/U-Boot 为 DDR4 私有源
+        # 执行 V3 物理加固脚本 (含清理逻辑)
         $GITHUB_WORKSPACE/$DIY_P2_SH
         make defconfig
 
@@ -65,10 +63,11 @@ jobs:
     - name: Compile the Firmware
       run: |
         cd openwrt
-        # 物理锁定路径：uboot-mediatek
+        # 物理顺序：先编译锁定的引导零件
         make package/boot/arm-trusted-firmware-mediatek/compile V=s -j1
         make package/boot/uboot-mediatek/compile V=s -j1
         
+        # 全局编译
         make -j$(nproc) || make -j1 V=s
 
     - name: Organize Files
@@ -76,12 +75,12 @@ jobs:
       run: |
         cd openwrt/bin/targets/mediatek/filogic
         mkdir -p $GITHUB_WORKSPACE/release
-        cp *factory.bin $GITHUB_WORKSPACE/release/ 2>/dev/null || true
+        cp *sl_3000*factory.bin $GITHUB_WORKSPACE/release/ 2>/dev/null || true
         cp *bl2.img $GITHUB_WORKSPACE/release/ 2>/dev/null || true
         cp *u-boot.fip $GITHUB_WORKSPACE/release/ 2>/dev/null || true
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: SL3000-Recovery-Bundle-2410
+        name: SL3000-V3-DDR4-Firmware
         path: release/*
