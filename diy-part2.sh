@@ -1,39 +1,40 @@
 #!/bin/bash
 
-# --- 旗舰工厂：物理路径锁定 V10 ---
-# 自动识别 PATCH 路径（兼容本地与 Actions 环境）
+# --- 旗舰工厂：物理路径锁定 V12 ---
 [ -d "${GITHUB_WORKSPACE}/888" ] && PATCH_DIR="${GITHUB_WORKSPACE}/888" || PATCH_DIR="../888"
 
-echo "物理自检：正在清理递归冲突包..."
-find package/ -name "*rd05a1*" -exec rm -rf {} + || true
+echo "物理重构：正在物理干预源码树..."
 
-echo "物理强占：正在抹除 MT7622 干扰..."
-# 修改 Mediatek 主 Makefile，强制只允许编译 filogic
-sed -i 's/SUBTARGETS:=.*/SUBTARGETS:=filogic/' target/linux/mediatek/Makefile
+# 1. 物理抹除所有干扰子架构
+# 直接重写 Makefile，把 SUBTARGETS 焊死在 filogic 上
+echo "SUBTARGETS:=filogic" > target/linux/mediatek/Makefile
+cat >> target/linux/mediatek/Makefile <<EOF
+include \$(INCLUDE_DIR)/target.mk
+\$(eval \$(call BuildTarget))
+EOF
 
-echo "物理注入：覆盖硬件定义并强制注册..."
-# 1. 物理覆盖硬件定义文件
+# 2. 物理注入硬件定义（强制成为该架构的唯一设备）
 if [ -f "$PATCH_DIR/mt7981.mk" ]; then
-    cp -f "$PATCH_DIR/mt7981.mk" target/linux/mediatek/image/mt7981.mk
-    # 2. 物理强行关联：确保主 Makefile 引用此定义
-    # 查找 filogic.mk 或 mt7981.mk 并注入真名注册
-    TARGET_MK="target/linux/mediatek/image/filogic.mk"
-    [ ! -f "$TARGET_MK" ] && TARGET_MK="target/linux/mediatek/image/mt7981.mk"
-    echo 'TARGET_DEVICES += sl_3000-emmc' >> "$TARGET_MK"
+    # 物理清空原有的所有设备定义，只注入你的 SL3000
+    cat "$PATCH_DIR/mt7981.mk" > target/linux/mediatek/image/filogic.mk
+    # 强行追加：确保系统只认这一个设备
+    echo 'TARGET_DEVICES := sl_3000-emmc' >> target/linux/mediatek/image/filogic.mk
 fi
 
-echo "物理对齐：原子化配置注入..."
-# 强制覆盖当前 .config，不留漂移余地
-sed -i '/CONFIG_TARGET/d' .config
-{
-  echo "CONFIG_TARGET_mediatek=y"
-  echo "CONFIG_TARGET_mediatek_filogic=y"
-  echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y"
-  echo "CONFIG_TARGET_KERNEL_PARTSIZE=6"
-  echo "CONFIG_TARGET_ROOTFS_PARTSIZE=20"
-} >> .config
+# 3. 物理重写 .config (原子级强制，不使用追加)
+# 我们直接生成一个“没得选”的配置文件
+cat > .config <<EOF
+CONFIG_TARGET_mediatek=y
+CONFIG_TARGET_mediatek_filogic=y
+CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y
+CONFIG_TARGET_KERNEL_PARTSIZE=6
+CONFIG_TARGET_ROOTFS_PARTSIZE=20
+# 物理封锁 Default 路径
+# CONFIG_TARGET_mediatek_filogic_Default is not set
+EOF
 
-# 锁定 20MB 救砖空间
+# 4. 物理对齐：修改内核分区表的源码默认值（救砖红线最后一道防线）
+# 即使配置失效，也要让生成的固件物理大小正确
 sed -i 's/CONFIG_TARGET_ROOTFS_PARTSIZE=.*/CONFIG_TARGET_ROOTFS_PARTSIZE=20/' .config
 
-echo "物理定论：V10 脚本已完成源码层级强占。"
+echo "物理定论：V12 脚本已完成物理强占。系统已被迫认领 sl_3000-emmc。"
