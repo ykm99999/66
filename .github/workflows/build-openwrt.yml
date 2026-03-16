@@ -77,14 +77,15 @@ jobs:
         # 执行包含工序4-9的物理脚本
         GITHUB_WORKSPACE=$GITHUB_WORKSPACE bash $GITHUB_WORKSPACE/$DIY_P2_SH
         
-        # 物理修正：使用 oldconfig 保持几千行配置的完整性并锁定脚本注入的 PARTSIZE
-        make oldconfig
+        # --- 物理核心修复点 ---
+        # 使用 yes "" 自动回答所有 [NEW] 提问为默认值(N)，防止交互式卡死
+        yes "" | make oldconfig
 
     - name: Download package
       id: package
       run: |
         cd openwrt
-        # 注意：此处不再执行全量 defconfig，防止覆盖手动注入的分区参数
+        # 已经通过 oldconfig 完成对齐，直接开始下载
         make download -j8
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
@@ -109,7 +110,6 @@ jobs:
       run: |
         cd openwrt/bin/targets/*/*
         rm -rf packages
-        # 物理记录固件存放路径
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
 
@@ -126,7 +126,7 @@ jobs:
       run: |
         echo "release_tag=SL3000_$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
         echo "司洛 SL-3000 EMMC 32MB 物理全量救砖固件" >> release.txt
-        echo " status=success" >> $GITHUB_OUTPUT
+        echo "status=success" >> $GITHUB_OUTPUT
 
     - name: 发布固件至Release
       uses: softprops/action-gh-release@v2
