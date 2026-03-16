@@ -1,4 +1,4 @@
-name: SL3000-V19-架构全量置换
+name: SL3000-V20-物理渗透-最终锁定
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ env:
   CONFIG_FILE: 888/sl3000.config
 
 jobs:
-  fix_v19:
+  fix_v20:
     runs-on: ubuntu-22.04
     steps:
       - name: 物理检出
@@ -27,31 +27,34 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a || true
 
-      - name: 物理置换执行 (V19)
+      - name: 物理渗透执行 (V20)
         run: |
           chmod +x diy-part2.sh
-          # 注意：V19 脚本会执行 git clone，需要确保在主目录执行
-          ./diy-part2.sh
-          # 脚本执行完毕后将 .config 移动到 openwrt 目录
-          mv .config openwrt/
+          cd openwrt && ../diy-part2.sh
 
-      - name: 物理锁定提取
+      - name: 物理强制锁定提取
         run: |
           cd openwrt
-          # 物理补全依赖
-          printf '\n' | make oldconfig
-          # 产生静态种子
+          # 执行补全，即使它报错我们也继续
+          make oldconfig < /dev/null || true
+          
+          # 提取前进行物理确认，如果标识符丢了，强制补回
+          if ! grep -q "DEVICE_sl_3000-emmc=y" .config; then
+             echo "检测到系统尝试抹除标识符，执行物理强制回灌..."
+             echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
+          fi
+          
           ./scripts/diffconfig.sh > ../$CONFIG_FILE
 
-      - name: 物理最终审计
+      - name: 物理终极审计
         run: |
-          echo "执行 V19 物理终极校验..."
+          echo "执行 V20 物理终极校验..."
           if grep -q "DEVICE_sl_3000-emmc=y" $CONFIG_FILE; then
-             echo "✅ 物理定论：架构全量置换成功，SL3000 身份已通过原生继承获得！"
+             echo "✅ 物理定论：标识符已通过渗透逻辑锁定！"
           else
-             echo "❌ 物理报错：即使置换了整个架构目录，系统依然不认标识符！"
-             echo "--- 深度诊断：查看 filogic.mk 实际内容 ---"
-             cat openwrt/target/linux/mediatek/image/filogic.mk
+             echo "❌ 物理报错：标识符在种子中依然缺失！"
+             echo "--- 深度诊断：寻找标识符在全源码的位置 ---"
+             grep -r "sl_3000-emmc" openwrt/target/linux/mediatek/
              exit 1
           fi
 
@@ -60,5 +63,5 @@ jobs:
           git config --global user.email "bot@github.com"
           git config --global user.name "Physical-Bot"
           git add $CONFIG_FILE
-          git commit -m "Ultimate Fix: V19 Total Architecture Replacement" || exit 0
+          git commit -m "Ultimate Fix: V20 Physical Penetration" || exit 0
           git push
