@@ -1,16 +1,13 @@
 #
 # https://github.com/P3TERX/Actions-OpenWrt
 #
-# File: .github/workflows/openwrt-bulder.yml
+# File: .github/workflows/openwrt-builder.yml
 # Description: Build OpenWrt using GitHub Actions
 #
 # Copyright (c) 2019-2024 P3TERX <https://p3terx.com>
 #
-# This is free software, licensed under the MIT License.
-# See /LICENSE for more information.
-#
 
-name: 司洛SL-3000 EMMC
+name: 司洛SL-3000 EMMC 物理全量构建
 
 on:
   repository_dispatch:
@@ -20,7 +17,7 @@ env:
   REPO_URL: https://github.com/padavanonly/immortalwrt-mt798x-24.10
   REPO_BRANCH: 2410
   FEEDS_CONF: feeds.conf.default
-  CONFIG_FILE: sl3000.config
+  CONFIG_FILE: 888/sl3000.config
   DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
   UPLOAD_BIN_DIR: false
@@ -59,7 +56,7 @@ jobs:
 
     - name: Load custom feeds
       run: |
-        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
+        [ -e $FEEDS_CONF ] && cp -f $FEEDS_CONF openwrt/feeds.conf.default
         chmod +x $DIY_P1_SH
         cd openwrt
         $GITHUB_WORKSPACE/$DIY_P1_SH
@@ -73,17 +70,21 @@ jobs:
     - name: Load custom configuration
       run: |
         [ -e files ] && mv files openwrt/files
-        [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
+        # 物理注入几千行的全量配置文件
+        [ -e $CONFIG_FILE ] && cp -f $CONFIG_FILE openwrt/.config
         chmod +x $DIY_P2_SH
-        # 准则2修正：显式注入物理工作空间变量，防止脚本执行时路径丢失
         cd openwrt
+        # 执行包含工序4-9的物理脚本
         GITHUB_WORKSPACE=$GITHUB_WORKSPACE bash $GITHUB_WORKSPACE/$DIY_P2_SH
+        
+        # 物理修正：使用 oldconfig 保持几千行配置的完整性并锁定脚本注入的 PARTSIZE
+        make oldconfig
 
     - name: Download package
       id: package
       run: |
         cd openwrt
-        make defconfig
+        # 注意：此处不再执行全量 defconfig，防止覆盖手动注入的分区参数
         make download -j8
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
@@ -93,6 +94,7 @@ jobs:
       run: |
         cd openwrt
         echo -e "$(nproc) thread compile"
+        # 物理强力构建
         make -j$(nproc) || make -j1 || make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
         echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
@@ -107,6 +109,7 @@ jobs:
       run: |
         cd openwrt/bin/targets/*/*
         rm -rf packages
+        # 物理记录固件存放路径
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
 
@@ -114,7 +117,7 @@ jobs:
       uses: actions/upload-artifact@main
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
-        name: SL3000_Firmware_${{ env.FILE_DATE }}
+        name: SL3000_Full_Images_${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE }}
 
     - name: Generate release tag
@@ -122,8 +125,8 @@ jobs:
       if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       run: |
         echo "release_tag=SL3000_$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-        echo "司洛 SL-3000 EMMC 32MB 救砖固件" >> release.txt
-        echo "status=success" >> $GITHUB_OUTPUT
+        echo "司洛 SL-3000 EMMC 32MB 物理全量救砖固件" >> release.txt
+        echo " status=success" >> $GITHUB_OUTPUT
 
     - name: 发布固件至Release
       uses: softprops/action-gh-release@v2
@@ -135,9 +138,3 @@ jobs:
         name: SL-3000-救砖包-${{ env.FILE_DATE }}
         tag_name: ${{ steps.tag.outputs.release_tag }}
         body_path: release.txt
-
-    - name: Delete workflow runs
-      uses: Mattraks/delete-workflow-runs@main
-      with:
-        retain_days: 0
-        keep_minimum_runs: 2
