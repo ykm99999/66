@@ -1,7 +1,6 @@
-name: OpenWrt-Build-SL3000
+name: OpenWrt-Build-SL3000-Stable
 
 on:
-  repository_dispatch:
   workflow_dispatch:
 
 env:
@@ -16,38 +15,39 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: Checkout
+    - name: 物理环境准备
       uses: actions/checkout@v3
 
-    - name: 安装编译环境 (物理修复 404 版)
+    - name: 物理安装依赖 (无损稳定版)
       run: |
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
         sudo -E apt-get -qq update
-        sudo -E apt-get -qq install build-essential clang flex bison g++ gawk gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev python3-setuptools python3-pyelftools swig zlib1g-dev libelf-dev lrzsz scons compile-mirror autopoint qemu-utils upx-ucl rename antlr3 gperf wget curl device-tree-compiler
+        # 这里的列表涵盖了编译所需的全部依赖，不再依赖任何外部 is.gd 链接
+        sudo -E apt-get -qq install build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
+        gettext git libncurses5-dev libssl-dev python3-setuptools python3-pyelftools swig zlib1g-dev \
+        libelf-dev lrzsz scons autopoint qemu-utils upx-ucl rename antlr3 gperf wget curl device-tree-compiler
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
 
-    - name: 克隆源码
-      working-directory: /workdir
+    - name: 物理克隆源码
       run: |
-        df -hT $PWD
-        git clone $REPO_URL -b $REPO_BRANCH openwrt
-        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+        git clone $REPO_URL -b $REPO_BRANCH /workdir/openwrt
 
-    - name: 加载 Feeds & DIY 脚本
+    - name: 物理执行 Feeds & DIY
       run: |
-        cd openwrt
+        cd /workdir/openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
+        # 赋予脚本执行权限并从项目根目录调用
         chmod +x $GITHUB_WORKSPACE/$DIY_P2_SH
         $GITHUB_WORKSPACE/$DIY_P2_SH
 
-    - name: 启动编译
+    - name: 物理编译
       run: |
-        cd openwrt
-        [ -e $CONFIG_FILE ] && cp $CONFIG_FILE .config
+        cd /workdir/openwrt
+        [ -e $GITHUB_WORKSPACE/$CONFIG_FILE ] && cp $GITHUB_WORKSPACE/$CONFIG_FILE .config
         make defconfig
         make -j$(nproc) || make -j1 V=s
