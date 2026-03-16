@@ -1,10 +1,9 @@
-name: Build SL3000 Recovery V3
+name: Build SL3000 Recovery V6
 
 on:
   workflow_dispatch:
 
 env:
-  # 物理锁定：你的个人源码库 2410 分支
   REPO_URL: https://github.com/ykm888/66
   REPO_BRANCH: 2410
   CONFIG_FILE: sl3000.config
@@ -20,8 +19,6 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Initialization Environment
-      env:
-        DEBIAN_FRONTEND: noninteractive
       run: |
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
         sudo -E apt-get -qq update
@@ -35,7 +32,6 @@ jobs:
     - name: Clone Custom Source
       working-directory: /workdir
       run: |
-        # 物理操作：克隆 2410 分支，直接继承你改好的 MK/DTS
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
@@ -50,7 +46,6 @@ jobs:
         [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
         chmod +x $DIY_P2_SH
         cd openwrt
-        # 执行 V3 物理加固脚本 (含清理逻辑)
         $GITHUB_WORKSPACE/$DIY_P2_SH
         make defconfig
 
@@ -63,11 +58,14 @@ jobs:
     - name: Compile the Firmware
       run: |
         cd openwrt
-        # 物理顺序：先编译锁定的引导零件
+        # 物理隔离编译：强制单线程编译引导，捕捉所有语法错误
+        echo "物理编译：ATF 引导层..."
         make package/boot/arm-trusted-firmware-mediatek/compile V=s -j1
+        
+        echo "物理编译：U-Boot 引导层..."
         make package/boot/uboot-mediatek/compile V=s -j1
         
-        # 全局编译
+        echo "物理编译：完整固件层..."
         make -j$(nproc) || make -j1 V=s
 
     - name: Organize Files
@@ -82,5 +80,5 @@ jobs:
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: SL3000-V3-DDR4-Firmware
+        name: SL3000-V6-Recovery-Firmware
         path: release/*
