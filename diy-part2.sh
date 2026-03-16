@@ -1,36 +1,37 @@
 #!/bin/bash
 
-# --- 旗舰工厂：物理路径锁定 V19 ---
-UPSTREAM_REPO="https://github.com/padavanonly/immortalwrt-mt798x-6.6"
-UPSTREAM_BRANCH="2410"
-
-echo "### 物理执行：V19 架构级全量置换 ###"
-
-# 1. 物理删除本地已经损坏的架构树
-rm -rf target/linux/mediatek
-
-# 2. 从已知正常运行的上游仓库物理克隆 MediaTek 架构
-git clone --depth 1 -b $UPSTREAM_BRANCH $UPSTREAM_REPO /tmp/upstream_repo
-cp -r /tmp/upstream_repo/target/linux/mediatek target/linux/
-
-# 3. 物理抓取并强制注入 SL3000 的专属 DTS
+# --- 旗舰工厂：物理路径锁定 V20 ---
 RAW_URL="https://raw.githubusercontent.com/padavanonly/immortalwrt-mt798x-6.6/2410"
-DTS_SOURCE="$RAW_URL/target/linux/mediatek/files-5.4/arch/arm64/boot/dts/mediatek/mt7981-sl-3000-emmc.dts"
 
-# 确保 DTS 注入到每一个可能的 files 目录下
-find target/linux/mediatek/ -type d -name "files*" | while read dir; do
-    dest="$dir/arch/arm64/boot/dts/mediatek/mt7981-sl-3000-emmc.dts"
-    mkdir -p $(dirname "$dest")
-    curl -sL "$DTS_SOURCE" -o "$dest"
-done
+echo "### 物理执行：V20 路径穿透与镜像对齐 ###"
 
-# 4. 物理强制镜像 Makefile 锁定 SL3000
-# 直接重置 filogic.mk，确保它不再 include 其他干扰项
-MK_SOURCE="$RAW_URL/target/linux/mediatek/image/mt7981.mk"
-curl -sL "$MK_SOURCE" > target/linux/mediatek/image/filogic.mk
-echo -e "\nTARGET_DEVICES := sl_3000-emmc" >> target/linux/mediatek/image/filogic.mk
+# 1. 物理修正：定位真正的 mediatek 目录
+# 有些仓库路径是 target/linux/mediatek，有些是 target/linux/mediatek_mt7981
+TARGET_DIR=$(find target/linux -name "mediatek*" -type d | head -n 1)
+echo "目标物理路径确认: $TARGET_DIR"
 
-# 5. 物理锁定 .config
+# 2. 物理强力拉取 MK 定义
+# 我们不创建新文件，我们直接寻找现有的 .mk 文件并暴力覆盖它
+MK_FILE=$(find $TARGET_DIR -name "mt7981.mk" -o -name "filogic.mk" | head -n 1)
+if [ -z "$MK_FILE" ]; then
+    MK_FILE="$TARGET_DIR/image/filogic.mk"
+    mkdir -p $(dirname "$MK_FILE")
+fi
+echo "物理注入镜像定义至: $MK_FILE"
+curl -sL "$RAW_URL/target/linux/mediatek/image/mt7981.mk" -o "$MK_FILE"
+
+# 3. 物理注入 DTS (核心零件)
+DTS_DIR=$(find $TARGET_DIR -name "mediatek" -type d | grep "files" | head -n 1)
+[ -z "$DTS_DIR" ] && DTS_DIR="$TARGET_DIR/files-5.4/arch/arm64/boot/dts/mediatek"
+mkdir -p "$DTS_DIR"
+curl -sL "$RAW_URL/target/linux/mediatek/files-5.4/arch/arm64/boot/dts/mediatek/mt7981-sl-3000-emmc.dts" -o "$DTS_DIR/mt7981-sl-3000-emmc.dts"
+echo "物理注入 DTS 至: $DTS_DIR"
+
+# 4. 物理修改 Makefile：强行把我们的设备塞进编译链
+# 无论上游 Makefile 怎么写，我们强行在末尾追加
+echo -e "\nTARGET_DEVICES += sl_3000-emmc" >> "$MK_FILE"
+
+# 5. 物理重写 .config
 cat > .config <<EOF
 CONFIG_TARGET_mediatek=y
 CONFIG_TARGET_mediatek_filogic=y
@@ -39,4 +40,4 @@ CONFIG_TARGET_KERNEL_PARTSIZE=6
 CONFIG_TARGET_ROOTFS_PARTSIZE=20
 EOF
 
-echo "物理定论：V19 架构置换已完成。SL3000 标识符现在具有物理原生合法性。"
+echo "物理定论：V20 零件已完成物理渗透。"
