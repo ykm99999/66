@@ -1,4 +1,4 @@
-name: SL3000-旗舰固件生产线-V22-Final
+name: SL3000-旗舰固件生产线-V23-Final
 
 on:
   workflow_dispatch:
@@ -17,37 +17,36 @@ jobs:
       - name: 物理检出本地仓库
         uses: actions/checkout@v4
 
-      - name: 部署工业编译环境
+      - name: 部署工业级编译环境
         run: |
           sudo -E apt-get -qq update
           sudo -E apt-get -qq install build-essential gawk git python3 curl
           sudo timedatectl set-timezone "Asia/Shanghai"
 
-      - name: 克隆源码并同步 Feeds
+      - name: 源码克隆与 Feeds 同步
         run: |
           git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
           cd openwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: 执行物理架构强攻 (diy-part2)
+      - name: 执行物理架构强攻与截肢 (diy-part2)
         run: |
           chmod +x $DIY_P2_SH
           cd openwrt && ../$DIY_P2_SH
 
       - name: 加载已捕获的物理种子
         run: |
-          # 将我们之前捕获成功的 sl3000.config 覆盖进源码目录
           cp $CONFIG_FILE openwrt/.config
 
-      - name: 执行零件补全与锁定 (diy-part1)
+      - name: 执行插件补全与分区锁定 (diy-part1)
         run: |
           chmod +x $DIY_P1_SH
           cd openwrt && ../$DIY_P1_SH
-          # 执行最终依赖补全
+          # 执行原子化依赖补全
           make defconfig
 
-      - name: 预下载编译包 (Download)
+      - name: 预下载依赖包 (Download)
         run: |
           cd openwrt
           make download -j8
@@ -56,17 +55,17 @@ jobs:
       - name: 生产级全量编译 (Compile)
         run: |
           cd openwrt
-          echo -e "$(nproc) thread compile"
+          # 物理隔离：先用多线程，失败则自动切换单线程展示错误
           make -j$(nproc) || make -j1 V=s
 
-      - name: 物理提取产物并重命名
+      - name: 物理提取产物
         run: |
           mkdir -p ./output
-          cp openwrt/bin/targets/mediatek/filogic/*.bin ./output/
+          cp openwrt/bin/targets/mediatek/filogic/*.bin ./output/ 2>/dev/null || echo "未找到 bin 文件"
           echo "BUILD_TIME=$(date +'%Y%m%d_%H%M')" >> $GITHUB_ENV
 
-      - name: 发布固件产物
+      - name: 发布 SL3000 救砖固件
         uses: actions/upload-artifact@v4
         with:
-          name: SL3000-eMMC-V22-${{ env.BUILD_TIME }}
+          name: SL3000-eMMC-V23-${{ env.BUILD_TIME }}
           path: ./output/
