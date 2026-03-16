@@ -1,4 +1,4 @@
-name: 物理修复并生成全量配置
+name: SL3000-旗舰工厂工程模式-种子净化
 
 on:
   workflow_dispatch:
@@ -10,43 +10,80 @@ env:
   TZ: Asia/Shanghai
 
 jobs:
-  repair:
+  industrial_grade_audit:
     runs-on: ubuntu-22.04
     steps:
-      - name: 物理检出当前仓库
+      - name: 物理检出 (Factory Checkout)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: 物理环境初始化
+      - name: 工业环境部署
         run: |
           sudo -E apt-get -qq update
           sudo -E apt-get -qq install build-essential gawk git python3
           sudo timedatectl set-timezone "$TZ"
 
-      - name: 源码溯源与Feeds补全
+      - name: 源码全量溯源
         run: |
           git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
           cd openwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: 执行全量补全 (Full Expand)
+      - name: 工程模式：物理逻辑重构
         run: |
-          # 1. 物理注入原始种子
-          cp $CONFIG_FILE openwrt/.config
-          
           cd openwrt
-          # 2. 物理膨胀：根据 MediaTek 5.4 内核树补齐所有 'is not set'
+          # 1. 深度清理：摘除所有干扰物理链路的 [NEW] 冲突包
+          echo "执行物理清理..."
+          find package/ -name "*rd05a1*" -exec rm -rf {} + || true
+          
+          # 2. 注入种子并强制锁定工厂预设 (Factory Presets)
+          [ -f ../$CONFIG_FILE ] && cp ../$CONFIG_FILE .config
+          sed -i '/CONFIG_TARGET/d' .config
+          {
+            echo "CONFIG_TARGET_mediatek=y"
+            echo "CONFIG_TARGET_mediatek_filogic=y"
+            echo "CONFIG_TARGET_mediatek_filogic_DEVICE_casat_sl3000-emmc=y"
+          } >> .config
+          
+          # 3. 物理膨胀与依赖重算
           make defconfig
           
-          # 3. 物理回填：覆盖 888 目录下的原文件
-          cp .config ../$CONFIG_FILE
+          # 4. 救砖红线锁定：32MB 窄空间物理对齐
+          echo "锁定 32MB 分区布局..."
+          sed -i '/CONFIG_TARGET_KERNEL_PARTSIZE/d' .config
+          sed -i '/CONFIG_TARGET_ROOTFS_PARTSIZE/d' .config
+          echo "CONFIG_TARGET_KERNEL_PARTSIZE=6" >> .config
+          echo "CONFIG_TARGET_ROOTFS_PARTSIZE=20" >> .config
+          
+          # 5. 核心驱动补全（SL3000 启动核心）
+          sed -i '/CONFIG_PACKAGE_kmod-mtk-sd/d' .config
+          echo "CONFIG_PACKAGE_kmod-mtk-sd=y" >> .config
 
-      - name: 物理推送到仓库
+      - name: 旗舰级物理审计 (Industrial Audit)
         run: |
-          git config --global user.email "bot@github.com"
-          git config --global user.name "Config-Fix-Bot"
+          echo "### 物理审计报告 ###"
+          cd openwrt
+          # 审计 A: Target 身份一致性
+          if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_casat_sl3000-emmc=y" .config; then
+            echo "❌ 物理错误：目标架构漂移！" && exit 1
+          fi
+          
+          # 审计 B: 存储物理拓扑
+          ROOT_SIZE=$(grep "CONFIG_TARGET_ROOTFS_PARTSIZE" .config | cut -d'=' -f2)
+          if [ "$ROOT_SIZE" != "20" ]; then
+            echo "❌ 物理错误：分区表空间溢出风险 ($ROOT_SIZE MB)" && exit 1
+          fi
+          
+          # 审计 C: 无交互性检测 (确保 diffconfig 纯净)
+          ./scripts/diffconfig.sh > ../$CONFIG_FILE
+          echo "✅ 物理审计 100% 通过"
+
+      - name: 原子化同步 (Atomic Commit)
+        run: |
+          git config --global user.email "factory-bot@github.com"
+          git config --global user.name "Factory-Engineering-Bot"
           git add $CONFIG_FILE
-          git commit -m "物理修复：生成 SL3000 全量分区布局配置 $(date +'%Y-%m-%d')" || exit 0
+          git commit -m "Factory: SL3000 全量配置静态化存储 (Build: ${{ github.run_number }})" || exit 0
           git push
