@@ -1,15 +1,12 @@
-name: 司洛SL-3000 EMMC 物理重构版
+name: SL3000-救砖版-物理终结编译
 
 on:
   workflow_dispatch:
 
 env:
-  # 物理锁定：底层源码仓库和分支
   REPO_URL: https://github.com/ykm888/66
   REPO_BRANCH: 2410
-  # 物理锁定：配置文件路径
   CONFIG_FILE: 888/sl3000.config
-  DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
   TZ: Asia/Shanghai
 
@@ -21,7 +18,7 @@ jobs:
     - name: Checkout Control Repo
       uses: actions/checkout@main
 
-    - name: Initialization environment
+    - name: Initialization Environment
       run: |
         sudo -E apt-get -qq update
         sudo -E apt-get -qq install build-essential clang flex gawk gettext git libncurses5-dev libssl-dev python3-distutils zlib1g-dev xxd
@@ -29,50 +26,46 @@ jobs:
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
 
-    - name: Clone source code
+    - name: Clone Source Code
       working-directory: /workdir
       run: |
         git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
-    - name: Load DIY-P1 & Update Feeds
-      run: |
-        chmod +x $DIY_P1_SH
-        ./$DIY_P1_SH
-        cd openwrt && ./scripts/feeds update -a && ./scripts/feeds install -a
+    - name: Update & Install Feeds
+      run: cd openwrt && ./scripts/feeds update -a && ./scripts/feeds install -a
 
-    - name: Physical Load Configuration & DIY-P2
+    - name: Load Config & Apply DIY-P2
       run: |
-        # 物理搬运：从 ykm99999 的 888 目录搬运到工作目录
+        # 1. 物理搬运种子配置到 openwrt 根目录
         [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
+        # 2. 执行脚本：物理平铺子目录并补全 ID
         chmod +x $DIY_P2_SH
         ./$DIY_P2_SH
-        # 进入 openwrt 再次刷新索引确保 DIY-P2 的修改生效
-        cd openwrt && ./scripts/feeds update -i && ./scripts/feeds install -a
+        # 3. 再次强制安装以刷新 Makefile 修改
+        cd openwrt && ./scripts/feeds install -a
 
-    - name: Download package
+    - name: Download & Defconfig
       run: |
         cd openwrt
         make defconfig
         make download -j8
 
-    - name: Compile the firmware
-      id: compile
+    - name: Compile Firmware
       run: |
         cd openwrt
+        # 物理策略：先内核后整体
+        make target/linux/compile -j$(nproc) || make target/linux/compile -j1 V=s
         make -j$(nproc) || make -j1 V=s
-        echo "status=success" >> $GITHUB_OUTPUT
 
-    - name: Organize files
-      if: steps.compile.outputs.status == 'success'
+    - name: Organize & Upload
+      if: always()
       run: |
-        cd openwrt/bin/targets/*/*
-        rm -rf packages
-        echo "FIRMWARE_DIR=$PWD" >> $GITHUB_ENV
-
-    - name: Upload firmware
+        mkdir -p ./output
+        cp openwrt/bin/targets/mediatek/filogic/*.bin ./output/ || echo "No bin files"
+      
+    - name: Upload Artifact
       uses: actions/upload-artifact@main
-      if: env.FIRMWARE_DIR != ''
       with:
-        name: SL3000_EMMC_Firmware
-        path: ${{ env.FIRMWARE_DIR }}/*.bin
+        name: SL3000-Final-EMMC-Firmware
+        path: ./output/*.bin
