@@ -1,73 +1,58 @@
-name: SL3000-V1-Physical-Recovery
+name: SL3000 Recovery Build
 
 on:
+  repository_dispatch:
   workflow_dispatch:
+
+env:
+  REPO_URL: https://github.com/ykm888/66.git
+  REPO_BRANCH: sl3000-clean-source
+  CONFIG_FILE: 888/mt7981_sl3000_nor_defconfig # 你的配置路径
+  DIY_P2_SH: diy-part2.sh
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+
     steps:
-    - name: Checkout Actions Repo
+    - name: Checkout Action Repo
       uses: actions/checkout@v4
 
-    - name: Initialization Environment
+    - name: Prepare Environment
       run: |
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
         sudo -E apt-get -qq update
         sudo -E apt-get -qq install $(curl -fsSL https://is.gd/depends_ubuntu_2204)
-        sudo timedatectl set-timezone "Asia/Shanghai"
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
 
-    - name: Clone OpenWrt Source
+    - name: Clone Source Code
       run: |
-        # 物理克隆 ykm888/66 的 2410 分支
-        git clone --depth 1 https://github.com/ykm888/66 -b 2410 openwrt
+        git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
 
-    - name: Load Config & Force Apply
+    - name: Load Custom Configuration
       run: |
-        # --- 物理路径锁定：从 888 目录抓取种子 ---
-        if [ -f "888/sl3000.config" ]; then
-            echo "物理校准：已定位到 888/sl3000.config"
-            
-            # 1. 物理清洗换行符
-            sed -i 's/\r$//' 888/sl3000.config
-            
-            # 2. 物理强制注入核心架构 (单箭头覆盖旧配置)
-            echo "CONFIG_TARGET_mediatek=y" > openwrt/.config
-            echo "CONFIG_TARGET_mediatek_filogic=y" >> openwrt/.config
-            echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> openwrt/.config
-            
-            # 3. 追加 888 目录下的业务配置
-            cat 888/sl3000.config >> openwrt/.config
-            echo "物理注入完成：888种子已对齐到 openwrt/.config"
-        else
-            echo "物理致命错误：888/sl3000.config 不在预期位置！"
-            ls -R
-            exit 1
-        fi
+        [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
 
-    - name: Run DIY Scripts
+    - name: Execute Physical Alignment (DIY Part 2)
       run: |
-        # 脚本必须在根目录执行，内部会 cd openwrt
-        chmod +x diy-part2.sh
-        ./diy-part2.sh
+        chmod +x $DIY_P2_SH
+        ./$DIY_P2_SH
 
-    - name: Build Toolchain
+    - name: Download Packages
+      working-directory: ./openwrt
       run: |
-        cd openwrt
         make defconfig
-        make tools/install -j$(nproc)
-        make toolchain/install -j$(nproc)
+        make download -j8
 
-    - name: Compile Components
+    - name: Compile Firmware
+      working-directory: ./openwrt
       run: |
-        cd openwrt
-        # 物理精准打击救砖零件
-        make package/boot/arm-trusted-firmware-mediatek/compile V=s -j1
-        make package/boot/uboot-mediatek/compile V=s -j1
-        # 开始全局编译
-        make -j$(nproc) || make -j1 V=s
+        echo -e "$(nproc) thread compile"
+        make -j$(nproc) || make -j1 || make -j1 V=s
 
     - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/checkout@v4
       with:
-        name: SL3000-V1-Recovery-Package
-        path: openwrt/bin/targets/mediatek/filogic/*
+        name: SL3000-Recovery-Firmware
+        path: openwrt/bin/targets/mediatek/filogic/
