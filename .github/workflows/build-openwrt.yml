@@ -1,4 +1,4 @@
-name: SL3000 Slim Build
+name: SL3000 Final Build
 
 on:
   workflow_dispatch:
@@ -9,32 +9,35 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout config branch (main)
+      # 检出 main 分支（包含 diy-part1.sh 和 888/ 配置）
+      - name: Checkout main branch
         uses: actions/checkout@v4
         with:
           ref: main
-          path: config-repo
+          path: main-repo
 
-      - name: Checkout source branch (sl3000-full-sync)
+      # 检出源码分支 sl3000-full-sync 到 source-repo
+      - name: Checkout source branch
         uses: actions/checkout@v4
         with:
           repository: ykm99999/66
           ref: sl3000-full-sync
           path: source-repo
 
-      - name: Install basic dependencies
+      - name: Install dependencies
         run: |
           sudo apt update
           sudo apt install -y build-essential git wget curl unzip file \
             gcc-aarch64-linux-gnu libncurses-dev libssl-dev python3
 
-      - name: Run DIY script
+      - name: Run build script
         run: |
-          chmod +x diy-part1.sh
+          chmod +x main-repo/diy-part1.sh
+          cd main-repo
           ./diy-part1.sh
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: sl3000-firmware
-          path: output/
+          path: main-repo/output/
