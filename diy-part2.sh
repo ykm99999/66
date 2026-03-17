@@ -1,23 +1,27 @@
 #!/bin/bash
 
-# --- V9 物理清理 ---
+# 1. 物理清理冲突
 rm -rf package/5g-modem
 rm -rf package/feeds/packages/rd05a1
 
-# --- V9 物理校准：解决 "recipe commences before first target" ---
-# 无论底层仓库如何，这里强行将所有行首空格转为硬 Tab
-# 物理逻辑：匹配行首的空格并替换为 \t
-if [ -f "package/boot/arm-trusted-firmware-mediatek/Makefile" ]; then
-    sed -i 's/^[[:space:]]\+/\t/g' package/boot/arm-trusted-firmware-mediatek/Makefile
-    # 针对 define 块内的特殊二重校准
-    sed -i 's/^\t\t/\t/g' package/boot/arm-trusted-firmware-mediatek/Makefile
-    echo "Makefile 物理校准完成。"
-else
-    echo "物理警告：底层仓库未检测到 Makefile！"
+# 2. 物理校准 ATF Makefile (确保小写 include 和硬 Tab)
+ATF_PATH="package/boot/arm-trusted-firmware-mediatek/Makefile"
+if [ -f "$ATF_PATH" ]; then
+    sed -i 's/Include/include/g' "$ATF_PATH"
+    sed -i 's/^[[:space:]]\+/\t/g' "$ATF_PATH"
 fi
 
-# --- V9 物理注入 DTS (由于不含 Tab，可用 printf 安全注入) ---
-mkdir -p package/boot/uboot-mediatek/files/arch/arm/dts
-printf '/dts-v1/;\n#include "mt7981.dtsi"\n/ {\n  model = "SL-3000 (ykm888 Hardened)";\n  compatible = "mediatek,mt7981-sl3000", "mediatek,mt7981";\n  memory@40000000 {\n    device_type = "memory";\n    reg = <0x40000000 0x20000000>;\n  };\n  chosen { stdout-path = &uart0; };\n};\n&uart0 { status = "okay"; };\n&mmc0 { status = "okay"; bus-width = <8>; cap-mmc-highspeed; non-removable; };\n&spi0 { status = "okay"; };\n' > package/boot/uboot-mediatek/files/arch/arm/dts/mt7981-sl3000.dts
+# 3. 物理注入 U-Boot 定义 (与 .config 中的 CONFIG_PACKAGE_uboot-mediatek-mt7981_sl3000_emmc 对齐)
+UBOOT_PATH="package/boot/uboot-mediatek/Makefile"
+if [ -f "$UBOOT_PATH" ]; then
+    # 检查是否已有定义，没有则物理插入
+    if ! grep -q "mt7981_sl3000_emmc" "$UBOOT_PATH"; then
+        sed -i '/define U-Boot\/mt7981-sd-emmc/i \
+define U-Boot/mt7981_sl3000_emmc\n  NAME:=SL-3000 (eMMC)\n  BUILD_SUBTARGET:=filogic\n  BUILD_DEVICES:=mediatek_mt7981\n  DEPENDS:=+arm-trusted-firmware-mediatek-mt7981-sl3000-emmc\nendef\n' "$UBOOT_PATH"
+        
+        # 物理加入目标编译列表
+        sed -i 's/UBOOT_TARGETS := \\/UBOOT_TARGETS := mt7981_sl3000_emmc \\/' "$UBOOT_PATH"
+    fi
+fi
 
-echo "V9 脚本物理准备就绪。"
+echo "SL3000 救砖零件物理对齐完成。"
