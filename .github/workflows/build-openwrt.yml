@@ -1,4 +1,4 @@
-name: SL3000-Physical-Recovery-V2026
+name: SL3000-Final-Recovery-V11
 
 on:
   workflow_dispatch:
@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: Checkout
+    - name: Checkout Actions Repo
       uses: actions/checkout@v4
 
     - name: Initialization Environment
@@ -26,66 +26,62 @@ jobs:
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
-        sudo mkdir -p /workdir
-        sudo chown $USER:$GROUPS /workdir
 
-    - name: Clone Source
-      working-directory: /workdir
+    - name: Clone Custom Source
       run: |
         git clone $REPO_URL -b $REPO_BRANCH openwrt
-        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
-
+        
     - name: Update & Install Feeds
       run: |
         cd openwrt
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Load Config & Physical Reset
+    - name: Load Config & Force Architecture
       run: |
-        [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
-        chmod +x $DIY_P2_SH
         cd openwrt
-        # 物理注入 SL3000 定义
+        # 1. 物理清洗种子配置 (防止 Windows 换行符干扰)
+        sed -i 's/\r$//' $GITHUB_WORKSPACE/$CONFIG_FILE
+        
+        # 2. 物理强制注入目标架构 (最高优先级覆盖)
+        echo "CONFIG_TARGET_mediatek=y" > .config
+        echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
+        echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
+        
+        # 3. 合并剩余配置
+        cat $GITHUB_WORKSPACE/$CONFIG_FILE >> .config
+        
+        # 4. 执行物理对齐脚本
+        chmod +x $GITHUB_WORKSPACE/$DIY_P2_SH
         $GITHUB_WORKSPACE/$DIY_P2_SH
         
-        # --- 物理架构重置 (彻底解决 x86 残留) ---
-        rm -rf staging_dir/target-x86_64* build_dir/target-x86_64*
-        rm -rf staging_dir/toolchain-x86_64* build_dir/toolchain-x86_64*
-        
-        # 强制同步配置
+        # 5. 物理重置索引并应用配置
         make defconfig
 
-    - name: Compile Toolchain (Physics First)
+    - name: Build Toolchain
       run: |
         cd openwrt
-        echo "物理构建：AArch64 工具链..."
-        make tools/install -j$(nproc) || make tools/install -j1 V=s
-        make toolchain/install -j$(nproc) || make toolchain/install -j1 V=s
+        # 预先构建 ARM 工具链，防止 cp ld-musl 报错
+        make tools/install -j$(nproc)
+        make toolchain/install -j$(nproc)
 
     - name: Compile SL3000 Components
       run: |
         cd openwrt
-        echo "物理构建：ATF & U-Boot..."
+        # 单线程精确编译引导零件
         make package/boot/arm-trusted-firmware-mediatek/compile V=s -j1
         make package/boot/uboot-mediatek/compile V=s -j1
 
-    - name: Final Global Build
+    - name: Final Build
       run: |
         cd openwrt
         make -j$(nproc) || make -j1 V=s
 
-    - name: Organize Artifacts
-      run: |
-        cd openwrt/bin/targets/mediatek/filogic
-        mkdir -p $GITHUB_WORKSPACE/release
-        # 物理提取救砖零件
-        cp *sl_3000* $GITHUB_WORKSPACE/release/ || true
-        cp *bl2.img $GITHUB_WORKSPACE/release/ || true
-        cp *u-boot.fip $GITHUB_WORKSPACE/release/ || true
-
-    - name: Upload
+    - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: SL3000-Final-Recovery
-        path: release/*
+        name: SL3000-Recovery-Binaries
+        path: |
+          openwrt/bin/targets/mediatek/filogic/*bl2.img
+          openwrt/bin/targets/mediatek/filogic/*u-boot.fip
+          openwrt/bin/targets/mediatek/filogic/*factory.bin
