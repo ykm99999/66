@@ -1,257 +1,32 @@
-name: SL3000 Production Build (Factory Grade)
+name: SL3000 Slim Build
 
 on:
+  workflow_dispatch:
   push:
     tags: [ 'v*' ]
-  workflow_dispatch:
-    inputs:
-      build_type:
-        description: 'Build type: normal (1G), rescue (512M), both'
-        required: true
-        default: 'normal'
-        type: choice
-        options:
-          - normal
-          - rescue
-          - both
-      skip_self_heal:
-        description: 'Skip self-healing (debug)'
-        required: false
-        default: false
-        type: boolean
-
-env:
-  DEVICE: "sl3000"                      # 修正拼写
-  SOC: "mt7981"
-  CONFIG_BRANCH: "main"
-  SOURCE_BRANCH: "sl3000-full-sync"      # 修正拼写
-  DTS_FILE: "mt7981-sl-3000-emmc"        # 修正拼写
-  MK_FILE: "mt7981.mk"
-  CONFIG_FILE: "sl3000.config"           # 修正拼写
 
 jobs:
   build:
-    # 多行条件表达式：正确缩进，括号匹配
-    if: |
-      (github.event_name == 'workflow_dispatch' && (
-        (github.event.inputs.build_type == 'normal' && matrix.memory == 1024) ||
-        (github.event.inputs.build_type == 'rescue' && matrix.memory == 512) ||
-        github.event.inputs.build_type == 'both'
-      )) || (github.event_name != 'workflow_dispatch' && matrix.memory == 1024)
     runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix:
-        memory: [1024, 512]
-        include:
-          - memory: 1024
-            suffix: 1g
-            device_name: sl_3000-emmc-1g
-          - memory: 512
-            suffix: 512m
-            device_name: sl_3000-emmc-512m
-
     steps:
-      - name: Maximize build space
-        run: |
-          sudo apt clean
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /usr/local/lib/android
-          df -h
-
-      - name: Checkout config branch (main)
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.CONFIG_BRANCH }}
-          path: config-repo
+          fetch-depth: 0
 
-      - name: Checkout source branch
-        uses: actions/checkout@v4
-        with:
-          repository: ykm99999/66
-          ref: ${{ env.SOURCE_BRANCH }}
-          path: source-repo
-
-      - name: Install dependencies
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            sudo apt update
-            sudo apt install -y build-essential clang flex bison g++ gawk \
-              gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
-              python3-distutils python3-setuptools rsync unzip zlib1g-dev file wget \
-              gcc-aarch64-linux-gnu
-
-      # 三件套检测
-      - name: Triple-file auto detect
+      - name: Install basic dependencies
         run: |
-          cd config-repo/888
-          EXPECTED_DTS="${DTS_FILE}-${{ matrix.suffix }}.dts"
-          EXPECTED_MK="${MK_FILE}"
-          EXPECTED_CONFIG="sl3000-${{ matrix.suffix }}.config"
-          MISSING=0
-          [ ! -f "$EXPECTED_DTS" ] && echo "Missing: $EXPECTED_DTS" && MISSING=1
-          [ ! -f "$EXPECTED_MK" ] && echo "Missing: $EXPECTED_MK" && MISSING=1
-          [ ! -f "$EXPECTED_CONFIG" ] && echo "Missing: $EXPECTED_CONFIG" && MISSING=1
-          if [ $MISSING -eq 1 ]; then
-            if [ "${{ github.event.inputs.skip_self_heal }}" == "true" ]; then
-              echo "❌ 三件套缺失且跳过修复，构建终止"
-              exit 1
-            fi
-            echo "❌ 三件套缺失，请确保文件已准备"
-            exit 1
-          fi
-          echo "✅ 三件套完整"
+          sudo apt update
+          sudo apt install -y build-essential git wget curl unzip file \
+            gcc-aarch64-linux-gnu libncurses-dev libssl-dev python3
 
-      # ---------- 编译 ATF ----------
-      - name: Build ATF (${{ matrix.memory }}MB)
-        id: build_atf
-        continue-on-error: true
+      - name: Run DIY script
         run: |
-          cd source-repo/arm-trusted-firmware
-          make clean
-          make PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=${{ matrix.memory }}
-          mkdir -p $GITHUB_WORKSPACE/output/atf
-          cp build/mt7981/release/bl2/bl2.elf $GITHUB_WORKSPACE/output/atf/bl2-${{ matrix.suffix }}.elf 2>/dev/null || true
-          [ -f build/mt7981/release/bl2.bin ] && cp build/mt7981/release/bl2.bin $GITHUB_WORKSPACE/output/atf/bl2-${{ matrix.suffix }}.bin
+          chmod +x diy-part1.sh
+          ./diy-part1.sh
 
-      - name: ATF self-heal (retry)
-        if: steps.build_atf.outcome == 'failure' && (github.event_name != 'workflow_dispatch' || !inputs.skip_self_heal)
-        run: |
-          cd source-repo/arm-trusted-firmware
-          make distclean
-          make PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=${{ matrix.memory }}
-          mkdir -p $GITHUB_WORKSPACE/output/atf
-          cp build/mt7981/release/bl2/bl2.elf $GITHUB_WORKSPACE/output/atf/bl2-${{ matrix.suffix }}.elf 2>/dev/null || true
-          [ -f build/mt7981/release/bl2.bin ] && cp build/mt7981/release/bl2.bin $GITHUB_WORKSPACE/output/atf/bl2-${{ matrix.suffix }}.bin
-
-      - name: Check ATF status
-        if: steps.build_atf.outcome == 'failure'
-        run: exit 1
-
-      # ---------- 编译 U-Boot ----------
-      - name: Build U-Boot
-        id: build_uboot
-        continue-on-error: true
-        run: |
-          cd source-repo/u-boot
-          make clean
-          if [ -f configs/mt7981_sl3000_emmc_defconfig ]; then
-            make mt7981_sl3000_emmc_defconfig
-          elif [ -f configs/mt7981_emmc_defconfig ]; then
-            make mt7981_emmc_defconfig
-          else
-            make defconfig
-          fi
-          make -j$(nproc)
-          mkdir -p $GITHUB_WORKSPACE/output/uboot
-          [ -f fip.bin ] && cp fip.bin $GITHUB_WORKSPACE/output/uboot/fip-${{ matrix.suffix }}.bin
-          [ -f u-boot.bin ] && cp u-boot.bin $GITHUB_WORKSPACE/output/uboot/u-boot-${{ matrix.suffix }}.bin
-
-      - name: U-Boot self-heal (retry)
-        if: steps.build_uboot.outcome == 'failure' && (github.event_name != 'workflow_dispatch' || !inputs.skip_self_heal)
-        run: |
-          cd source-repo/u-boot
-          make distclean
-          if [ -f configs/mt7981_sl3000_emmc_defconfig ]; then
-            make mt7981_sl3000_emmc_defconfig
-          elif [ -f configs/mt7981_emmc_defconfig ]; then
-            make mt7981_emmc_defconfig
-          else
-            make defconfig
-          fi
-          make -j$(nproc)
-          mkdir -p $GITHUB_WORKSPACE/output/uboot
-          [ -f fip.bin ] && cp fip.bin $GITHUB_WORKSPACE/output/uboot/fip-${{ matrix.suffix }}.bin
-          [ -f u-boot.bin ] && cp u-boot.bin $GITHUB_WORKSPACE/output/uboot/u-boot-${{ matrix.suffix }}.bin
-
-      - name: Check U-Boot status
-        if: steps.build_uboot.outcome == 'failure'
-        run: exit 1
-
-      # ---------- 编译 ImmortalWrt ----------
-      - name: Prepare ImmortalWrt source
-        run: |
-          cp -r source-repo/immortalwrt $GITHUB_WORKSPACE/immortalwrt-${{ matrix.suffix }}
-          cd $GITHUB_WORKSPACE/immortalwrt-${{ matrix.suffix }}
-          cp $GITHUB_WORKSPACE/config-repo/888/${{ env.DTS_FILE }}-${{ matrix.suffix }}.dts target/linux/mediatek/dts/
-          cp $GITHUB_WORKSPACE/config-repo/888/${{ env.MK_FILE }} target/linux/mediatek/image/
-          cp $GITHUB_WORKSPACE/config-repo/888/sl3000-${{ matrix.suffix }}.config .config
-
-      - name: Build ImmortalWrt
-        id: build_ipq
-        continue-on-error: true
-        run: |
-          cd $GITHUB_WORKSPACE/immortalwrt-${{ matrix.suffix }}
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-          make defconfig
-          make -j$(nproc) V=s 2>&1 | tee build.log
-          mkdir -p $GITHUB_WORKSPACE/output/firmware-${{ matrix.suffix }}
-          find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp {} $GITHUB_WORKSPACE/output/firmware-${{ matrix.suffix }}/ \;
-          cp build.log $GITHUB_WORKSPACE/output/firmware-${{ matrix.suffix }}/build.log
-
-      - name: ImmortalWrt self-heal (clean & retry)
-        if: steps.build_ipq.outcome == 'failure' && (github.event_name != 'workflow_dispatch' || !inputs.skip_self_heal)
-        run: |
-          cd $GITHUB_WORKSPACE/immortalwrt-${{ matrix.suffix }}
-          make clean
-          make -j$(nproc) V=s 2>&1 | tee build.log
-          mkdir -p $GITHUB_WORKSPACE/output/firmware-${{ matrix.suffix }}
-          find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp {} $GITHUB_WORKSPACE/output/firmware-${{ matrix.suffix }}/ \;
-          cp build.log $GITHUB_WORKSPACE/output/firmware-${{ matrix.suffix }}/build.log
-
-      - name: Check ImmortalWrt status
-        if: steps.build_ipq.outcome == 'failure'
-        run: exit 1
-
-      # ---------- 打包 mtk_uartboot ----------
-      - name: Package mtk_uartboot
-        run: |
-          cd source-repo/mtk_uartboot
-          tar -czf $GITHUB_WORKSPACE/output/mtk_uartboot.tar.gz .
-
-      # ---------- 生成元数据 ----------
-      - name: Generate metadata
-        run: |
-          cd $GITHUB_WORKSPACE/output
-          echo "BUILD_TIME=$(date -Iseconds)" > metadata.txt
-          echo "COMMIT_ID=${{ github.sha }}" >> metadata.txt
-          echo "CONFIG_BRANCH=${{ env.CONFIG_BRANCH }}" >> metadata.txt
-          echo "SOURCE_BRANCH=${{ env.SOURCE_BRANCH }}" >> metadata.txt
-          echo "MEMORY_SIZE=${{ matrix.memory }}" >> metadata.txt
-          echo "DEVICE_NAME=${{ matrix.device_name }}" >> metadata.txt
-          sha256sum * > sha256sums.txt 2>/dev/null || true
-
-      - name: Upload artifacts (per variant)
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sl3000-${{ matrix.suffix }}
+          name: sl3000-firmware
           path: output/
-          retention-days: 30
-
-  # ---------- 合并发布 ----------
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    if: success()
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Prepare release files
-        run: |
-          mkdir final_output
-          for dir in artifacts/*; do
-            cp -r "$dir"/* final_output/ 2>/dev/null || true
-          done
-          # 合并 metadata
-          for file in artifacts/*/metadata.txt; do
-            variant=$(basename $(dirname $file))
-            sed "s/^/${variant}_/" "$file" >> final_output/metadata_combined.txt
-          done
-          # 合并 sha256
-          find artifacts -name sha256sums.txt -exec cat {} \; |
