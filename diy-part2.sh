@@ -1,28 +1,41 @@
 #!/bin/bash
 # ---------------------------------------------------------
-# 物理执行三准则：全链路名称自动对齐修复脚本 (禁用 EOF 版)
+# 物理执行三准则：SL3000 全链路自愈脚本 (V7.0 终极版)
+# 针对：双仓库关联 + 禁用 EOF + 源码分支强制锁定
 # ---------------------------------------------------------
 
-echo "开始全链路像素级对齐自检 (禁用 EOF 模式)..."
+# 1. 物理坐标纠偏：进入 Action 下载的源码子目录
+[ -d "openwrt" ] && cd openwrt || { echo "物理断链：找不到 openwrt 目录"; exit 1; }
 
-# 1. 物理重构 U-Boot 依赖
+echo "开始物理像素级校准..."
+
+# 2. 物理修复 ATF Makefile (锁定 sl3000-clean-source 分支)
+ATF_MK="package/boot/arm-trusted-firmware-mediatek/Makefile"
+if [ -f "$ATF_MK" ]; then
+    echo "校准 ATF 物理源码源至 sl3000-clean-source..."
+    sed -i 's/PKG_SOURCE_VERSION:=.*/PKG_SOURCE_VERSION:=sl3000-clean-source/g' "$ATF_MK"
+    # 修复可能存在的名称偏差
+    sed -i 's/mt7981-sl3000-emmc/mt7981-sl_3000-emmc/g' "$ATF_MK"
+    sed -i 's/^[[:space:]]\+/\t/g' "$ATF_MK"
+fi
+
+# 3. 物理修复 U-Boot Makefile (锁定 sl3000-clean-source 分支)
 UBOOT_MK="package/boot/uboot-mediatek/Makefile"
 if [ -f "$UBOOT_MK" ]; then
-    echo "正在物理修正 U-Boot 依赖路径..."
+    echo "校准 U-Boot 物理源码源至 sl3000-clean-source..."
+    sed -i 's/PKG_SOURCE_VERSION:=.*/PKG_SOURCE_VERSION:=sl3000-clean-source/g' "$UBOOT_MK"
     sed -i 's/sl3000-emmc/sl_3000-emmc/g' "$UBOOT_MK"
     sed -i 's/mt7981_sl3000_emmc/mt7981_sl-3000-emmc/g' "$UBOOT_MK"
     sed -i 's/^[[:space:]]\+/\t/g' "$UBOOT_MK"
-    sed -i 's/Include /include /g' "$UBOOT_MK"
 fi
 
-# 2. 物理修复 mt7981.mk 救砖全家桶
+# 4. 物理注入 mt7981.mk 救砖定义 (彻底禁用 EOF，改用逐行 echo)
 IMAGE_MK="target/linux/mediatek/image/mt7981.mk"
 if [ -f "$IMAGE_MK" ]; then
-    echo "正在物理注入救砖逻辑到 mt7981.mk..."
-    # 物理清除原有旧定义
+    echo "物理注入 eMMC 救砖全家桶镜像链..."
+    # 清理底层源中不完整的定义
     sed -i '/define Device\/sl_3000-emmc/,/endef/d' "$IMAGE_MK"
     
-    # 使用 echo 物理追加，彻底弃用 EOF
     echo "" >> "$IMAGE_MK"
     echo "define Device/sl_3000-emmc" >> "$IMAGE_MK"
     echo "  DEVICE_VENDOR := SL" >> "$IMAGE_MK"
@@ -40,9 +53,9 @@ if [ -f "$IMAGE_MK" ]; then
     echo "TARGET_DEVICES += sl_3000-emmc" >> "$IMAGE_MK"
 fi
 
-# 3. 物理刷新索引
+# 5. 物理重载 Feeds 索引 (确保新定义的设备被系统识别)
 rm -rf tmp
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-echo "物理全链路名称对齐完成：sl_3000-emmc 标准已锁定。"
+echo "全链路物理自愈完成。名称锁定：sl_3000-emmc"
