@@ -22,7 +22,6 @@ jobs:
           ref: sl3000-full-sync
           path: source-repo
 
-      # 关键修正：移除 gcc-multilib 和 g++-multilib，避免冲突
       - name: Install dependencies
         run: |
           sudo apt update
