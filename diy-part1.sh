@@ -17,7 +17,6 @@ cd $SOURCE_DIR/arm-trusted-firmware
 make clean
 make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=512
 
-# 动态查找 bl2 文件
 find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-512m.bin \; 2>/dev/null || echo "No bl2.bin for 512M"
 find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-512m.elf \; 2>/dev/null || echo "No bl2.elf for 512M"
 
@@ -32,7 +31,6 @@ echo "=== Building U-Boot ==="
 cd $SOURCE_DIR/u-boot
 make clean
 
-# 使用验证通过的配置
 if [ -f configs/mt7981_emmc_rfb_defconfig ]; then
     make CROSS_COMPILE=aarch64-linux-gnu- mt7981_emmc_rfb_defconfig
 else
@@ -49,11 +47,10 @@ cd $WORKSPACE
 cp -r $SOURCE_DIR/immortalwrt immortalwrt-build
 cd immortalwrt-build
 
-# 复制三件套文件（根据实际文件名调整）
-cp $CONFIG_DIR/mt7981-sl-3000-emmc-1g.dts target/linux/mediatek/dts/ 2>/dev/null || echo "Warning: 1G DTS not found"
-cp $CONFIG_DIR/mt7981-sl-3000-emmc-512m.dts target/linux/mediatek/dts/ 2>/dev/null || echo "Warning: 512M DTS not found"
+# 复制三件套文件（根据实际仓库路径名称）
+cp $CONFIG_DIR/mt7981-sl-3000-emmc.dts target/linux/mediatek/dts/ 2>/dev/null || echo "Warning: mt7981-sl-3000-emmc.dts not found"
 cp $CONFIG_DIR/mt7981.mk target/linux/mediatek/image/
-cp $CONFIG_DIR/sl3000-1g.config .config   # 可改为 512m 版本编译救砖版
+cp $CONFIG_DIR/sl3000.config .config || { echo "Error: sl3000.config not found in $CONFIG_DIR"; exit 1; }
 
 ./scripts/feeds update -a
 ./scripts/feeds install -a
