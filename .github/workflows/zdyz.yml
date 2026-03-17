@@ -1,0 +1,77 @@
+name: Validate Source Files
+
+on:
+  workflow_dispatch:  # 手动触发
+  push:
+    paths:
+      - '.github/workflows/validate-sources.yml'
+      - 'source-repo/**'  # 可根据需要调整
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source branch (sl3000-full-sync)
+        uses: actions/checkout@v4
+        with:
+          repository: ykm99999/66
+          ref: sl3000-full-sync
+          path: source-repo
+
+      - name: Check critical files
+        id: check_files
+        run: |
+          set +e  # 不立即退出，收集所有缺失
+          cd source-repo
+          MISSING=()
+
+          # arm-trusted-firmware
+          echo "=== Checking arm-trusted-firmware ==="
+          [ -f arm-trusted-firmware/plat/mediatek/mt7981/platform.mk ] || MISSING+=("arm-trusted-firmware/plat/mediatek/mt7981/platform.mk")
+          [ -f arm-trusted-firmware/bl2/bl2_main.c ] || MISSING+=("arm-trusted-firmware/bl2/bl2_main.c")
+          [ -f arm-trusted-firmware/fdts/mt7981.dts ] || MISSING+=("arm-trusted-firmware/fdts/mt7981.dts")
+          [ -f arm-trusted-firmware/bl2/bl2.ld.S ] || [ -f arm-trusted-firmware/bl2/bl2_el3.ld.S ] || MISSING+=("arm-trusted-firmware/bl2 linker script")
+
+          # u-boot
+          echo "=== Checking u-boot ==="
+          [ -f u-boot/configs/mt7981_emmc_defconfig ] || MISSING+=("u-boot/configs/mt7981_emmc_defconfig")
+          [ -f u-boot/arch/arm/dts/mt7981.dtsi ] || MISSING+=("u-boot/arch/arm/dts/mt7981.dtsi")
+          [ -d u-boot/board/mediatek/mt7981 ] || MISSING+=("u-boot/board/mediatek/mt7981 directory")
+
+          # immortalwrt
+          echo "=== Checking immortalwrt ==="
+          [ -d immortalwrt/target/linux/mediatek ] || MISSING+=("immortalwrt/target/linux/mediatek")
+          [ -f immortalwrt/target/linux/mediatek/dts/mt7981.dtsi ] || MISSING+=("immortalwrt/target/linux/mediatek/dts/mt7981.dtsi")
+          [ -f immortalwrt/feeds.conf.default ] || MISSING+=("immortalwrt/feeds.conf.default")
+
+          # mtk_uartboot
+          echo "=== Checking mtk_uartboot ==="
+          [ -f mtk_uartboot/Cargo.toml ] || MISSING+=("mtk_uartboot/Cargo.toml")
+          [ -d mtk_uartboot/src ] || MISSING+=("mtk_uartboot/src directory")
+
+          # bl-mt798x (不死 U-Boot)
+          echo "=== Checking bl-mt798x ==="
+          [ -d bl-mt798x/configs ] || MISSING+=("bl-mt798x/configs directory")
+          [ -f bl-mt798x/arch/arm/dts/mt7981*.dts ] || MISSING+=("bl-mt798x device tree files")
+
+          # 输出结果
+          echo "========================="
+          if [ ${#MISSING[@]} -eq 0 ]; then
+            echo "✅ All critical files are present."
+            echo "status=ok" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Missing files/directories:"
+            for item in "${MISSING[@]}"; do
+              echo "   - $item"
+            done
+            echo "status=failed" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "Validation completed with status: ${{ steps.check_files.outputs.status }}"
+          if [ "${{ steps.check_files.outputs.status }}" != "ok" ]; then
+            echo "Please ensure all required files are present in the 'sl3000-full-sync' branch."
+          fi
