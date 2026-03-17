@@ -3,7 +3,7 @@ name: Sync ImmortalWrt & Bootloader for SL3000
 on:
   workflow_dispatch:        # 手动触发
   # schedule:
-  #   - cron: '0 20 * * 0'  # 如果需要定时同步可取消注释
+  #   - cron: '0 20 * * 0'  # 如需定时同步可取消注释
 
 env:
   GH_USER: ${{ github.repository_owner }}
@@ -33,42 +33,42 @@ jobs:
           git checkout -b $BRANCH_NAME || git checkout $BRANCH_NAME
           git pull origin $BRANCH_NAME || echo "New branch"
 
-      # ---------- ImmortalWrt ----------
+      # ---------- ImmortalWrt (根目录 /immortalwrt) ----------
       - name: Add ImmortalWrt remote and sync
         run: |
           git remote add upstream-immortalwrt https://github.com/immortalwrt/immortalwrt.git
           git fetch upstream-immortalwrt master:immortalwrt-master --depth=1
-          mkdir -p source/immortalwrt
-          git read-tree --prefix=source/immortalwrt/ -u immortalwrt-master
-          git add source/immortalwrt
+          rm -rf immortalwrt
+          git read-tree --prefix=immortalwrt/ -u immortalwrt-master
+          git add immortalwrt
           git commit -m "Sync: ImmortalWrt master ($(date +'%Y-%m-%d'))" || echo "No changes"
 
-      # ---------- ATF (Arm Trusted Firmware) ----------
+      # ---------- ATF (根目录 /arm-trusted-firmware) ----------
       - name: Add ATF remote and sync
         run: |
           git remote add upstream-atf https://github.com/mtk-openwrt/arm-trusted-firmware.git
           git fetch upstream-atf mtksoc-20230719:atf-master --depth=1
-          mkdir -p source/arm-trusted-firmware
-          git read-tree --prefix=source/arm-trusted-firmware/ -u atf-master
-          git add source/arm-trusted-firmware
+          rm -rf arm-trusted-firmware
+          git read-tree --prefix=arm-trusted-firmware/ -u atf-master
+          git add arm-trusted-firmware
           git commit -m "Sync: ATF (branch mtksoc-20230719) $(date +'%Y-%m-%d')" || echo "No changes"
 
-      # ---------- U-Boot ----------
+      # ---------- U-Boot (根目录 /u-boot-mtk) ----------
       - name: Add U-Boot remote and sync
         run: |
           git remote add upstream-uboot https://github.com/mtk-openwrt/u-boot.git
           git fetch upstream-uboot mtksoc-20250212:uboot-mtk --depth=1
-          mkdir -p source/u-boot-mtk
-          git read-tree --prefix=source/u-boot-mtk/ -u uboot-mtk
-          git add source/u-boot-mtk
+          rm -rf u-boot-mtk
+          git read-tree --prefix=u-boot-mtk/ -u uboot-mtk
+          git add u-boot-mtk
           git commit -m "Sync: U-Boot (branch mtksoc-20250212) $(date +'%Y-%m-%d')" || echo "No changes"
 
       # ---------- 硬件配置与救砖文档（永久记录，禁用EOF）----------
-      - name: Generate SL3000 Hardware Configuration (no heredoc)
+      - name: Generate SL3000 Hardware Configuration
         run: |
           mkdir -p device/sl3000
 
-          # 写入 README.md (逐行 echo，禁用 EOF)
+          # 写入 README.md (逐行 echo，确保兼容性)
           echo "# 司络 SL3000 救砖与编译配置" > device/sl3000/README.md
           echo "" >> device/sl3000/README.md
           echo "## 硬件参数（永久记录）" >> device/sl3000/README.md
