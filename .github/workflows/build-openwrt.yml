@@ -1,4 +1,4 @@
-name: SL3000-救砖版-物理环境修复编译
+name: SL3000-物理救砖-终极构建
 
 on:
   workflow_dispatch:
@@ -15,19 +15,19 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: Checkout Master Repo
+    - name: Checkout Control Repo
       uses: actions/checkout@main
 
     - name: Initialization Environment
       run: |
         sudo -E apt-get -qq update
-        # 物理级补全：m4, flex, bison, python3-pyelftools 是解决内核编译失败的关键
-        sudo -E apt-get -qq install build-essential clang flex bison gawk gettext git libncurses5-dev libssl-dev python3-distutils python3-pyelftools zlib1g-dev xxd ccache m4
+        # 物理拒绝安装 ccache，确保环境纯净
+        sudo -E apt-get -qq install build-essential clang flex bison gawk gettext git libncurses5-dev libssl-dev python3-distutils python3-pyelftools zlib1g-dev xxd m4
         sudo timedatectl set-timezone "$TZ"
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
 
-    - name: Clone Source Code
+    - name: Clone OpenWrt Source
       working-directory: /workdir
       run: |
         git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
@@ -36,37 +36,39 @@ jobs:
     - name: Update & Install Feeds
       run: cd openwrt && ./scripts/feeds update -a && ./scripts/feeds install -a
 
-    - name: Load Config & Apply DIY-P2
+    - name: Load Config & Execute DIY-P2
       run: |
-        # 物理搬运种子配置
+        # 1. 搬运已经修复好的 888/sl3000.config
         [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
+        # 2. 执行物理级净化与平铺脚本
         chmod +x $DIY_P2_SH
         ./$DIY_P2_SH
-        # 强制安装刷新 Makefile 逻辑
+        # 3. 物理刷新 Makefile 依赖
         cd openwrt && ./scripts/feeds install -a
 
     - name: Download & Defconfig
       run: |
         cd openwrt
-        # 重新生成配置以彻底应用脚本中的 sed 修改
+        # 重新生成配置，彻底物理抹除 CCACHE 影子
         make defconfig
         make download -j8
 
     - name: Compile Firmware
       run: |
         cd openwrt
-        # 物理编译策略：单线程编译内核以便观察报错，整体并行编译
+        # 物理执行：先编译内核，再整体并行构建
         make target/linux/compile -j$(nproc) || make target/linux/compile -j1 V=s
         make -j$(nproc) || make -j1 V=s
 
-    - name: Organize & Upload
+    - name: Organize & Upload Bin
       if: always()
       run: |
         mkdir -p ./output
-        cp openwrt/bin/targets/mediatek/filogic/*.bin ./output/ || echo "No bin files found"
+        # 提取 eMMC 救砖专用的 factory.bin 和 sysupgrade.bin
+        cp openwrt/bin/targets/mediatek/filogic/*.bin ./output/ || echo "No Images Found"
       
     - name: Upload Artifact
       uses: actions/upload-artifact@main
       with:
-        name: SL3000-EMMC-Fixed-Build
+        name: SL3000-Recovery-Firmware
         path: ./output/*.bin
