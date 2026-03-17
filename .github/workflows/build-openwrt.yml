@@ -1,58 +1,50 @@
-name: SL3000 Recovery Build
+name: SL3000-Physical-Recovery-Build
 
 on:
-  repository_dispatch:
   workflow_dispatch:
-
-env:
-  REPO_URL: https://github.com/ykm888/66.git
-  REPO_BRANCH: sl3000-clean-source
-  CONFIG_FILE: 888/mt7981_sl3000_nor_defconfig # 你的配置路径
-  DIY_P2_SH: diy-part2.sh
 
 jobs:
   build:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: Checkout Action Repo
-      uses: actions/checkout@v4
+      - name: Checkout Master Repo
+        uses: actions/checkout@v4
+        with:
+          path: master-repo  # 将主控仓库放在独立目录
 
-    - name: Prepare Environment
-      run: |
-        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-        sudo -E apt-get -qq update
-        sudo -E apt-get -qq install $(curl -fsSL https://is.gd/depends_ubuntu_2204)
-        sudo -E apt-get -qq autoremove --purge
-        sudo -E apt-get -qq clean
+      - name: Clone Source Code
+        run: |
+          # 克隆底层源码仓库 2410 分支
+          git clone --depth 1 https://github.com/ykm888/66.git -b 2410 openwrt
 
-    - name: Clone Source Code
-      run: |
-        git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
+      - name: Physical Move Assets
+        run: |
+          # 1. 搬运配置文件 (严格遵守不自动创建逻辑)
+          cp master-repo/888/sl3000.config openwrt/.config
+          # 2. 搬运脚本到根目录以便执行
+          cp master-repo/diy-part2.sh .
+          chmod +x diy-part2.sh
 
-    - name: Load Custom Configuration
-      run: |
-        [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
+      - name: Execute Physical Alignment
+        run: |
+          # 运行自愈脚本，内部会自动进入 openwrt 目录
+          ./diy-part2.sh
 
-    - name: Execute Physical Alignment (DIY Part 2)
-      run: |
-        chmod +x $DIY_P2_SH
-        ./$DIY_P2_SH
+      - name: Run defconfig
+        working-directory: ./openwrt
+        run: |
+          # 物理锁定：将种子 config 展开为完整配置
+          make defconfig
 
-    - name: Download Packages
-      working-directory: ./openwrt
-      run: |
-        make defconfig
-        make download -j8
+      - name: Compile Firmware
+        working-directory: ./openwrt
+        run: |
+          # 执行物理编译
+          make -j$(nproc) || make -j1 V=s
 
-    - name: Compile Firmware
-      working-directory: ./openwrt
-      run: |
-        echo -e "$(nproc) thread compile"
-        make -j$(nproc) || make -j1 || make -j1 V=s
-
-    - name: Upload Artifacts
-      uses: actions/checkout@v4
-      with:
-        name: SL3000-Recovery-Firmware
-        path: openwrt/bin/targets/mediatek/filogic/
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SL3000-Recovery-Image
+          path: openwrt/bin/targets/mediatek/filogic/*.bin
