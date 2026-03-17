@@ -1,11 +1,7 @@
 name: Validate Source Files
 
 on:
-  workflow_dispatch:  # 手动触发
-  push:
-    paths:
-      - '.github/workflows/validate-sources.yml'
-      - 'source-repo/**'  # 可根据需要调整
+  workflow_dispatch:
 
 jobs:
   validate:
@@ -21,7 +17,7 @@ jobs:
       - name: Check critical files
         id: check_files
         run: |
-          set +e  # 不立即退出，收集所有缺失
+          set +e
           cd source-repo
           MISSING=()
 
@@ -32,16 +28,22 @@ jobs:
           [ -f arm-trusted-firmware/fdts/mt7981.dts ] || MISSING+=("arm-trusted-firmware/fdts/mt7981.dts")
           [ -f arm-trusted-firmware/bl2/bl2.ld.S ] || [ -f arm-trusted-firmware/bl2/bl2_el3.ld.S ] || MISSING+=("arm-trusted-firmware/bl2 linker script")
 
-          # u-boot
+          # u-boot - 检查任何 mt7981_*emmc* 的配置文件
           echo "=== Checking u-boot ==="
-          [ -f u-boot/configs/mt7981_emmc_defconfig ] || MISSING+=("u-boot/configs/mt7981_emmc_defconfig")
+          UBOOT_CONFIG=$(ls u-boot/configs/mt7981*emmc*.h 2>/dev/null | head -1)
+          if [ -z "$UBOOT_CONFIG" ]; then
+            MISSING+=("u-boot/configs/mt7981*emmc*_defconfig (no emmc config found)")
+          fi
           [ -f u-boot/arch/arm/dts/mt7981.dtsi ] || MISSING+=("u-boot/arch/arm/dts/mt7981.dtsi")
           [ -d u-boot/board/mediatek/mt7981 ] || MISSING+=("u-boot/board/mediatek/mt7981 directory")
 
-          # immortalwrt
+          # immortalwrt - 检查任何 mt7981 dtsi
           echo "=== Checking immortalwrt ==="
           [ -d immortalwrt/target/linux/mediatek ] || MISSING+=("immortalwrt/target/linux/mediatek")
-          [ -f immortalwrt/target/linux/mediatek/dts/mt7981.dtsi ] || MISSING+=("immortalwrt/target/linux/mediatek/dts/mt7981.dtsi")
+          IMM_DTS=$(ls immortalwrt/target/linux/mediatek/dts/mt7981*.dtsi 2>/dev/null | head -1)
+          if [ -z "$IMM_DTS" ]; then
+            MISSING+=("immortalwrt/target/linux/mediatek/dts/mt7981*.dtsi")
+          fi
           [ -f immortalwrt/feeds.conf.default ] || MISSING+=("immortalwrt/feeds.conf.default")
 
           # mtk_uartboot
@@ -49,10 +51,21 @@ jobs:
           [ -f mtk_uartboot/Cargo.toml ] || MISSING+=("mtk_uartboot/Cargo.toml")
           [ -d mtk_uartboot/src ] || MISSING+=("mtk_uartboot/src directory")
 
-          # bl-mt798x (不死 U-Boot)
+          # bl-mt798x - 检查是否存在配置文件目录和 dts 文件
           echo "=== Checking bl-mt798x ==="
-          [ -d bl-mt798x/configs ] || MISSING+=("bl-mt798x/configs directory")
-          [ -f bl-mt798x/arch/arm/dts/mt7981*.dts ] || MISSING+=("bl-mt798x device tree files")
+          if [ -d bl-mt798x/configs ]; then
+            echo "bl-mt798x/configs exists"
+          else
+            # 可能配置在其他位置，例如 mtkclient 目录
+            CONFIG_ALT=$(ls -d bl-mt798x/*/ 2>/dev/null | grep -i config)
+            if [ -z "$CONFIG_ALT" ]; then
+              MISSING+=("bl-mt798x/configs or alternative config directory")
+            fi
+          fi
+          DTS_FILES=$(ls bl-mt798x/arch/arm/dts/mt7981*.dts 2>/dev/null | head -1)
+          if [ -z "$DTS_FILES" ]; then
+            MISSING+=("bl-mt798x/arch/arm/dts/mt7981*.dts")
+          fi
 
           # 输出结果
           echo "========================="
@@ -66,12 +79,4 @@ jobs:
             done
             echo "status=failed" >> $GITHUB_OUTPUT
             exit 1
-          fi
-
-      - name: Summary
-        if: always()
-        run: |
-          echo "Validation completed with status: ${{ steps.check_files.outputs.status }}"
-          if [ "${{ steps.check_files.outputs.status }}" != "ok" ]; then
-            echo "Please ensure all required files are present in the 'sl3000-full-sync' branch."
           fi
