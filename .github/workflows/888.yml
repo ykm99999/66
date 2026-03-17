@@ -1,9 +1,9 @@
 name: Sync ImmortalWrt & Bootloader for SL3000
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:        # 手动触发
   # schedule:
-    # - cron: '0 20 * * 0'
+  #   - cron: '0 20 * * 0'  # 如果需要定时同步可取消注释
 
 env:
   GH_USER: ${{ github.repository_owner }}
@@ -27,13 +27,14 @@ jobs:
           git config --global user.email "actions@github.com"
           git config --global user.name "GitHub Actions"
 
-      - name: Create branch for SL3000 (ImmortalWrt)
+      - name: Create or switch to branch
         run: |
           BRANCH_NAME="sl3000-immortalwrt-sync"
           git checkout -b $BRANCH_NAME || git checkout $BRANCH_NAME
           git pull origin $BRANCH_NAME || echo "New branch"
 
-      - name: Add ImmortalWrt as remote and sync
+      # ---------- ImmortalWrt ----------
+      - name: Add ImmortalWrt remote and sync
         run: |
           git remote add upstream-immortalwrt https://github.com/immortalwrt/immortalwrt.git
           git fetch upstream-immortalwrt master:immortalwrt-master --depth=1
@@ -42,74 +43,77 @@ jobs:
           git add source/immortalwrt
           git commit -m "Sync: ImmortalWrt master ($(date +'%Y-%m-%d'))" || echo "No changes"
 
-      - name: Add ATF (Arm Trusted Firmware) source
+      # ---------- ATF (Arm Trusted Firmware) ----------
+      - name: Add ATF remote and sync
         run: |
           git remote add upstream-atf https://github.com/mtk-openwrt/arm-trusted-firmware.git
-          git fetch upstream-atf master:atf-master --depth=1
+          git fetch upstream-atf mtksoc-20230719:atf-master --depth=1
           mkdir -p source/arm-trusted-firmware
           git read-tree --prefix=source/arm-trusted-firmware/ -u atf-master
           git add source/arm-trusted-firmware
-          git commit -m "Sync: ATF (MediaTek) $(date +'%Y-%m-%d')" || echo "No changes"
+          git commit -m "Sync: ATF (branch mtksoc-20230719) $(date +'%Y-%m-%d')" || echo "No changes"
 
-      - name: Add U-Boot source (修正版)
+      # ---------- U-Boot ----------
+      - name: Add U-Boot remote and sync
         run: |
           git remote add upstream-uboot https://github.com/mtk-openwrt/u-boot.git
-          git fetch upstream-uboot mtk-openwrt-2022.07:uboot-mtk --depth=1
+          git fetch upstream-uboot mtksoc-20250212:uboot-mtk --depth=1
           mkdir -p source/u-boot-mtk
           git read-tree --prefix=source/u-boot-mtk/ -u uboot-mtk
           git add source/u-boot-mtk
-          git commit -m "Sync: U-Boot MTK $(date +'%Y-%m-%d')" || echo "No changes"
+          git commit -m "Sync: U-Boot (branch mtksoc-20250212) $(date +'%Y-%m-%d')" || echo "No changes"
 
-      - name: Generate SL3000 Hardware Configuration
+      # ---------- 硬件配置与救砖文档（永久记录，禁用EOF）----------
+      - name: Generate SL3000 Hardware Configuration (no heredoc)
         run: |
           mkdir -p device/sl3000
-          cat > device/sl3000/README.md << EOF
-          # 司络 SL3000 救砖与编译配置
 
-          ## 硬件参数（永久记录）
-          - **SoC**: MediaTek MT7981B (Filogic 820)
-          - **WiFi**: MT7976CN (DBDC)
-          - **RAM**: 1GB DDR4 (型号: P3A8GL4MLF-GJN)
-          - **eMMC**: 128GB (型号: HSEMSDS7D2B128G)
-          - **SPI NOR**: 32MB (型号: 25Q256FSSIG)
+          # 写入 README.md (逐行 echo，禁用 EOF)
+          echo "# 司络 SL3000 救砖与编译配置" > device/sl3000/README.md
+          echo "" >> device/sl3000/README.md
+          echo "## 硬件参数（永久记录）" >> device/sl3000/README.md
+          echo "- **SoC**: MediaTek MT7981B (Filogic 820)" >> device/sl3000/README.md
+          echo "- **WiFi**: MT7976CN (DBDC)" >> device/sl3000/README.md
+          echo "- **RAM**: 1GB DDR4 (型号: P3A8GL4MLF-GJN)" >> device/sl3000/README.md
+          echo "- **eMMC**: 128GB (型号: HSEMSDS7D2B128G)" >> device/sl3000/README.md
+          echo "- **SPI NOR**: 32MB (型号: 25Q256FSSIG)" >> device/sl3000/README.md
+          echo "" >> device/sl3000/README.md
+          echo "## 🔥 救砖关键步骤（已验证）" >> device/sl3000/README.md
+          echo "此设备需注意内存初始化时序，救砖时务必按以下顺序操作：" >> device/sl3000/README.md
+          echo "" >> device/sl3000/README.md
+          echo "1. **内存降容救砖**：使用512MB内存配置的BL2引导（\`bl2-512m.bin\`）" >> device/sl3000/README.md
+          echo "2. **恢复1GB运行内存**：救砖成功后刷入正常1GB固件" >> device/sl3000/README.md
+          echo "" >> device/sl3000/README.md
+          echo "## 分区布局" >> device/sl3000/README.md
+          echo "- **SPI NOR (32MB)**: BL2, FIP, Factory (ART)" >> device/sl3000/README.md
+          echo "- **eMMC**: kernel, rootfs, rootfs_data, 用户存储" >> device/sl3000/README.md
+          echo "" >> device/sl3000/README.md
+          echo "## U-Boot 编译参数" >> device/sl3000/README.md
+          echo '```make' >> device/sl3000/README.md
+          echo "make mt7981_sl3000_emmc_defconfig" >> device/sl3000/README.md
+          echo '```' >> device/sl3000/README.md
+          echo "" >> device/sl3000/README.md
+          echo "## ATF 编译参数" >> device/sl3000/README.md
+          echo '```bash' >> device/sl3000/README.md
+          echo "# 512MB 救砖版" >> device/sl3000/README.md
+          echo "make PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=512" >> device/sl3000/README.md
+          echo "" >> device/sl3000/README.md
+          echo "# 1GB 正常版" >> device/sl3000/README.md
+          echo "make PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=1024" >> device/sl3000/README.md
+          echo '```' >> device/sl3000/README.md
 
-          ## 🔥 救砖关键步骤（已验证）
-          此设备需注意内存初始化时序，救砖时务必按以下顺序操作：
-
-          1. **内存降容救砖**：使用512MB内存配置的BL2引导（`bl2-512m.bin`）
-          2. **恢复1GB运行内存**：救砖成功后刷入正常1GB固件
-
-          ## 分区布局
-          - **SPI NOR (32MB)**: BL2, FIP, Factory (ART)
-          - **eMMC**: kernel, rootfs, rootfs_data, 用户存储
-
-          ## U-Boot 编译参数
-          \`\`\`make
-          make mt7981_sl3000_emmc_defconfig
-          \`\`\`
-
-          ## ATF 编译参数
-          \`\`\`bash
-          # 512MB 救砖版
-          make PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=512
-
-          # 1GB 正常版
-          make PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=1024
-          \`\`\`
-          EOF
-
-          cat > device/sl3000/config.seed << EOF
-          CONFIG_TARGET_mediatek=y
-          CONFIG_TARGET_mediatek_filogic=y
-          CONFIG_TARGET_mediatek_filogic_Device_sl3000=y
-          CONFIG_MTK_NAND_EMC=y
-          CONFIG_PACKAGE_kmod-mt7915e=y
-          CONFIG_DRAM_SIZE=1024
-          EOF
+          # 写入 config.seed
+          echo "CONFIG_TARGET_mediatek=y" > device/sl3000/config.seed
+          echo "CONFIG_TARGET_mediatek_filogic=y" >> device/sl3000/config.seed
+          echo "CONFIG_TARGET_mediatek_filogic_Device_sl3000=y" >> device/sl3000/config.seed
+          echo "CONFIG_MTK_NAND_EMC=y" >> device/sl3000/config.seed
+          echo "CONFIG_PACKAGE_kmod-mt7915e=y" >> device/sl3000/config.seed
+          echo "CONFIG_DRAM_SIZE=1024" >> device/sl3000/config.seed
 
           git add device/sl3000
           git commit -m "docs: add SL3000 permanent hardware config and rescue guide" || echo "Config exists"
 
+      # ---------- 推送至你的仓库 ----------
       - name: Push to your repository
         run: |
           BRANCH_NAME="sl3000-immortalwrt-sync"
