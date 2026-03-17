@@ -1,4 +1,4 @@
-name: SL3000-Recovery-Final-V14
+name: SL3000-Recovery-V15-Final
 
 on:
   workflow_dispatch:
@@ -18,58 +18,55 @@ jobs:
 
     - name: Clone Source
       run: |
-        # 物理克隆到底层目录 openwrt
+        # 物理克隆：源码及 sl3000.config 均进入 openwrt 目录
         git clone https://github.com/ykm888/66 -b 2410 openwrt
 
-    - name: Load Config & Physical Apply
+    - name: Load Config & Physical Force-Apply
       run: |
         cd openwrt
-        # --- 核心：物理定位 sl3000.config ---
+        # --- 物理修正：在当前 openwrt 目录下寻找 sl3000.config ---
         if [ -f "sl3000.config" ]; then
-            echo "物理校准：定位成功，开始应用配置..."
-            # 1. 物理格式化配置
+            echo "物理校准：已定位到 sl3000.config"
+            # 1. 清理换行符污染
             sed -i 's/\r$//' sl3000.config
-            # 2. 物理强制锁定目标架构 (置顶)
+            # 2. 物理重置 .config 并强行注入 ARM 架构标识
+            # 使用 > 符号彻底抹除旧的 x86 记忆
             echo "CONFIG_TARGET_mediatek=y" > .config
             echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
             echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
-            # 3. 合并原始种子配置内容
+            # 3. 追加你原有的种子配置
             cat sl3000.config >> .config
         else
-            echo "物理致命错误：在 /workdir/openwrt/ 路径下未找到 sl3000.config！"
-            ls -F
+            echo "物理致命错误：sl3000.config 不在 openwrt 目录中！"
+            ls -F # 列出当前目录供回溯
             exit 1
         fi
         
-        # 执行脚本 (脚本在 openwrt 的父目录)
+        # 4. 执行零件对齐脚本 (脚本在 openwrt 的父目录)
         chmod +x ../diy-part2.sh
         ../diy-part2.sh
         
-        # 物理生成完整编译链
+        # 5. 物理生成全量编译配置
         make defconfig
 
     - name: Build Toolchain
       run: |
         cd openwrt
-        # 必须先物理构建 ARM 工具链，解决 ld-musl 缺失问题
+        # 必须先构建 ARM 交叉编译环境，防止 cp ld-musl 报错
         make tools/install -j$(nproc)
         make toolchain/install -j$(nproc)
 
-    - name: Compile Components
+    - name: Compile
       run: |
         cd openwrt
-        echo "物理编译：ATF 零件..."
+        # 精准物理编译引导零件
         make package/boot/arm-trusted-firmware-mediatek/compile V=s -j1
-        echo "物理编译：U-Boot 零件..."
         make package/boot/uboot-mediatek/compile V=s -j1
-        # 全局编译
+        # 全局编译 (如果熔断，开启单核日志模式)
         make -j$(nproc) || make -j1 V=s
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: SL3000-Recovery-V14
-        path: |
-          openwrt/bin/targets/mediatek/filogic/*bl2.img
-          openwrt/bin/targets/mediatek/filogic/*u-boot.fip
-          openwrt/bin/targets/mediatek/filogic/*factory.bin
+        name: SL3000-V15-Recovery-Bin
+        path: openwrt/bin/targets/mediatek/filogic/*
