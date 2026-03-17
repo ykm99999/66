@@ -1,4 +1,4 @@
-name: SL3000-Recovery-V16-Final
+name: SL3000-V1-Physical-Return
 
 on:
   workflow_dispatch:
@@ -16,49 +16,47 @@ jobs:
         sudo -E apt-get -qq install $(curl -fsSL https://is.gd/depends_ubuntu_2204)
         sudo timedatectl set-timezone "Asia/Shanghai"
 
-    - name: Clone Source
+    - name: Clone OpenWrt Source
       run: |
-        # 物理克隆 ykm888/66 到底层目录 openwrt
-        git clone https://github.com/ykm888/66 -b 2410 openwrt
+        # 物理克隆 ykm888/66 的 2410 分支
+        git clone --depth 1 https://github.com/ykm888/66 -b 2410 openwrt
 
-    - name: Load Config From 888 Directory
+    - name: Load Config & Force Architecture
       run: |
-        cd openwrt
-        # --- 物理绝对定位：指定 888/sl3000.config ---
-        if [ -f "888/sl3000.config" ]; then
-            echo "物理校准：已定位到 888/sl3000.config，开始强行应用..."
-            # 1. 物理清洗
-            sed -i 's/\r$//' 888/sl3000.config
-            # 2. 物理重置并注入架构标识 (单箭头覆盖旧记忆)
-            echo "CONFIG_TARGET_mediatek=y" > .config
-            echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-            echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
-            # 3. 物理合并
-            cat 888/sl3000.config >> .config
+        # 1. 物理检查根目录下的种子配置
+        if [ -f "sl3000.config" ]; then
+            echo "物理校准：发现根目录配置，开始注入..."
+            sed -i 's/\r$//' sl3000.config
+            
+            # 2. 物理锁定：强制置顶目标架构 (单箭头 > 杀死 x86 记忆)
+            echo "CONFIG_TARGET_mediatek=y" > openwrt/.config
+            echo "CONFIG_TARGET_mediatek_filogic=y" >> openwrt/.config
+            echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> openwrt/.config
+            
+            # 3. 追加配置内容
+            cat sl3000.config >> openwrt/.config
         else
-            echo "物理致命错误：文件不在 openwrt/888/sl3000.config！"
-            echo "当前目录下的 888 文件夹内容："
-            ls -R 888/ || echo "888 文件夹根本不存在！"
+            echo "物理致命错误：根目录下未发现 sl3000.config！"
+            ls -F
             exit 1
         fi
-        
-        # 执行脚本 (脚本在 openwrt 的父目录)
-        chmod +x ../diy-part2.sh
-        ../diy-part2.sh
-        
-        make defconfig
+
+    - name: Run DIY Scripts
+      run: |
+        chmod +x diy-part2.sh
+        ./diy-part2.sh
 
     - name: Build Toolchain
       run: |
         cd openwrt
-        # 物理构建 ARM 交叉编译环境
+        make defconfig
         make tools/install -j$(nproc)
         make toolchain/install -j$(nproc)
 
     - name: Compile Components
       run: |
         cd openwrt
-        # 物理精准打击
+        # 物理精准打击救砖零件
         make package/boot/arm-trusted-firmware-mediatek/compile V=s -j1
         make package/boot/uboot-mediatek/compile V=s -j1
         make -j$(nproc) || make -j1 V=s
@@ -66,5 +64,5 @@ jobs:
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: SL3000-V16-Binaries
+        name: SL3000-V1-Recovery
         path: openwrt/bin/targets/mediatek/filogic/*
