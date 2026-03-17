@@ -9,10 +9,18 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout code
+      - name: Checkout config branch (main)
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          ref: main
+          path: config-repo
+
+      - name: Checkout source branch (sl3000-full-sync)
+        uses: actions/checkout@v4
+        with:
+          repository: ykm99999/66
+          ref: sl3000-full-sync
+          path: source-repo
 
       - name: Install basic dependencies
         run: |
