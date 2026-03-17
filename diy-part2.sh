@@ -1,69 +1,55 @@
 #!/bin/bash
 # ---------------------------------------------------------
-# 物理执行三准则：SL3000 全链路自愈脚本 (禁用 EOF + 强制依赖补全)
+# 物理执行三准则：SL3000 子目录物理重构脚本 (V10.0 终极版)
+# 针对：u-boot/atf 位于子目录 + 禁用 EOF + 零件 ID 注入
 # ---------------------------------------------------------
 
 # 1. 物理位置纠偏
 [ -d "openwrt" ] && cd openwrt || { echo "物理断链"; exit 1; }
 
-echo "开始执行像素级依赖重构..."
+echo "开始物理级依赖重构与子目录适配..."
 
-# 2. 物理重构 ATF Makefile (核心修复：确保 ATF 零件名与 U-Boot 请求一致)
+# 2. 物理修复 ATF Makefile 逻辑
 ATF_MK="package/boot/arm-trusted-firmware-mediatek/Makefile"
 if [ -f "$ATF_MK" ]; then
-    echo "物理强制补全 ATF 编译目标..."
-    # 锁定分支
+    echo "重定向 ATF 源码源并锁定 ID..."
+    # 锁定物理仓库和分支
+    sed -i 's|PKG_SOURCE_URL:=.*|PKG_SOURCE_URL:=https://github.com/ykm888/66.git|g' "$ATF_MK"
     sed -i 's/PKG_SOURCE_VERSION:=.*/PKG_SOURCE_VERSION:=sl3000-clean-source/g' "$ATF_MK"
-    # 强制物理注入 ATF 设备定义 (针对 sl_3000-emmc)
-    # 先清理可能存在的冲突定义
-    sed -i '/define Device\/mt7981-sl_3000-emmc/,/endef/d' "$ATF_MK"
-    sed -i '/TARGET_DEVICES += mt7981-sl_3000-emmc/d' "$ATF_MK"
     
-    # 物理追加 ATF 目标，确保 U-Boot 能找到这个依赖
+    # 物理注入：在编译解压后，强制进入 atf 子目录执行（或将内容移出）
+    # 这里我们通过修改构建指令，确保编译器在 atf/ 目录下寻找 Makefile
+    sed -i 's/HOST_BUILD_DIR)/HOST_BUILD_DIR)\/atf/g' "$ATF_MK"
+    
+    # 物理注入零件 ID 定义，解决“依赖不存在”报错
+    sed -i '/define Device\/mt7981-sl_3000-emmc/,/endef/d' "$ATF_MK"
     echo "define Device/mt7981-sl_3000-emmc" >> "$ATF_MK"
     echo "  NAME := SL-3000 (eMMC)" >> "$ATF_MK"
     echo "  DEVICE_DTS := mt7981-sl-3000-emmc" >> "$ATF_MK"
     echo "endef" >> "$ATF_MK"
     echo "TARGET_DEVICES += mt7981-sl_3000-emmc" >> "$ATF_MK"
-    
-    # 修复缩进
     sed -i 's/^[[:space:]]\+/\t/g' "$ATF_MK"
 fi
 
-# 3. 物理重构 U-Boot Makefile
+# 3. 物理修复 U-Boot Makefile 逻辑
 UBOOT_MK="package/boot/uboot-mediatek/Makefile"
 if [ -f "$UBOOT_MK" ]; then
-    echo "物理对齐 U-Boot 零件名称..."
+    echo "重定向 U-Boot 源码源并适配子目录..."
+    sed -i 's|PKG_SOURCE_URL:=.*|PKG_SOURCE_URL:=https://github.com/ykm888/66.git|g' "$UBOOT_MK"
     sed -i 's/PKG_SOURCE_VERSION:=.*/PKG_SOURCE_VERSION:=sl3000-clean-source/g' "$UBOOT_MK"
-    # 确保 U-Boot 请求的 ATF 依赖名与上面 ATF 定义的完全一致
+    
+    # 物理注入：让 U-Boot 构建进入 u-boot 子目录
+    sed -i 's/BUILD_DIR)/BUILD_DIR)\/u-boot/g' "$UBOOT_MK"
+    
+    # 物理对齐零件 ID 请求
     sed -i 's/sl3000-emmc/sl_3000-emmc/g' "$UBOOT_MK"
     sed -i 's/mt7981_sl3000_emmc/mt7981_sl-3000-emmc/g' "$UBOOT_MK"
     sed -i 's/^[[:space:]]\+/\t/g' "$UBOOT_MK"
 fi
 
-# 4. 物理注入 mt7981.mk 镜像定义
-IMAGE_MK="target/linux/mediatek/image/mt7981.mk"
-if [ -f "$IMAGE_MK" ]; then
-    echo "注入镜像生成链..."
-    sed -i '/define Device\/sl_3000-emmc/,/endef/d' "$IMAGE_MK"
-    echo "define Device/sl_3000-emmc" >> "$IMAGE_MK"
-    echo "  DEVICE_VENDOR := SL" >> "$IMAGE_MK"
-    echo "  DEVICE_MODEL := 3000 eMMC" >> "$IMAGE_MK"
-    echo "  DEVICE_DTS := mt7981-sl-3000-emmc" >> "$IMAGE_MK"
-    echo "  SUPPORTED_DEVICES := sl,3000-emmc" >> "$IMAGE_MK"
-    echo "  DEVICE_PACKAGES := \$(MT7981_USB_PKGS) f2fsck losetup mkf2fs kmod-fs-f2fs kmod-mmc" >> "$IMAGE_MK"
-    echo "  KERNEL_SIZE := 10240k" >> "$IMAGE_MK"
-    echo "  IMAGES := sysupgrade.bin factory.bin" >> "$IMAGE_MK"
-    echo "  IMAGE/factory.bin := append-kernel | pad-to \$\$(KERNEL_SIZE) | append-rootfs | pad-to 128M | check-size" >> "$IMAGE_MK"
-    echo "  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata" >> "$IMAGE_MK"
-    echo "  UBOOT_DEVICE_NAME := mt7981_sl_3000_emmc" >> "$IMAGE_MK"
-    echo "endef" >> "$IMAGE_MK"
-    echo "TARGET_DEVICES += sl_3000-emmc" >> "$IMAGE_MK"
-fi
-
-# 5. 强制物理刷新 Feeds
+# 4. 物理清理 Feeds 并强制重置索引
 rm -rf tmp
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-echo "依赖补全完成。现在开始生成 config。"
+echo "自愈完成。已锁定零件 ID 并适配仓库子目录结构。"
