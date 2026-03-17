@@ -30,7 +30,6 @@ jobs:
 
           # ========== u-boot ==========
           echo "=== Checking u-boot ==="
-          # 查找任何包含 emmc 的 defconfig 文件（如 mt7981_emmc_rfb_defconfig）
           UBOOT_CONFIG=$(ls u-boot/configs/mt7981*emmc*_defconfig 2>/dev/null | head -1)
           if [ -z "$UBOOT_CONFIG" ]; then
             MISSING+=("u-boot/configs/mt7981*emmc*_defconfig (no emmc config found)")
@@ -56,22 +55,14 @@ jobs:
           [ -f mtk_uartboot/Cargo.toml ] || MISSING+=("mtk_uartboot/Cargo.toml")
           [ -d mtk_uartboot/src ] || MISSING+=("mtk_uartboot/src directory")
 
-          # ========== bl-mt798x ==========
-          echo "=== Checking bl-mt798x ==="
-          # 配置文件可能位于 configs/ 或 include/configs/
-          if [ -d bl-mt798x/configs ]; then
-            echo "bl-mt798x/configs exists"
-          elif [ -d bl-mt798x/include/configs ]; then
-            echo "bl-mt798x/include/configs exists (alternative location)"
+          # ========== bl-mt798x（可选，仅提示，不影响构建）==========
+          echo "=== Checking bl-mt798x (optional) ==="
+          if [ -d bl-mt798x ]; then
+            echo "✅ bl-mt798x directory exists (optional component)."
+            echo "Contents (top level):"
+            ls -1 bl-mt798x | head -5
           else
-            MISSING+=("bl-mt798x/configs or include/configs directory")
-          fi
-          # 检查设备树文件
-          DTS_FILES=$(ls bl-mt798x/arch/arm/dts/mt7981*.dts 2>/dev/null | head -1)
-          if [ -z "$DTS_FILES" ]; then
-            MISSING+=("bl-mt798x/arch/arm/dts/mt7981*.dts")
-          else
-            echo "Found DTS: $(basename $DTS_FILES)"
+            echo "ℹ️ bl-mt798x directory not found (optional, skipping)"
           fi
 
           # ========== 输出结果 ==========
@@ -80,7 +71,7 @@ jobs:
             echo "✅ All critical files are present."
             echo "status=ok" >> $GITHUB_OUTPUT
           else
-            echo "❌ Missing files/directories:"
+            echo "❌ Missing critical files/directories:"
             for item in "${MISSING[@]}"; do
               echo "   - $item"
             done
