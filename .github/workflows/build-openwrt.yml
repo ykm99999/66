@@ -1,4 +1,4 @@
-name: Build SL3000 Recovery V9
+name: SL3000-Physical-Recovery-V2026
 
 on:
   workflow_dispatch:
@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: Checkout Actions Repo
+    - name: Checkout
       uses: actions/checkout@v4
 
     - name: Initialization Environment
@@ -29,7 +29,7 @@ jobs:
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
 
-    - name: Clone Custom Source
+    - name: Clone Source
       working-directory: /workdir
       run: |
         git clone $REPO_URL -b $REPO_BRANCH openwrt
@@ -41,48 +41,51 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: Load Custom Configuration
+    - name: Load Config & Physical Reset
       run: |
         [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
         chmod +x $DIY_P2_SH
         cd openwrt
+        # 物理注入 SL3000 定义
         $GITHUB_WORKSPACE/$DIY_P2_SH
         
-        echo "=== 物理审计：Makefile 二进制结构 (期待看到 ^I) ==="
-        cat -A package/boot/arm-trusted-firmware-mediatek/Makefile | head -n 50
+        # --- 物理架构重置 (彻底解决 x86 残留) ---
+        rm -rf staging_dir/target-x86_64* build_dir/target-x86_64*
+        rm -rf staging_dir/toolchain-x86_64* build_dir/toolchain-x86_64*
         
+        # 强制同步配置
         make defconfig
 
-    - name: Download Package
+    - name: Compile Toolchain (Physics First)
       run: |
         cd openwrt
-        make download -j8
-        find dl -size -1024c -exec rm -f {} \;
+        echo "物理构建：AArch64 工具链..."
+        make tools/install -j$(nproc) || make tools/install -j1 V=s
+        make toolchain/install -j$(nproc) || make toolchain/install -j1 V=s
 
-    - name: Compile the Firmware
+    - name: Compile SL3000 Components
       run: |
         cd openwrt
-        echo "物理编译：ATF 引导零件..."
-        # 强制单线程编译以捕捉物理报错位置
+        echo "物理构建：ATF & U-Boot..."
         make package/boot/arm-trusted-firmware-mediatek/compile V=s -j1
-        
-        echo "物理编译：U-Boot 引导零件..."
         make package/boot/uboot-mediatek/compile V=s -j1
-        
-        echo "物理编译：完整固件..."
+
+    - name: Final Global Build
+      run: |
+        cd openwrt
         make -j$(nproc) || make -j1 V=s
 
-    - name: Organize Files
-      if: success()
+    - name: Organize Artifacts
       run: |
         cd openwrt/bin/targets/mediatek/filogic
         mkdir -p $GITHUB_WORKSPACE/release
-        cp *sl_3000*factory.bin $GITHUB_WORKSPACE/release/ 2>/dev/null || true
-        cp *bl2.img $GITHUB_WORKSPACE/release/ 2>/dev/null || true
-        cp *u-boot.fip $GITHUB_WORKSPACE/release/ 2>/dev/null || true
+        # 物理提取救砖零件
+        cp *sl_3000* $GITHUB_WORKSPACE/release/ || true
+        cp *bl2.img $GITHUB_WORKSPACE/release/ || true
+        cp *u-boot.fip $GITHUB_WORKSPACE/release/ || true
 
-    - name: Upload Artifacts
+    - name: Upload
       uses: actions/upload-artifact@v4
       with:
-        name: SL3000-V9-Recovery
+        name: SL3000-Final-Recovery
         path: release/*
