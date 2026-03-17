@@ -1,54 +1,79 @@
 #!/bin/bash
-# ---------------------------------------------------------
-# 物理执行三准则：SL3000 路径平铺与环境净化脚本 (V22.0)
-# ---------------------------------------------------------
+set -e
 
-echo "开始执行物理级净化与源码空间重构..."
+WORKSPACE="$GITHUB_WORKSPACE"
+SOURCE_DIR="$WORKSPACE/source-repo"
+CONFIG_DIR="$WORKSPACE/main-repo/888"
+OUTPUT_DIR="$WORKSPACE/output"
 
-# 1. 【物理净化】强制抹除 .config 中的 CCACHE 痕迹 (彻底解决编译器找不到报错)
-# 这一步会物理扫描并删除所有 CCACHE 相关的配置行，确保编译器走 /usr/bin/gcc
-sed -i '/CONFIG_CCACHE/d' .config
-echo "# CONFIG_CCACHE is not set" >> .config
-echo "CONFIG_CCACHE=n" >> .config
+mkdir -p $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware
 
-# 2. 补齐物理工具软链接 (防止 flex 执行 m4 失败)
-sudo ln -sf /usr/bin/m4 /usr/local/bin/m4 2>/dev/null || true
+export CROSS_COMPILE=aarch64-linux-gnu-
+export ARCH=arm64
 
-# 3. 彻底重构 ATF Makefile (对齐种子配置里的 mt7981-sl3000-emmc)
-ATF_MK="package/boot/arm-trusted-firmware-mediatek/Makefile"
-if [ -f "$ATF_MK" ]; then
-    echo "物理重写 ATF 构建逻辑..."
-    sed -i 's|PKG_SOURCE_URL:=.*|PKG_SOURCE_URL:=https://github.com/ykm888/66.git|g' "$ATF_MK"
-    sed -i 's/PKG_SOURCE_VERSION:=.*/PKG_SOURCE_VERSION:=sl3000-clean-source/g' "$ATF_MK"
-    # 物理平铺：在 Build/Prepare 阶段将子目录 atf/ 内容翻到根目录
-    sed -i '/define Build\/Prepare/a \	mv $(PKG_BUILD_DIR)/atf/* $(PKG_BUILD_DIR)/' "$ATF_MK"
-    
-    # 物理注入零件 ID 定义 (确保与 config 里的 sl3000-emmc 像素级匹配)
-    sed -i '/define Device\/mt7981-sl3000-emmc/,/endef/d' "$ATF_MK"
-    echo "define Device/mt7981-sl3000-emmc" >> "$ATF_MK"
-    echo "  NAME := SL-3000 (eMMC)" >> "$ATF_MK"
-    echo "  DEVICE_DTS := mt7981-sl-3000-emmc" >> "$ATF_MK"
-    echo "endef" >> "$ATF_MK"
-    echo "TARGET_DEVICES += mt7981-sl3000-emmc" >> "$ATF_MK"
-    sed -i 's/^[[:space:]]\+/\t/g' "$ATF_MK"
+# ========== 1. 编译 ATF (使用动态查找) ==========
+echo "=== Building ATF 512M ==="
+cd $SOURCE_DIR/arm-trusted-firmware
+make clean
+make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=512
+
+# 动态查找 bl2 文件
+find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-512m.bin \; 2>/dev/null || true
+find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-512m.elf \; 2>/dev/null || true
+
+make clean
+make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=1024
+
+find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-1g.bin \; 2>/dev/null || true
+find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-1g.elf \; 2>/dev/null || true
+
+# ========== 2. 编译 U-Boot ==========
+echo "=== Building U-Boot ==="
+cd $SOURCE_DIR/u-boot
+make clean
+
+# 优先使用 mt7981_emmc_rfb_defconfig，如果没有则尝试其他 emmc 配置
+if [ -f configs/mt7981_emmc_rfb_defconfig ]; then
+    make CROSS_COMPILE=aarch64-linux-gnu- mt7981_emmc_rfb_defconfig
+elif [ -f configs/mt7981_emmc_defconfig ]; then
+    make CROSS_COMPILE=aarch64-linux-gnu- mt7981_emmc_defconfig
+else
+    # 尝试找到任何包含 emmc 的 mt7981 配置
+    EMMC_CONFIG=$(ls configs/mt7981*emmc*_defconfig 2>/dev/null | head -1)
+    if [ -n "$EMMC_CONFIG" ]; then
+        CONFIG_NAME=$(basename "$EMMC_CONFIG" .h)
+        make CROSS_COMPILE=aarch64-linux-gnu- "$CONFIG_NAME"
+    else
+        echo "❌ No suitable emmc config found!"
+        exit 1
+    fi
 fi
 
-# 4. 彻底重构 U-Boot Makefile (对应种子配置 mt7981_sl3000_emmc)
-UBOOT_MK="package/boot/uboot-mediatek/Makefile"
-if [ -f "$UBOOT_MK" ]; then
-    echo "物理重写 U-Boot 构建逻辑..."
-    sed -i 's|PKG_SOURCE_URL:=.*|PKG_SOURCE_URL:=https://github.com/ykm888/66.git|g' "$UBOOT_MK"
-    sed -i 's/PKG_SOURCE_VERSION:=.*/PKG_SOURCE_VERSION:=sl3000-clean-source/g' "$UBOOT_MK"
-    # 物理平铺逻辑
-    sed -i '/define Build\/Prepare/a \	mv $(PKG_BUILD_DIR)/u-boot/* $(PKG_BUILD_DIR)/' "$UBOOT_MK"
-    # 强制修正 ID 命名对齐镜像生成
-    sed -i 's/sl3000-emmc/sl3000-emmc/g' "$UBOOT_MK"
-    sed -i 's/mt7981_sl3000_emmc/mt7981_sl3000_emmc/g' "$UBOOT_MK"
-    sed -i 's/^[[:space:]]\+/\t/g' "$UBOOT_MK"
-fi
+make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
+[ -f fip.bin ] && cp fip.bin $OUTPUT_DIR/uboot/fip.bin
+[ -f u-boot.bin ] && cp u-boot.bin $OUTPUT_DIR/uboot/u-boot.bin
 
-# 5. 镜像生成物理对齐 (确保生成针对 eMMC 的 factory.bin)
-IMAGE_MK="target/linux/mediatek/image/mt7981.mk"
-if [ -f "$IMAGE_MK" ]; then
-    sed -i 's/sl3000-emmc/sl3000-emmc/g' "$IMAGE_MK"
-fi
+# ========== 3. 编译 ImmortalWrt ==========
+cd $WORKSPACE
+cp -r $SOURCE_DIR/immortalwrt immortalwrt-build
+cd immortalwrt-build
+
+cp $CONFIG_DIR/mt7981-sl-3000-emmc-1g.dts target/linux/mediatek/dts/
+cp $CONFIG_DIR/mt7981-sl-3000-emmc-512m.dts target/linux/mediatek/dts/
+cp $CONFIG_DIR/mt7981.mk target/linux/mediatek/image/
+cp $CONFIG_DIR/sl3000-1g.config .config   # 可改为 512m 版本
+
+./scripts/feeds update -a
+./scripts/feeds install -a
+make defconfig
+make -j$(nproc) V=s 2>&1 | tee build.log
+
+find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp {} $OUTPUT_DIR/firmware/ \;
+cp build.log $OUTPUT_DIR/firmware/
+
+# ========== 4. 打包 mtk_uartboot ==========
+cd $SOURCE_DIR/mtk_uartboot
+tar -czf $OUTPUT_DIR/mtk_uartboot.tar.gz .
+
+echo "✅ 构建完成，产物位于: $OUTPUT_DIR"
+ls -la $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware
