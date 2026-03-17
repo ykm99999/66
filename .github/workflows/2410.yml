@@ -1,56 +1,32 @@
-name: 物理克隆并创建2410补丁分支
+name: Sync 2410 Branch from Upstream (Manual only)
 
 on:
-  workflow_dispatch: # 手动点击运行
+  workflow_dispatch:
 
 jobs:
-  sync_to_2410:
+  sync-branch:
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
-      - name: 1. 物理检出配置仓库
+      - name: Checkout target repository
         uses: actions/checkout@v4
         with:
-          path: config_repo
+          fetch-depth: 0
+          token: ${{ github.token }}
 
-      - name: 2. 物理同步上游 24.10 源码
+      - name: Configure git
         run: |
-          # 物理锁定上游源
-          UPSTREAM_URL="https://github.com/padavanonly/immortalwrt-mt798x-24.10.git"
-          git clone --depth 1 -b 2410 $UPSTREAM_URL source_code
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: 3. 物理执行手术：注入 SL3000 硬件零件
+      - name: Add upstream and fetch 2410 branch
         run: |
-          SRC="source_code"
-          PATCH="config_repo/888"
+          git remote add upstream https://github.com/padavanonly/immortalwrt-mt798x-6.6.git
+          git fetch upstream 2410 --depth=1
 
-          # A. 物理投递 DTS (驱动 SL-3000 eMMC)
-          cp -v "$PATCH/mt7981-sl-3000-emmc.dts" "$SRC/target/linux/mediatek/dts/"
-
-          # B. 物理劫持 ATF/U-Boot (锁定 DDR4 救砖逻辑)
-          cp -v "$PATCH/atf-Makefile" "$SRC/package/boot/arm-trusted-firmware-mediatek/Makefile"
-          cp -v "$PATCH/uboot-Makefile" "$SRC/package/boot/uboot-mediatek/Makefile"
-
-          # C. 物理覆盖镜像规则 (锁定 1MB 偏移合成)
-          cp -v "$PATCH/filogic.mk" "$SRC/target/linux/mediatek/image/mt7981.mk"
-
-      - name: 4. 物理推送到本地 2410 分支
+      - name: Force push to your 2410 branch
         run: |
-          cd source_code
-          git remote remove origin
-          git remote add origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
-          
-          # 物理身份配置
-          git config user.name "GitHub Action"
-          git config user.email "action@github.com"
-          
-          # 物理提交并强制创建/覆盖 2410 分支
-          git add .
-          git commit -m "物理同步：基于 padavanonly 24.10 并注入 SL3000 DDR4 补丁"
-          git checkout -b 2410
-          git push -f origin 2410
-
-      - name: 5. 物理链路反馈
-        run: echo "成功！你的仓库已新增物理分支：2410。该分支已具备完整救砖编译环境。"
+          # 使用完整的 ref 格式指定目标分支
+          git push --force origin refs/remotes/upstream/2410:refs/heads/2410
