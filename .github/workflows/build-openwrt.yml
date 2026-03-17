@@ -1,50 +1,78 @@
-name: SL3000-Physical-Final-Build
+name: 司洛SL-3000 EMMC 物理重构版
 
 on:
   workflow_dispatch:
+
+env:
+  # 物理锁定：底层源码仓库和分支
+  REPO_URL: https://github.com/ykm888/66
+  REPO_BRANCH: 2410
+  # 物理锁定：配置文件路径
+  CONFIG_FILE: 888/sl3000.config
+  DIY_P1_SH: diy-part1.sh
+  DIY_P2_SH: diy-part2.sh
+  TZ: Asia/Shanghai
 
 jobs:
   build:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout Control Repo
-        uses: actions/checkout@v4
-        with:
-          path: master-repo
+    - name: Checkout Control Repo
+      uses: actions/checkout@main
 
-      - name: Clone Base Source
-        run: |
-          # 克隆底层 2410 分支基础骨架
-          git clone --depth 1 https://github.com/ykm888/66.git -b 2410 openwrt
+    - name: Initialization environment
+      run: |
+        sudo -E apt-get -qq update
+        sudo -E apt-get -qq install build-essential clang flex gawk gettext git libncurses5-dev libssl-dev python3-distutils zlib1g-dev xxd
+        sudo timedatectl set-timezone "$TZ"
+        sudo mkdir -p /workdir
+        sudo chown $USER:$GROUPS /workdir
 
-      - name: Physical Assets Delivery
-        run: |
-          # 1. 搬运 sl3000.config (主控仓库路径)
-          cp master-repo/888/sl3000.config openwrt/.config
-          # 2. 搬运 diy-part2.sh 脚本
-          cp master-repo/diy-part2.sh .
-          chmod +x diy-part2.sh
+    - name: Clone source code
+      working-directory: /workdir
+      run: |
+        git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
+        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
 
-      - name: Execute Physical Alignment
-        run: |
-          # 运行自愈脚本，强制修正路径与零件 ID
-          ./diy-part2.sh
+    - name: Load DIY-P1 & Update Feeds
+      run: |
+        chmod +x $DIY_P1_SH
+        ./$DIY_P1_SH
+        cd openwrt && ./scripts/feeds update -a && ./scripts/feeds install -a
 
-      - name: Run defconfig
-        working-directory: ./openwrt
-        run: |
-          # 将种子 config 物理展开为完整配置
-          make defconfig
+    - name: Physical Load Configuration & DIY-P2
+      run: |
+        # 物理搬运：从 ykm99999 的 888 目录搬运到工作目录
+        [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
+        chmod +x $DIY_P2_SH
+        ./$DIY_P2_SH
+        # 进入 openwrt 再次刷新索引确保 DIY-P2 的修改生效
+        cd openwrt && ./scripts/feeds update -i && ./scripts/feeds install -a
 
-      - name: Compile Firmware
-        working-directory: ./openwrt
-        run: |
-          # 执行物理编译，-j1 方便排查潜在的子目录路径错误
-          make -j$(nproc) || make -j1 V=s
+    - name: Download package
+      run: |
+        cd openwrt
+        make defconfig
+        make download -j8
 
-      - name: Upload Images
-        uses: actions/upload-artifact@v4
-        with:
-          name: SL3000-Firmware-Package
-          path: openwrt/bin/targets/mediatek/filogic/*.bin
+    - name: Compile the firmware
+      id: compile
+      run: |
+        cd openwrt
+        make -j$(nproc) || make -j1 V=s
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: Organize files
+      if: steps.compile.outputs.status == 'success'
+      run: |
+        cd openwrt/bin/targets/*/*
+        rm -rf packages
+        echo "FIRMWARE_DIR=$PWD" >> $GITHUB_ENV
+
+    - name: Upload firmware
+      uses: actions/upload-artifact@main
+      if: env.FIRMWARE_DIR != ''
+      with:
+        name: SL3000_EMMC_Firmware
+        path: ${{ env.FIRMWARE_DIR }}/*.bin
