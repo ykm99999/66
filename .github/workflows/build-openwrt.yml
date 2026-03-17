@@ -1,74 +1,274 @@
-name: SL3000-物理救砖-终极构建
+name: SL3000 Production Build (Factory Grade)
 
 on:
-  workflow_dispatch:
+  push:
+    tags: [ 'v*' ]                     # 生产构建仅打标签时触发
+  workflow_dispatch:                    # 保留手动触发
+    inputs:
+      build_type:
+        description: 'Build type: normal (1G), rescue (512M), both'
+        required: true
+        default: 'normal'
+        type: choice
+        options:
+          - normal
+          - rescue
+          - both
+      skip_self_heal:
+        description: 'Skip self-healing (debug)'
+        required: false
+        default: false
+        type: boolean
 
 env:
-  REPO_URL: https://github.com/ykm888/66
-  REPO_BRANCH: 2410
-  CONFIG_FILE: 888/sl3000.config
-  DIY_P2_SH: diy-part2.sh
-  TZ: Asia/Shanghai
+  DEVICE: "sl3000"
+  SOC: "mt7981"
+  CONFIG_BRANCH: "main"
+  SOURCE_BRANCH: "sl3000-full-sync"
+  # 三件套文件路径
+  DTS_FILE: "mt7981-sl-3000-emmc"
+  MK_FILE: "mt7981.mk"
+  CONFIG_FILE: "sl3000.config"
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false                  # 即使一个变种失败，其他继续
+      matrix:
+        memory: [1024, 512]             # 1G 和 512M 并行构建
+        # 通过 build_type 输入动态选择，但为了简化，我们使用矩阵+条件
+        # 如果 build_type=normal，只运行 1024；rescue 只运行 512；both 运行两个
+        exclude:
+          - memory: 1024
+            build_type_input: rescue
+          - memory: 512
+            build_type_input: normal
+        include:
+          - memory: 1024
+            suffix: 1g
+            device_name: sl_3000-emmc-1g
+          - memory: 512
+            suffix: 512m
+            device_name: sl_3000-emmc-512m
 
     steps:
-    - name: Checkout Control Repo
-      uses: actions/checkout@main
+      # ---------- 1. 基础准备 ----------
+      - name: Maximize build space
+        run: |
+          sudo apt clean
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /usr/local/lib/android
+          df -h
 
-    - name: Initialization Environment
-      run: |
-        sudo -E apt-get -qq update
-        # 物理拒绝安装 ccache，确保环境纯净
-        sudo -E apt-get -qq install build-essential clang flex bison gawk gettext git libncurses5-dev libssl-dev python3-distutils python3-pyelftools zlib1g-dev xxd m4
-        sudo timedatectl set-timezone "$TZ"
-        sudo mkdir -p /workdir
-        sudo chown $USER:$GROUPS /workdir
+      - name: Checkout config branch (main)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.CONFIG_BRANCH }}
+          path: config-repo
 
-    - name: Clone OpenWrt Source
-      working-directory: /workdir
-      run: |
-        git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
-        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+      - name: Checkout source branch
+        uses: actions/checkout@v4
+        with:
+          repository: ykm99999/66
+          ref: ${{ env.SOURCE_BRANCH }}
+          path: source-repo
 
-    - name: Update & Install Feeds
-      run: cd openwrt && ./scripts/feeds update -a && ./scripts/feeds install -a
+      - name: Install dependencies (with retry)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: |
+            sudo apt update
+            sudo apt install -y build-essential clang flex bison g++ gawk \
+              gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
+              python3-distutils python3-setuptools rsync unzip zlib1g-dev file wget
 
-    - name: Load Config & Execute DIY-P2
-      run: |
-        # 1. 搬运已经修复好的 888/sl3000.config
-        [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
-        # 2. 执行物理级净化与平铺脚本
-        chmod +x $DIY_P2_SH
-        ./$DIY_P2_SH
-        # 3. 物理刷新 Makefile 依赖
-        cd openwrt && ./scripts/feeds install -a
+      # ---------- 2. 三件套自动检测/修复 ----------
+      - name: Triple-file auto detect & heal
+        id: triple_check
+        run: |
+          set -e
+          cd config-repo/888
 
-    - name: Download & Defconfig
-      run: |
-        cd openwrt
-        # 重新生成配置，彻底物理抹除 CCACHE 影子
-        make defconfig
-        make download -j8
+          # 定义期望的文件
+          EXPECTED_DTS="${DTS_FILE}-${{ matrix.suffix }}.dts"
+          EXPECTED_MK="${MK_FILE}"
+          EXPECTED_CONFIG="sl3000-${{ matrix.suffix }}.config"
 
-    - name: Compile Firmware
-      run: |
-        cd openwrt
-        # 物理执行：先编译内核，再整体并行构建
-        make target/linux/compile -j$(nproc) || make target/linux/compile -j1 V=s
-        make -j$(nproc) || make -j1 V=s
+          # 检测函数
+          check_file() {
+            if [ ! -f "$1" ]; then
+              echo "❌ 缺失文件: $1"
+              return 1
+            fi
+            echo "✅ 存在: $1"
+            return 0
+          }
 
-    - name: Organize & Upload Bin
-      if: always()
-      run: |
-        mkdir -p ./output
-        # 提取 eMMC 救砖专用的 factory.bin 和 sysupgrade.bin
-        cp openwrt/bin/targets/mediatek/filogic/*.bin ./output/ || echo "No Images Found"
-      
-    - name: Upload Artifact
-      uses: actions/upload-artifact@main
-      with:
-        name: SL3000-Recovery-Firmware
-        path: ./output/*.bin
+          # 检测三件套
+          check_file "$EXPECTED_DTS" || need_repair_dts=1
+          check_file "$EXPECTED_MK" || need_repair_mk=1
+          check_file "$EXPECTED_CONFIG" || need_repair_config=1
+
+          # 自动修复逻辑
+          if [ "${{ github.event.inputs.skip_self_heal }}" == "true" ]; then
+            echo "⏭️ 跳过自动修复"
+          else
+            # 修复 DTS：如果缺失，从基础模板生成（假设有 mt7981-sl-3000-emmc.template）
+            if [ -n "$need_repair_dts" ]; then
+              echo "🔧 正在修复 DTS: $EXPECTED_DTS"
+              if [ -f "mt7981-sl-3000-emmc.template" ]; then
+                sed "s/@MEMORY_SIZE@/${{ matrix.memory }}/" mt7981-sl-3000-emmc.template > "$EXPECTED_DTS"
+                echo "✅ DTS 已从模板生成"
+              else
+                echo "❌ 无法修复 DTS：模板文件缺失"
+                exit 1
+              fi
+            fi
+
+            # 修复 MK 文件：如果缺失，从默认模板复制
+            if [ -n "$need_repair_mk" ]; then
+              echo "🔧 正在修复 MK: $EXPECTED_MK"
+              if [ -f "mt7981.mk.default" ]; then
+                cp "mt7981.mk.default" "$EXPECTED_MK"
+                echo "✅ MK 已从默认模板恢复"
+              else
+                echo "❌ 无法修复 MK：默认模板缺失"
+                exit 1
+              fi
+            fi
+
+            # 修复 config：如果缺失，从基础配置生成
+            if [ -n "$need_repair_config" ]; then
+              echo "🔧 正在修复 config: $EXPECTED_CONFIG"
+              if [ -f "sl3000-base.config" ]; then
+                # 根据内存大小调整 CONFIG_DRAM_SIZE
+                cp "sl3000-base.config" "$EXPECTED_CONFIG"
+                echo "CONFIG_DRAM_SIZE=${{ matrix.memory }}" >> "$EXPECTED_CONFIG"
+                # 确保设备名正确
+                sed -i "s/CONFIG_TARGET_mediatek_filogic_DEVICE_.*/CONFIG_TARGET_mediatek_filogic_DEVICE_${{ matrix.device_name }}=y/" "$EXPECTED_CONFIG"
+                echo "✅ config 已从基础模板生成"
+              else
+                echo "❌ 无法修复 config：基础模板缺失"
+                exit 1
+              fi
+            fi
+          fi
+
+          # 再次检测
+          check_file "$EXPECTED_DTS"
+          check_file "$EXPECTED_MK"
+          check_file "$EXPECTED_CONFIG"
+
+          echo "status=ok" >> $GITHUB_OUTPUT
+
+      # ---------- 3. 编译 ATF ----------
+      - name: Build ATF (${{ matrix.memory }}MB)
+        id: build_atf
+        continue-on-error: true          # 允许失败，后续步骤可处理
+        run: |
+          cd source-repo/arm-trusted-firmware
+          make clean
+          make PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=${{ matrix.memory }}
+          # 复制产物
+          mkdir -p $GITHUB_WORKSPACE/output/atf
+          cp build/mt7981/release/bl2/bl2.elf $GITHUB_WORKSPACE/output/atf/bl2-${{ matrix.suffix }}.elf 2>/dev/null || true
+          [ -f build/mt7981/release/bl2.bin ] && cp build/mt7981/release/bl2.bin $GITHUB_WORKSPACE/output/atf/bl2-${{ matrix.suffix }}.bin
+
+      # ATF 自愈：如果失败，清理后重试一次
+      - name: ATF self-heal (retry)
+        if: steps.build_atf.outcome == 'failure' && !inputs.skip_self_heal
+        run: |
+          echo "⚠️ ATF 编译失败，尝试清理后重试..."
+          cd source-repo/arm-trusted-firmware
+          make distclean
+          make PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=${{ matrix.memory }}
+          mkdir -p $GITHUB_WORKSPACE/output/atf
+          cp build/mt7981/release/bl2/bl2.elf $GITHUB_WORKSPACE/output/atf/bl2-${{ matrix.suffix }}.elf 2>/dev/null || true
+          [ -f build/mt7981/release/bl2.bin ] && cp build/mt7981/release/bl2.bin $GITHUB_WORKSPACE/output/atf/bl2-${{ matrix.suffix }}.bin
+
+      # 如果自愈后仍然失败，记录错误并退出
+      - name: Check ATF status
+        if: steps.build_atf.outcome == 'failure' && (inputs.skip_self_heal || failure())
+        run: |
+          echo "❌ ATF 编译失败，已尝试自愈，请查看日志"
+          exit 1
+
+      # ---------- 4. 编译 U-Boot ----------
+      - name: Build U-Boot
+        id: build_uboot
+        continue-on-error: true
+        run: |
+          cd source-repo/u-boot
+          make clean
+          if [ -f configs/mt7981_emmc_defconfig ]; then
+            make mt7981_emmc_defconfig
+          else
+            make defconfig
+          fi
+          make -j$(nproc)
+          mkdir -p $GITHUB_WORKSPACE/output/uboot
+          [ -f fip.bin ] && cp fip.bin $GITHUB_WORKSPACE/output/uboot/fip-${{ matrix.suffix }}.bin
+          [ -f u-boot.bin ] && cp u-boot.bin $GITHUB_WORKSPACE/output/uboot/u-boot-${{ matrix.suffix }}.bin
+
+      - name: U-Boot self-heal (retry)
+        if: steps.build_uboot.outcome == 'failure' && !inputs.skip_self_heal
+        run: |
+          echo "⚠️ U-Boot 编译失败，尝试清理后重试..."
+          cd source-repo/u-boot
+          make distclean
+          if [ -f configs/mt7981_emmc_defconfig ]; then
+            make mt7981_emmc_defconfig
+          else
+            make defconfig
+          fi
+          make -j$(nproc)
+          mkdir -p $GITHUB_WORKSPACE/output/uboot
+          [ -f fip.bin ] && cp fip.bin $GITHUB_WORKSPACE/output/uboot/fip-${{ matrix.suffix }}.bin
+          [ -f u-boot.bin ] && cp u-boot.bin $GITHUB_WORKSPACE/output/uboot/u-boot-${{ matrix.suffix }}.bin
+
+      - name: Check U-Boot status
+        if: steps.build_uboot.outcome == 'failure' && (inputs.skip_self_heal || failure())
+        run: |
+          echo "❌ U-Boot 编译失败，已尝试自愈，请查看日志"
+          exit 1
+
+      # ---------- 5. 编译 ImmortalWrt ----------
+      - name: Prepare ImmortalWrt source
+        run: |
+          # 选择源码（这里使用官方 immortalwrt，也可以切换到 mt798x）
+          cp -r source-repo/immortalwrt $GITHUB_WORKSPACE/immortalwrt-${{ matrix.suffix }}
+          cd $GITHUB_WORKSPACE/immortalwrt-${{ matrix.suffix }}
+          # 复制三件套
+          cp $GITHUB_WORKSPACE/config-repo/888/${{ env.DTS_FILE }}-${{ matrix.suffix }}.dts target/linux/mediatek/dts/
+          cp $GITHUB_WORKSPACE/config-repo/888/${{ env.MK_FILE }} target/linux/mediatek/image/
+          cp $GITHUB_WORKSPACE/config-repo/888/sl3000-${{ matrix.suffix }}.config .config
+
+      - name: Build ImmortalWrt
+        id: build_ipq
+        continue-on-error: true
+        run: |
+          cd $GITHUB_WORKSPACE/immortalwrt-${{ matrix.suffix }}
+          # 更新 feeds
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          make defconfig
+          # 编译并保存详细日志
+          make -j$(nproc) V=s 2>&1 | tee build.log
+          # 收集固件
+          mkdir -p $GITHUB_WORKSPACE/output/firmware-${{ matrix.suffix }}
+          find bin/targets/ -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" | \
+            xargs -I {} cp {} $GITHUB_WORKSPACE/output/firmware-${{ matrix.suffix }}/
+          # 保存编译日志
+          cp build.log $GITHUB_WORKSPACE/output/firmware-${{ matrix.suffix }}/build.log
+
+      - name: ImmortalWrt self-heal (clean & retry)
+        if: steps.build_ipq.outcome == 'failure' && !inputs.skip_self_heal
+        run: |
+          echo "⚠️ ImmortalWrt 编译失败，清理后重试..."
+          cd $GITHUB_WORKSPACE/immortalwrt-${{ matrix.suffix }}
+          make clean
+          make -j$(nproc) V=s 2>&1 | tee build.log
+          mkdir -p $GITHUB_WORKSPACE/output/firmware-${{ matrix.suffix }}
+          find bin/targets/ -name "*.bin" -o -name 
