@@ -1,4 +1,4 @@
-name: SL3000-救砖版-物理终结编译
+name: SL3000-救砖版-物理环境修复编译
 
 on:
   workflow_dispatch:
@@ -15,13 +15,14 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-    - name: Checkout Control Repo
+    - name: Checkout Master Repo
       uses: actions/checkout@main
 
     - name: Initialization Environment
       run: |
         sudo -E apt-get -qq update
-        sudo -E apt-get -qq install build-essential clang flex gawk gettext git libncurses5-dev libssl-dev python3-distutils zlib1g-dev xxd
+        # 物理级补全：m4, flex, bison, python3-pyelftools 是解决内核编译失败的关键
+        sudo -E apt-get -qq install build-essential clang flex bison gawk gettext git libncurses5-dev libssl-dev python3-distutils python3-pyelftools zlib1g-dev xxd ccache m4
         sudo timedatectl set-timezone "$TZ"
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
@@ -37,24 +38,24 @@ jobs:
 
     - name: Load Config & Apply DIY-P2
       run: |
-        # 1. 物理搬运种子配置到 openwrt 根目录
+        # 物理搬运种子配置
         [ -e $CONFIG_FILE ] && cp $CONFIG_FILE openwrt/.config
-        # 2. 执行脚本：物理平铺子目录并补全 ID
         chmod +x $DIY_P2_SH
         ./$DIY_P2_SH
-        # 3. 再次强制安装以刷新 Makefile 修改
+        # 强制安装刷新 Makefile 逻辑
         cd openwrt && ./scripts/feeds install -a
 
     - name: Download & Defconfig
       run: |
         cd openwrt
+        # 重新生成配置以彻底应用脚本中的 sed 修改
         make defconfig
         make download -j8
 
     - name: Compile Firmware
       run: |
         cd openwrt
-        # 物理策略：先内核后整体
+        # 物理编译策略：单线程编译内核以便观察报错，整体并行编译
         make target/linux/compile -j$(nproc) || make target/linux/compile -j1 V=s
         make -j$(nproc) || make -j1 V=s
 
@@ -62,10 +63,10 @@ jobs:
       if: always()
       run: |
         mkdir -p ./output
-        cp openwrt/bin/targets/mediatek/filogic/*.bin ./output/ || echo "No bin files"
+        cp openwrt/bin/targets/mediatek/filogic/*.bin ./output/ || echo "No bin files found"
       
     - name: Upload Artifact
       uses: actions/upload-artifact@main
       with:
-        name: SL3000-Final-EMMC-Firmware
+        name: SL3000-EMMC-Fixed-Build
         path: ./output/*.bin
