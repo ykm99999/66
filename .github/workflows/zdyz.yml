@@ -21,53 +21,60 @@ jobs:
           cd source-repo
           MISSING=()
 
-          # arm-trusted-firmware
+          # ========== arm-trusted-firmware ==========
           echo "=== Checking arm-trusted-firmware ==="
           [ -f arm-trusted-firmware/plat/mediatek/mt7981/platform.mk ] || MISSING+=("arm-trusted-firmware/plat/mediatek/mt7981/platform.mk")
           [ -f arm-trusted-firmware/bl2/bl2_main.c ] || MISSING+=("arm-trusted-firmware/bl2/bl2_main.c")
           [ -f arm-trusted-firmware/fdts/mt7981.dts ] || MISSING+=("arm-trusted-firmware/fdts/mt7981.dts")
           [ -f arm-trusted-firmware/bl2/bl2.ld.S ] || [ -f arm-trusted-firmware/bl2/bl2_el3.ld.S ] || MISSING+=("arm-trusted-firmware/bl2 linker script")
 
-          # u-boot - 检查任何 mt7981_*emmc* 的配置文件
+          # ========== u-boot ==========
           echo "=== Checking u-boot ==="
-          UBOOT_CONFIG=$(ls u-boot/configs/mt7981*emmc*.h 2>/dev/null | head -1)
+          # 查找任何包含 emmc 的 defconfig 文件（如 mt7981_emmc_rfb_defconfig）
+          UBOOT_CONFIG=$(ls u-boot/configs/mt7981*emmc*_defconfig 2>/dev/null | head -1)
           if [ -z "$UBOOT_CONFIG" ]; then
             MISSING+=("u-boot/configs/mt7981*emmc*_defconfig (no emmc config found)")
+          else
+            echo "Found: $(basename $UBOOT_CONFIG)"
           fi
           [ -f u-boot/arch/arm/dts/mt7981.dtsi ] || MISSING+=("u-boot/arch/arm/dts/mt7981.dtsi")
           [ -d u-boot/board/mediatek/mt7981 ] || MISSING+=("u-boot/board/mediatek/mt7981 directory")
 
-          # immortalwrt - 检查任何 mt7981 dtsi
+          # ========== immortalwrt ==========
           echo "=== Checking immortalwrt ==="
           [ -d immortalwrt/target/linux/mediatek ] || MISSING+=("immortalwrt/target/linux/mediatek")
           IMM_DTS=$(ls immortalwrt/target/linux/mediatek/dts/mt7981*.dtsi 2>/dev/null | head -1)
           if [ -z "$IMM_DTS" ]; then
             MISSING+=("immortalwrt/target/linux/mediatek/dts/mt7981*.dtsi")
+          else
+            echo "Found: $(basename $IMM_DTS)"
           fi
           [ -f immortalwrt/feeds.conf.default ] || MISSING+=("immortalwrt/feeds.conf.default")
 
-          # mtk_uartboot
+          # ========== mtk_uartboot ==========
           echo "=== Checking mtk_uartboot ==="
           [ -f mtk_uartboot/Cargo.toml ] || MISSING+=("mtk_uartboot/Cargo.toml")
           [ -d mtk_uartboot/src ] || MISSING+=("mtk_uartboot/src directory")
 
-          # bl-mt798x - 检查是否存在配置文件目录和 dts 文件
+          # ========== bl-mt798x ==========
           echo "=== Checking bl-mt798x ==="
+          # 配置文件可能位于 configs/ 或 include/configs/
           if [ -d bl-mt798x/configs ]; then
             echo "bl-mt798x/configs exists"
+          elif [ -d bl-mt798x/include/configs ]; then
+            echo "bl-mt798x/include/configs exists (alternative location)"
           else
-            # 可能配置在其他位置，例如 mtkclient 目录
-            CONFIG_ALT=$(ls -d bl-mt798x/*/ 2>/dev/null | grep -i config)
-            if [ -z "$CONFIG_ALT" ]; then
-              MISSING+=("bl-mt798x/configs or alternative config directory")
-            fi
+            MISSING+=("bl-mt798x/configs or include/configs directory")
           fi
+          # 检查设备树文件
           DTS_FILES=$(ls bl-mt798x/arch/arm/dts/mt7981*.dts 2>/dev/null | head -1)
           if [ -z "$DTS_FILES" ]; then
             MISSING+=("bl-mt798x/arch/arm/dts/mt7981*.dts")
+          else
+            echo "Found DTS: $(basename $DTS_FILES)"
           fi
 
-          # 输出结果
+          # ========== 输出结果 ==========
           echo "========================="
           if [ ${#MISSING[@]} -eq 0 ]; then
             echo "✅ All critical files are present."
@@ -79,4 +86,12 @@ jobs:
             done
             echo "status=failed" >> $GITHUB_OUTPUT
             exit 1
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "Validation completed with status: ${{ steps.check_files.outputs.status }}"
+          if [ "${{ steps.check_files.outputs.status }}" != "ok" ]; then
+            echo "Please ensure all required files are present in the 'sl3000-full-sync' branch."
           fi
