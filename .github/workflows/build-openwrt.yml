@@ -1,4 +1,4 @@
-name: SL3000-V1-Physical-Return
+name: SL3000-V1-Physical-Recovery
 
 on:
   workflow_dispatch:
@@ -21,28 +21,32 @@ jobs:
         # 物理克隆 ykm888/66 的 2410 分支
         git clone --depth 1 https://github.com/ykm888/66 -b 2410 openwrt
 
-    - name: Load Config & Force Architecture
+    - name: Load Config & Force Apply
       run: |
-        # 1. 物理检查根目录下的种子配置
-        if [ -f "sl3000.config" ]; then
-            echo "物理校准：发现根目录配置，开始注入..."
-            sed -i 's/\r$//' sl3000.config
+        # --- 物理路径锁定：从 888 目录抓取种子 ---
+        if [ -f "888/sl3000.config" ]; then
+            echo "物理校准：已定位到 888/sl3000.config"
             
-            # 2. 物理锁定：强制置顶目标架构 (单箭头 > 杀死 x86 记忆)
+            # 1. 物理清洗换行符
+            sed -i 's/\r$//' 888/sl3000.config
+            
+            # 2. 物理强制注入核心架构 (单箭头覆盖旧配置)
             echo "CONFIG_TARGET_mediatek=y" > openwrt/.config
             echo "CONFIG_TARGET_mediatek_filogic=y" >> openwrt/.config
             echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> openwrt/.config
             
-            # 3. 追加配置内容
-            cat sl3000.config >> openwrt/.config
+            # 3. 追加 888 目录下的业务配置
+            cat 888/sl3000.config >> openwrt/.config
+            echo "物理注入完成：888种子已对齐到 openwrt/.config"
         else
-            echo "物理致命错误：根目录下未发现 sl3000.config！"
-            ls -F
+            echo "物理致命错误：888/sl3000.config 不在预期位置！"
+            ls -R
             exit 1
         fi
 
     - name: Run DIY Scripts
       run: |
+        # 脚本必须在根目录执行，内部会 cd openwrt
         chmod +x diy-part2.sh
         ./diy-part2.sh
 
@@ -59,10 +63,11 @@ jobs:
         # 物理精准打击救砖零件
         make package/boot/arm-trusted-firmware-mediatek/compile V=s -j1
         make package/boot/uboot-mediatek/compile V=s -j1
+        # 开始全局编译
         make -j$(nproc) || make -j1 V=s
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: SL3000-V1-Recovery
+        name: SL3000-V1-Recovery-Package
         path: openwrt/bin/targets/mediatek/filogic/*
