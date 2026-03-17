@@ -1,86 +1,74 @@
-name: SL3000-Final-Recovery-V11
+name: SL3000-Recovery-Final-V14
 
 on:
   workflow_dispatch:
 
-env:
-  REPO_URL: https://github.com/ykm888/66
-  REPO_BRANCH: 2410
-  CONFIG_FILE: sl3000.config
-  DIY_P2_SH: diy-part2.sh
-  TZ: Asia/Shanghai
-
 jobs:
   build:
     runs-on: ubuntu-22.04
-
     steps:
     - name: Checkout Actions Repo
       uses: actions/checkout@v4
 
     - name: Initialization Environment
       run: |
-        sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
         sudo -E apt-get -qq update
         sudo -E apt-get -qq install $(curl -fsSL https://is.gd/depends_ubuntu_2204)
-        sudo -E apt-get -qq autoremove --purge
-        sudo -E apt-get -qq clean
-        sudo timedatectl set-timezone "$TZ"
+        sudo timedatectl set-timezone "Asia/Shanghai"
 
-    - name: Clone Custom Source
+    - name: Clone Source
       run: |
-        git clone $REPO_URL -b $REPO_BRANCH openwrt
-        
-    - name: Update & Install Feeds
+        # 物理克隆到底层目录 openwrt
+        git clone https://github.com/ykm888/66 -b 2410 openwrt
+
+    - name: Load Config & Physical Apply
       run: |
         cd openwrt
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a
-
-    - name: Load Config & Force Architecture
-      run: |
-        cd openwrt
-        # 1. 物理清洗种子配置 (防止 Windows 换行符干扰)
-        sed -i 's/\r$//' $GITHUB_WORKSPACE/$CONFIG_FILE
+        # --- 核心：物理定位 sl3000.config ---
+        if [ -f "sl3000.config" ]; then
+            echo "物理校准：定位成功，开始应用配置..."
+            # 1. 物理格式化配置
+            sed -i 's/\r$//' sl3000.config
+            # 2. 物理强制锁定目标架构 (置顶)
+            echo "CONFIG_TARGET_mediatek=y" > .config
+            echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
+            echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
+            # 3. 合并原始种子配置内容
+            cat sl3000.config >> .config
+        else
+            echo "物理致命错误：在 /workdir/openwrt/ 路径下未找到 sl3000.config！"
+            ls -F
+            exit 1
+        fi
         
-        # 2. 物理强制注入目标架构 (最高优先级覆盖)
-        echo "CONFIG_TARGET_mediatek=y" > .config
-        echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-        echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
+        # 执行脚本 (脚本在 openwrt 的父目录)
+        chmod +x ../diy-part2.sh
+        ../diy-part2.sh
         
-        # 3. 合并剩余配置
-        cat $GITHUB_WORKSPACE/$CONFIG_FILE >> .config
-        
-        # 4. 执行物理对齐脚本
-        chmod +x $GITHUB_WORKSPACE/$DIY_P2_SH
-        $GITHUB_WORKSPACE/$DIY_P2_SH
-        
-        # 5. 物理重置索引并应用配置
+        # 物理生成完整编译链
         make defconfig
 
     - name: Build Toolchain
       run: |
         cd openwrt
-        # 预先构建 ARM 工具链，防止 cp ld-musl 报错
+        # 必须先物理构建 ARM 工具链，解决 ld-musl 缺失问题
         make tools/install -j$(nproc)
         make toolchain/install -j$(nproc)
 
-    - name: Compile SL3000 Components
+    - name: Compile Components
       run: |
         cd openwrt
-        # 单线程精确编译引导零件
+        echo "物理编译：ATF 零件..."
         make package/boot/arm-trusted-firmware-mediatek/compile V=s -j1
+        echo "物理编译：U-Boot 零件..."
         make package/boot/uboot-mediatek/compile V=s -j1
-
-    - name: Final Build
-      run: |
-        cd openwrt
+        # 全局编译
         make -j$(nproc) || make -j1 V=s
 
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: SL3000-Recovery-Binaries
+        name: SL3000-Recovery-V14
         path: |
           openwrt/bin/targets/mediatek/filogic/*bl2.img
           openwrt/bin/targets/mediatek/filogic/*u-boot.fip
