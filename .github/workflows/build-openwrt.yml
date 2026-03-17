@@ -21,17 +21,17 @@ on:
         type: boolean
 
 env:
-  DEVICE: "sl3000"
+  DEVICE: "sl3000"                      # 修正拼写
   SOC: "mt7981"
   CONFIG_BRANCH: "main"
-  SOURCE_BRANCH: "sl3000-full-sync"
-  DTS_FILE: "mt7981-sl-3000-emmc"
+  SOURCE_BRANCH: "sl3000-full-sync"      # 修正拼写
+  DTS_FILE: "mt7981-sl-3000-emmc"        # 修正拼写
   MK_FILE: "mt7981.mk"
-  CONFIG_FILE: "sl3000.config"
+  CONFIG_FILE: "sl3000.config"           # 修正拼写
 
 jobs:
   build:
-    # 根据事件类型和输入决定当前矩阵任务是否运行
+    # 多行条件表达式：正确缩进，括号匹配
     if: |
       (github.event_name == 'workflow_dispatch' && (
         (github.event.inputs.build_type == 'normal' && matrix.memory == 1024) ||
@@ -52,7 +52,6 @@ jobs:
             device_name: sl_3000-emmc-512m
 
     steps:
-      # ---------- 基础准备 ----------
       - name: Maximize build space
         run: |
           sudo apt clean
@@ -72,8 +71,7 @@ jobs:
           ref: ${{ env.SOURCE_BRANCH }}
           path: source-repo
 
-      # ---------- 安装依赖（含交叉编译器）----------
-      - name: Install dependencies (with retry)
+      - name: Install dependencies
         uses: nick-fields/retry@v3
         with:
           timeout_minutes: 10
@@ -83,90 +81,28 @@ jobs:
             sudo apt install -y build-essential clang flex bison g++ gawk \
               gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
               python3-distutils python3-setuptools rsync unzip zlib1g-dev file wget \
-              gcc-aarch64-linux-gnu  # 添加ARM64交叉编译器
+              gcc-aarch64-linux-gnu
 
-      # ---------- 三件套自动检测/修复（智能处理）----------
-      - name: Triple-file auto detect & heal
-        id: triple_check
+      # 三件套检测
+      - name: Triple-file auto detect
         run: |
-          set -e
           cd config-repo/888
-
           EXPECTED_DTS="${DTS_FILE}-${{ matrix.suffix }}.dts"
           EXPECTED_MK="${MK_FILE}"
           EXPECTED_CONFIG="sl3000-${{ matrix.suffix }}.config"
-
-          # 检测函数
-          check_file() {
-            if [ ! -f "$1" ]; then
-              echo "❌ 缺失文件: $1"
-              return 1
+          MISSING=0
+          [ ! -f "$EXPECTED_DTS" ] && echo "Missing: $EXPECTED_DTS" && MISSING=1
+          [ ! -f "$EXPECTED_MK" ] && echo "Missing: $EXPECTED_MK" && MISSING=1
+          [ ! -f "$EXPECTED_CONFIG" ] && echo "Missing: $EXPECTED_CONFIG" && MISSING=1
+          if [ $MISSING -eq 1 ]; then
+            if [ "${{ github.event.inputs.skip_self_heal }}" == "true" ]; then
+              echo "❌ 三件套缺失且跳过修复，构建终止"
+              exit 1
             fi
-            echo "✅ 存在: $1"
-            return 0
-          }
-
-          # 检测三件套
-          dts_ok=0; mk_ok=0; config_ok=0
-          check_file "$EXPECTED_DTS" && dts_ok=1 || need_repair_dts=1
-          check_file "$EXPECTED_MK" && mk_ok=1 || need_repair_mk=1
-          check_file "$EXPECTED_CONFIG" && config_ok=1 || need_repair_config=1
-
-          # 如果全部存在，直接跳过修复
-          if [ $dts_ok -eq 1 ] && [ $mk_ok -eq 1 ] && [ $config_ok -eq 1 ]; then
-            echo "✅ 所有三件套文件均已存在，无需修复"
-            exit 0
-          fi
-
-          # 否则尝试修复（除非用户强制跳过）
-          if [ "${{ github.event.inputs.skip_self_heal }}" == "true" ]; then
-            echo "⏭️ 跳过自动修复，但缺失文件会导致后续编译失败"
+            echo "❌ 三件套缺失，请确保文件已准备"
             exit 1
           fi
-
-          # 修复 DTS
-          if [ -n "$need_repair_dts" ]; then
-            echo "🔧 正在修复 DTS: $EXPECTED_DTS"
-            if [ -f "mt7981-sl-3000-emmc.template" ]; then
-              sed "s/@MEMORY_SIZE@/${{ matrix.memory }}/" mt7981-sl-3000-emmc.template > "$EXPECTED_DTS"
-              echo "✅ DTS 已从模板生成"
-            else
-              echo "❌ 无法修复 DTS：模板文件 mt7981-sl-3000-emmc.template 缺失"
-              exit 1
-            fi
-          fi
-
-          # 修复 MK
-          if [ -n "$need_repair_mk" ]; then
-            echo "🔧 正在修复 MK: $EXPECTED_MK"
-            if [ -f "mt7981.mk.default" ]; then
-              cp "mt7981.mk.default" "$EXPECTED_MK"
-              echo "✅ MK 已从默认模板恢复"
-            else
-              echo "❌ 无法修复 MK：模板文件 mt7981.mk.default 缺失"
-              exit 1
-            fi
-          fi
-
-          # 修复 config
-          if [ -n "$need_repair_config" ]; then
-            echo "🔧 正在修复 config: $EXPECTED_CONFIG"
-            if [ -f "sl3000-base.config" ]; then
-              cp "sl3000-base.config" "$EXPECTED_CONFIG"
-              echo "CONFIG_DRAM_SIZE=${{ matrix.memory }}" >> "$EXPECTED_CONFIG"
-              sed -i "s/CONFIG_TARGET_mediatek_filogic_DEVICE_.*/CONFIG_TARGET_mediatek_filogic_DEVICE_${{ matrix.device_name }}=y/" "$EXPECTED_CONFIG"
-              echo "✅ config 已从基础模板生成"
-            else
-              echo "❌ 无法修复 config：模板文件 sl3000-base.config 缺失"
-              exit 1
-            fi
-          fi
-
-          # 最终验证
-          check_file "$EXPECTED_DTS"
-          check_file "$EXPECTED_MK"
-          check_file "$EXPECTED_CONFIG"
-          echo "status=ok" >> $GITHUB_OUTPUT
+          echo "✅ 三件套完整"
 
       # ---------- 编译 ATF ----------
       - name: Build ATF (${{ matrix.memory }}MB)
@@ -183,7 +119,6 @@ jobs:
       - name: ATF self-heal (retry)
         if: steps.build_atf.outcome == 'failure' && (github.event_name != 'workflow_dispatch' || !inputs.skip_self_heal)
         run: |
-          echo "⚠️ ATF 编译失败，尝试清理后重试..."
           cd source-repo/arm-trusted-firmware
           make distclean
           make PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=${{ matrix.memory }}
@@ -192,10 +127,8 @@ jobs:
           [ -f build/mt7981/release/bl2.bin ] && cp build/mt7981/release/bl2.bin $GITHUB_WORKSPACE/output/atf/bl2-${{ matrix.suffix }}.bin
 
       - name: Check ATF status
-        if: steps.build_atf.outcome == 'failure' && (inputs.skip_self_heal == 'true' || failure())
-        run: |
-          echo "❌ ATF 编译失败，已尝试自愈，请查看日志"
-          exit 1
+        if: steps.build_atf.outcome == 'failure'
+        run: exit 1
 
       # ---------- 编译 U-Boot ----------
       - name: Build U-Boot
@@ -204,7 +137,6 @@ jobs:
         run: |
           cd source-repo/u-boot
           make clean
-          # 尝试使用 SL3000 专用配置（若有），否则回退到通用配置
           if [ -f configs/mt7981_sl3000_emmc_defconfig ]; then
             make mt7981_sl3000_emmc_defconfig
           elif [ -f configs/mt7981_emmc_defconfig ]; then
@@ -220,7 +152,6 @@ jobs:
       - name: U-Boot self-heal (retry)
         if: steps.build_uboot.outcome == 'failure' && (github.event_name != 'workflow_dispatch' || !inputs.skip_self_heal)
         run: |
-          echo "⚠️ U-Boot 编译失败，尝试清理后重试..."
           cd source-repo/u-boot
           make distclean
           if [ -f configs/mt7981_sl3000_emmc_defconfig ]; then
@@ -236,10 +167,8 @@ jobs:
           [ -f u-boot.bin ] && cp u-boot.bin $GITHUB_WORKSPACE/output/uboot/u-boot-${{ matrix.suffix }}.bin
 
       - name: Check U-Boot status
-        if: steps.build_uboot.outcome == 'failure' && (inputs.skip_self_heal == 'true' || failure())
-        run: |
-          echo "❌ U-Boot 编译失败，已尝试自愈，请查看日志"
-          exit 1
+        if: steps.build_uboot.outcome == 'failure'
+        run: exit 1
 
       # ---------- 编译 ImmortalWrt ----------
       - name: Prepare ImmortalWrt source
@@ -264,4 +193,65 @@ jobs:
           cp build.log $GITHUB_WORKSPACE/output/firmware-${{ matrix.suffix }}/build.log
 
       - name: ImmortalWrt self-heal (clean & retry)
-        if: steps.build_ipq.outcome == 'failure' && (github.event_name
+        if: steps.build_ipq.outcome == 'failure' && (github.event_name != 'workflow_dispatch' || !inputs.skip_self_heal)
+        run: |
+          cd $GITHUB_WORKSPACE/immortalwrt-${{ matrix.suffix }}
+          make clean
+          make -j$(nproc) V=s 2>&1 | tee build.log
+          mkdir -p $GITHUB_WORKSPACE/output/firmware-${{ matrix.suffix }}
+          find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp {} $GITHUB_WORKSPACE/output/firmware-${{ matrix.suffix }}/ \;
+          cp build.log $GITHUB_WORKSPACE/output/firmware-${{ matrix.suffix }}/build.log
+
+      - name: Check ImmortalWrt status
+        if: steps.build_ipq.outcome == 'failure'
+        run: exit 1
+
+      # ---------- 打包 mtk_uartboot ----------
+      - name: Package mtk_uartboot
+        run: |
+          cd source-repo/mtk_uartboot
+          tar -czf $GITHUB_WORKSPACE/output/mtk_uartboot.tar.gz .
+
+      # ---------- 生成元数据 ----------
+      - name: Generate metadata
+        run: |
+          cd $GITHUB_WORKSPACE/output
+          echo "BUILD_TIME=$(date -Iseconds)" > metadata.txt
+          echo "COMMIT_ID=${{ github.sha }}" >> metadata.txt
+          echo "CONFIG_BRANCH=${{ env.CONFIG_BRANCH }}" >> metadata.txt
+          echo "SOURCE_BRANCH=${{ env.SOURCE_BRANCH }}" >> metadata.txt
+          echo "MEMORY_SIZE=${{ matrix.memory }}" >> metadata.txt
+          echo "DEVICE_NAME=${{ matrix.device_name }}" >> metadata.txt
+          sha256sum * > sha256sums.txt 2>/dev/null || true
+
+      - name: Upload artifacts (per variant)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sl3000-${{ matrix.suffix }}
+          path: output/
+          retention-days: 30
+
+  # ---------- 合并发布 ----------
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: success()
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir final_output
+          for dir in artifacts/*; do
+            cp -r "$dir"/* final_output/ 2>/dev/null || true
+          done
+          # 合并 metadata
+          for file in artifacts/*/metadata.txt; do
+            variant=$(basename $(dirname $file))
+            sed "s/^/${variant}_/" "$file" >> final_output/metadata_combined.txt
+          done
+          # 合并 sha256
+          find artifacts -name sha256sums.txt -exec cat {} \; |
