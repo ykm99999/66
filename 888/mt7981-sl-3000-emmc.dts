@@ -5,7 +5,7 @@
 #include <dt-bindings/leds/common.h>
 
 / {
-	model = "SL-3000 (ykm888 Physical Hardened)";
+	model = "SL-3000 (1GB DDR4)";
 	compatible = "sl,3000-emmc", "mediatek,mt7981";
 
 	aliases {
@@ -19,14 +19,14 @@
 
 	chosen {
 		stdout-path = "serial0:115200n8";
-		/* 物理加固：锁定 GPT 分区的 production 标签作为根路径 */
+		/* 默认从 eMMC 的 production 分区启动，U-Boot 可覆盖 */
 		bootargs = "console=ttyS0,115200n1 loglevel=8 earlycon=uart8250,mmio32,0x11002000 root=PARTLABEL=production rootwait rw rootfstype=f2fs,squashfs,ext4";
 	};
 
-	/* 物理锁定：强制 512MB RAM 映射 (MT7981B 标准映射) */
+	/* 1GB DDR4 内存 */
 	memory@40000000 {
 		device_type = "memory";
-		reg = <0 0x40000000 0 0x20000000>;
+		reg = <0 0x40000000 0 0x40000000>;
 	};
 
 	leds {
@@ -61,7 +61,7 @@
 	};
 };
 
-/* 物理加固：SPI-NOR 闪存节点 (存放救砖全家桶) */
+/* SPI-NOR 闪存：与救砖镜像布局对齐 */
 &spi0 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&spi0_flash_pins>;
@@ -77,10 +77,32 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 
-			/* 0-1MB 留给 BL2 和 FIP (U-Boot) */
+			partition@0 {
+				label = "bl2";
+				reg = <0x0 0x100000>; /* 1MB: BL2 */
+				read-only;
+			};
+
 			partition@100000 {
-				label = "firmware";
-				reg = <0x100000 0x1f00000>; /* 31MB 可用空间 */
+				label = "fip";
+				reg = <0x100000 0x100000>; /* 1MB: FIP (U-Boot) */
+				read-only;
+			};
+
+			partition@200000 {
+				label = "nor-kernel";
+				reg = <0x200000 0x800000>; /* 8MB: 内核（救砖用） */
+			};
+
+			partition@a00000 {
+				label = "nor-rootfs";
+				reg = <0xa00000 0x1600000>; /* 22MB: 根文件系统（救砖用） */
+			};
+
+			/* 剩余空间可自定义，但 32MB 已用完，此处仅为完整性 */
+			partition@2000000 {
+				label = "reserved";
+				reg = <0x2000000 0x0>;
 			};
 		};
 	};
@@ -187,6 +209,6 @@
 &uart0 { status = "okay"; };
 &watchdog { status = "okay"; };
 
-/* 物理增加：内核 6.6 需要显式定义电源管理 */
+/* 内核 6.12 需要显式定义电源管理节点（已在 mt7981.dtsi 中定义，此处仅启用） */
 &reg_1p8v { status = "okay"; };
 &reg_3p3v { status = "okay"; };
