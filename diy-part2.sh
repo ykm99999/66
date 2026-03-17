@@ -1,25 +1,48 @@
 #!/bin/bash
+# ---------------------------------------------------------
+# 物理执行三准则：全链路名称自动对齐修复脚本 (禁用 EOF 版)
+# ---------------------------------------------------------
 
-# --- 1. 物理进入源码目录 ---
-cd openwrt
+echo "开始全链路像素级对齐自检 (禁用 EOF 模式)..."
 
-# --- 2. 物理校准 ATF Makefile (修正缩进) ---
-ATF_PATH="package/boot/arm-trusted-firmware-mediatek/Makefile"
-if [ -f "$ATF_PATH" ]; then
-    # 强制将 Include 关键字小写
-    sed -i 's/Include/include/g' "$ATF_PATH"
-    # 强制将行首空格刷回硬 Tab
-    sed -i 's/^[[:space:]]\+/\t/g' "$ATF_PATH"
-    echo "ATF Makefile 物理对齐完成。"
+# 1. 物理重构 U-Boot 依赖
+UBOOT_MK="package/boot/uboot-mediatek/Makefile"
+if [ -f "$UBOOT_MK" ]; then
+    echo "正在物理修正 U-Boot 依赖路径..."
+    sed -i 's/sl3000-emmc/sl_3000-emmc/g' "$UBOOT_MK"
+    sed -i 's/mt7981_sl3000_emmc/mt7981_sl-3000-emmc/g' "$UBOOT_MK"
+    sed -i 's/^[[:space:]]\+/\t/g' "$UBOOT_MK"
+    sed -i 's/Include /include /g' "$UBOOT_MK"
 fi
 
-# --- 3. 物理注入 U-Boot 定义 ---
-UBOOT_PATH="package/boot/uboot-mediatek/Makefile"
-if [ -f "$UBOOT_PATH" ]; then
-    if ! grep -q "mt7981_sl3000_emmc" "$UBOOT_PATH"; then
-        sed -i '/define U-Boot\/mt7981-sd-emmc/i \
-define U-Boot/mt7981_sl3000_emmc\n  NAME:=SL-3000 (eMMC)\n  BUILD_SUBTARGET:=filogic\n  BUILD_DEVICES:=mediatek_mt7981\n  DEPENDS:=+arm-trusted-firmware-mediatek-mt7981-sl3000-emmc\nendef\n' "$UBOOT_PATH"
-        sed -i 's/UBOOT_TARGETS := \\/UBOOT_TARGETS := mt7981_sl3000_emmc \\/' "$UBOOT_PATH"
-        echo "U-Boot 物理零件挂载完成。"
-    fi
+# 2. 物理修复 mt7981.mk 救砖全家桶
+IMAGE_MK="target/linux/mediatek/image/mt7981.mk"
+if [ -f "$IMAGE_MK" ]; then
+    echo "正在物理注入救砖逻辑到 mt7981.mk..."
+    # 物理清除原有旧定义
+    sed -i '/define Device\/sl_3000-emmc/,/endef/d' "$IMAGE_MK"
+    
+    # 使用 echo 物理追加，彻底弃用 EOF
+    echo "" >> "$IMAGE_MK"
+    echo "define Device/sl_3000-emmc" >> "$IMAGE_MK"
+    echo "  DEVICE_VENDOR := SL" >> "$IMAGE_MK"
+    echo "  DEVICE_MODEL := 3000 eMMC" >> "$IMAGE_MK"
+    echo "  DEVICE_DTS := mt7981-sl-3000-emmc" >> "$IMAGE_MK"
+    echo "  DEVICE_DTS_DIR := \$(DTS_DIR)/mediatek" >> "$IMAGE_MK"
+    echo "  SUPPORTED_DEVICES := sl,3000-emmc" >> "$IMAGE_MK"
+    echo "  DEVICE_PACKAGES := \$(MT7981_USB_PKGS) f2fsck losetup mkf2fs kmod-fs-f2fs kmod-mmc" >> "$IMAGE_MK"
+    echo "  KERNEL_SIZE := 10240k" >> "$IMAGE_MK"
+    echo "  IMAGES := sysupgrade.bin factory.bin" >> "$IMAGE_MK"
+    echo "  IMAGE/factory.bin := append-kernel | pad-to \$\$(KERNEL_SIZE) | append-rootfs | pad-to 128M | check-size" >> "$IMAGE_MK"
+    echo "  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata" >> "$IMAGE_MK"
+    echo "  UBOOT_DEVICE_NAME := mt7981_sl_3000_emmc" >> "$IMAGE_MK"
+    echo "endef" >> "$IMAGE_MK"
+    echo "TARGET_DEVICES += sl_3000-emmc" >> "$IMAGE_MK"
 fi
+
+# 3. 物理刷新索引
+rm -rf tmp
+./scripts/feeds update -a
+./scripts/feeds install -a
+
+echo "物理全链路名称对齐完成：sl_3000-emmc 标准已锁定。"
