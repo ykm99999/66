@@ -36,18 +36,19 @@ jobs:
       # ---------- ImmortalWrt (官方主线) ----------
       - name: Sync ImmortalWrt (official)
         run: |
-          rm -rf immortalwrt-official
-          git clone --recursive --depth=1 https://github.com/immortalwrt/immortalwrt.git immortalwrt-official-temp
-          rm -rf immortalwrt-official-temp/.git
-          mv immortalwrt-official-temp immortalwrt-official
-          git add immortalwrt-official
+          rm -rf immortalwrt
+          git clone --recursive --depth=1 https://github.com/immortalwrt/immortalwrt.git immortalwrt-temp
+          rm -rf immortalwrt-temp/.git
+          mv immortalwrt-temp immortalwrt
+          git add immortalwrt
           git commit -m "Sync: ImmortalWrt official ($(date +'%Y-%m-%d'))" || echo "No changes"
 
       # ---------- ImmortalWrt (Hanwckf 优化版) ----------
       - name: Sync ImmortalWrt (hanwckf mt798x)
         run: |
           rm -rf immortalwrt-mt798x
-          git clone --recursive --depth=1 -b mt7981 https://github.com/hanwckf/immortalwrt-mt798x.git immortalwrt-mt798x-temp
+          # 注意：该仓库没有 mt7981 分支，直接拉取默认分支（main）
+          git clone --recursive --depth=1 https://github.com/hanwckf/immortalwrt-mt798x.git immortalwrt-mt798x-temp
           rm -rf immortalwrt-mt798x-temp/.git
           mv immortalwrt-mt798x-temp immortalwrt-mt798x
           git add immortalwrt-mt798x
@@ -66,11 +67,11 @@ jobs:
       # ---------- U-Boot (MediaTek 官方) ----------
       - name: Sync U-Boot (official)
         run: |
-          rm -rf u-boot-mtk
-          git clone --recursive --depth=1 -b mtksoc-20250212 https://github.com/mtk-openwrt/u-boot.git uboot-temp
-          rm -rf uboot-temp/.git
-          mv uboot-temp u-boot-mtk
-          git add u-boot-mtk
+          rm -rf u-boot
+          git clone --recursive --depth=1 -b mtksoc-20250212 https://github.com/mtk-openwrt/u-boot.git u-boot-temp
+          rm -rf u-boot-temp/.git
+          mv u-boot-temp u-boot
+          git add u-boot
           git commit -m "Sync: U-Boot (branch mtksoc-20250212) $(date +'%Y-%m-%d')" || echo "No changes"
 
       # ---------- U-Boot (Hanwckf 不死版) ----------
@@ -110,7 +111,7 @@ jobs:
           echo "## 🔥 救砖关键步骤" >> device/sl3000/README.md
           echo "1. **使用 mtk_uartboot 加载内存引导**：" >> device/sl3000/README.md
           echo "   - 工具路径：\`/mtk_uartboot\`" >> device/sl3000/README.md
-          echo "   - 需要先编译 ATF 生成 \`bl2.bin\`（注意 DDR4 和 BGA 封装）[citation:8]" >> device/sl3000/README.md
+          echo "   - 需要先编译 ATF 生成 \`bl2.bin\`（注意 DDR4 和 BGA 封装）" >> device/sl3000/README.md
           echo "2. **内存降容救砖**：使用 512MB 配置的 BL2 引导（\`DRAM_SIZE=512\`）" >> device/sl3000/README.md
           echo "3. **恢复 1GB 运行内存**：救砖成功后刷入正常 1GB 固件" >> device/sl3000/README.md
           echo "" >> device/sl3000/README.md
