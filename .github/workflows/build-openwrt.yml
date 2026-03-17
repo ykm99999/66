@@ -1,4 +1,4 @@
-name: SL3000-Physical-Recovery-Build
+name: SL3000-Physical-Final-Build
 
 on:
   workflow_dispatch:
@@ -8,43 +8,43 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout Master Repo
+      - name: Checkout Control Repo
         uses: actions/checkout@v4
         with:
-          path: master-repo  # 将主控仓库放在独立目录
+          path: master-repo
 
-      - name: Clone Source Code
+      - name: Clone Base Source
         run: |
-          # 克隆底层源码仓库 2410 分支
+          # 克隆底层 2410 分支基础骨架
           git clone --depth 1 https://github.com/ykm888/66.git -b 2410 openwrt
 
-      - name: Physical Move Assets
+      - name: Physical Assets Delivery
         run: |
-          # 1. 搬运配置文件 (严格遵守不自动创建逻辑)
+          # 1. 搬运 sl3000.config (主控仓库路径)
           cp master-repo/888/sl3000.config openwrt/.config
-          # 2. 搬运脚本到根目录以便执行
+          # 2. 搬运 diy-part2.sh 脚本
           cp master-repo/diy-part2.sh .
           chmod +x diy-part2.sh
 
       - name: Execute Physical Alignment
         run: |
-          # 运行自愈脚本，内部会自动进入 openwrt 目录
+          # 运行自愈脚本，强制修正路径与零件 ID
           ./diy-part2.sh
 
       - name: Run defconfig
         working-directory: ./openwrt
         run: |
-          # 物理锁定：将种子 config 展开为完整配置
+          # 将种子 config 物理展开为完整配置
           make defconfig
 
       - name: Compile Firmware
         working-directory: ./openwrt
         run: |
-          # 执行物理编译
+          # 执行物理编译，-j1 方便排查潜在的子目录路径错误
           make -j$(nproc) || make -j1 V=s
 
-      - name: Upload Artifacts
+      - name: Upload Images
         uses: actions/upload-artifact@v4
         with:
-          name: SL3000-Recovery-Image
+          name: SL3000-Firmware-Package
           path: openwrt/bin/targets/mediatek/filogic/*.bin
