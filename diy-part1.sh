@@ -1,6 +1,7 @@
 #!/bin/bash
 set -e
 
+# ========== 定义路径 ==========
 WORKSPACE="$GITHUB_WORKSPACE"
 SOURCE_DIR="$WORKSPACE/source-repo"
 CONFIG_DIR="$WORKSPACE/main-repo/888"
@@ -11,6 +12,7 @@ DTS_PATH_OLD="target/linux/mediatek/dts"
 DTS_PATH_NEW="target/linux/mediatek/files-6.12/arch/arm64/boot/dts/mediatek"
 MK_FILE="target/linux/mediatek/image/mt7981.mk"
 
+# ========== 创建输出目录 ==========
 mkdir -p $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware $STAGING_DIR_IMAGE
 
 export CROSS_COMPILE=aarch64-linux-gnu-
@@ -85,33 +87,37 @@ cd immortalwrt-build
 echo "=== Updating feeds ==="
 ./scripts/feeds update -a
 
-# ========== 4. 物理净化：批量删除依赖缺失的包 ==========
-echo "=== Purging packages with missing dependencies ==="
+# ========== 4. 彻底递归删除所有问题包 ==========
+echo "=== Purging problematic packages recursively ==="
 
-# 删除所有依赖 rust/host 的包（根据日志中出现的包名）
-RUST_DEPS_PKGS="aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server shadow-tls shadowsocks-rust spotifyd tuic-client tuic-server yggdrasil-jumper"
-for pkg in $RUST_DEPS_PKGS; do
-    rm -rf feeds/packages/$pkg
-    rm -rf package/feeds/packages/$pkg
+# 定义需要删除的包名列表（包含所有可能出现在日志中的问题包）
+PROBLEM_PKGS="aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server shadow-tls shadowsocks-rust spotifyd tuic-client tuic-server yggdrasil-jumper gst1-plugins-base onionshare-cli onionshare"
+
+# 递归删除 feeds 中所有匹配的目录（无论层级多深）
+for pkg in $PROBLEM_PKGS; do
+    find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
 done
 
-# 删除已知的其他问题包
-rm -rf feeds/packages/gst1-plugins-base
-rm -rf package/feeds/packages/gst1-plugins-base
-rm -rf feeds/packages/onionshare-cli
-rm -rf package/feeds/packages/onionshare-cli
-rm -rf feeds/packages/onionshare
-rm -rf package/feeds/packages/onionshare
+# 删除整个 video 和 telephony feed
+rm -rf feeds/video feeds/telephony
 
-# 删除整个 video 和 telephony feed（它们通常包含大量不需要的桌面软件）
-rm -rf feeds/video
-rm -rf feeds/telephony
+# 清理 package/feeds 下所有符号链接
+rm -rf package/feeds
 
 # 重新生成 feed 索引
 ./scripts/feeds update -i
 
-# 安装 feeds
+# 安装 feeds（此时问题包已被移除，不会重新安装）
 ./scripts/feeds install -a
+
+# 再次递归删除（防止某些包因依赖被重新下载）
+for pkg in $PROBLEM_PKGS; do
+    find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
+done
+
+# 再次更新索引并重建符号链接
+./scripts/feeds update -i
+make package/symlinks
 
 # ========== 5. 自动注册三件套 (双路径注入 DTS) ==========
 echo "=== 开始物理注册 SL3000 设备链 ==="
@@ -153,7 +159,16 @@ make defconfig
 # 再次添加设备选项（defconfig 可能会重置）
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-1g=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-512m=y" >> .config
-make olddefconfig
+
+# ========== 6. 详细模式运行 oldconfig ==========
+echo "=== Running oldconfig with verbose output ==="
+# 使用 -j1 V=s 确保详细输出，并捕获错误
+make -j1 V=s oldconfig 2>&1 | tee oldconfig.log
+if [ ${PIPESTATUS[0]} -ne 0 ]; then
+    echo "❌ oldconfig failed. Check oldconfig.log for details."
+    cat oldconfig.log
+    exit 1
+fi
 
 # 5.6 最终验证设备是否启用
 echo "=== 验证设备启用状态 ==="
@@ -161,7 +176,7 @@ grep "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-1g=y" .config || { echo
 grep "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-512m=y" .config || { echo "❌ 512M device not enabled!"; exit 1; }
 echo "✅ 设备已成功注册并启用"
 
-# ========== 6. 编译 ImmortalWrt ==========
+# ========== 7. 编译 ImmortalWrt ==========
 echo "=== Building ImmortalWrt ==="
 make VERSION_NUMBER="1.0.0" VERSION_CODE="r1" -j$(nproc) V=s 2>&1 | tee build.log
 
@@ -173,10 +188,10 @@ echo "=== Collecting firmware ==="
 find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp -v {} $OUTPUT_DIR/firmware/ \;
 cp build.log $OUTPUT_DIR/firmware/
 
-# ========== 7. 打包 mtk_uartboot ==========
+# ========== 8. 打包 mtk_uartboot ==========
 cd $SOURCE_DIR/mtk_uartboot
 tar -czf $OUTPUT_DIR/mtk_uartboot.tar.gz .
 
-# ========== 8. 最终输出 ==========
+# ========== 9. 最终输出 ==========
 echo "✅ Build complete. Output directory contents:"
 ls -la $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware
