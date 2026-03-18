@@ -9,6 +9,7 @@ define Device/sl_3000-emmc
     f2fsck losetup mkf2fs kmod-fs-f2fs kmod-mmc \
     luci-app-ksmbd luci-i18n-ksmbd-zh-cn ksmbd-utils \
     ~gst1-plugins-base \
+    ~gst1-plugins-good \
     ~gst1-plugins-ugly \
     ~libdmapsharing \
     ~luci-app-passwall \
@@ -46,6 +47,9 @@ define Device/sl_3000-emmc
     ~python-rpds-py \
     ~python-service-identity \
     ~python-twisted \
+    ~python-docker \
+    ~python-jsonschema \
+    ~python-referencing \
     ~ruby \
     ~ruby-yaml \
     ~podman \
