@@ -1,63 +1,15 @@
 #!/bin/bash
 set -e
 
-# ========== 全文件检测 ==========
-echo "=== Checking all required source files ==="
-
 WORKSPACE="$GITHUB_WORKSPACE"
 SOURCE_DIR="$WORKSPACE/source-repo"
 CONFIG_DIR="$WORKSPACE/main-repo/888"
 OUTPUT_DIR="$WORKSPACE/output"
 IMMORTALWRT_BUILD="$WORKSPACE/immortalwrt-build"
 STAGING_DIR_IMAGE="$IMMORTALWRT_BUILD/staging_dir/image"
-
-MISSING_FILES=()
-
-FILES_TO_CHECK=(
-    "arm-trusted-firmware/plat/mediatek/mt7981/platform.mk"
-    "arm-trusted-firmware/bl2/bl2_main.c"
-    "arm-trusted-firmware/fdts/mt7981.dts"
-    "arm-trusted-firmware/bl2/bl2.ld.S"
-    "arm-trusted-firmware/tools/fiptool/fiptool.c"
-    "u-boot/configs/mt7981_emmc_rfb_defconfig"
-    "u-boot/configs/mt7981_spim_nor_rfb_defconfig"
-    "u-boot/arch/arm/dts/mt7981.dtsi"
-    "immortalwrt/target/linux/mediatek"
-    "immortalwrt/feeds.conf.default"
-    "immortalwrt/scripts/feeds"
-    "mtk_uartboot/Cargo.toml"
-    "mtk_uartboot/src/main.rs"
-    "bl-mt798x"
-)
-
-for FILE in "${FILES_TO_CHECK[@]}"; do
-    if [ ! -e "$SOURCE_DIR/$FILE" ]; then
-        MISSING_FILES+=("$SOURCE_DIR/$FILE")
-    fi
-done
-
-CONFIG_FILES=(
-    "mt7981.mk"
-    "sl3000.config"
-    "mt7981-sl-3000-emmc-1g.dts"
-    "mt7981-sl-3000-emmc-512m.dts"
-)
-
-for FILE in "${CONFIG_FILES[@]}"; do
-    if [ ! -f "$CONFIG_DIR/$FILE" ]; then
-        MISSING_FILES+=("$CONFIG_DIR/$FILE")
-    fi
-done
-
-if [ ${#MISSING_FILES[@]} -ne 0 ]; then
-    echo "❌ Missing required files:"
-    for MISSING in "${MISSING_FILES[@]}"; do
-        echo "   - $MISSING"
-    done
-    exit 1
-else
-    echo "✅ All required files are present."
-fi
+DTS_PATH_OLD="target/linux/mediatek/dts"
+DTS_PATH_NEW="target/linux/mediatek/files-6.12/arch/arm64/boot/dts/mediatek"
+MK_FILE="target/linux/mediatek/image/mt7981.mk"
 
 mkdir -p $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware $STAGING_DIR_IMAGE
 
@@ -123,7 +75,7 @@ else
 fi
 cp u-boot.bin $OUTPUT_DIR/uboot/u-boot-emmc.bin
 
-# ========== 3. 编译 ImmortalWrt ==========
+# ========== 3. 准备 ImmortalWrt 源码 ==========
 cd $WORKSPACE
 rm -rf immortalwrt-build
 cp -r $SOURCE_DIR/immortalwrt immortalwrt-build
@@ -133,49 +85,71 @@ cd immortalwrt-build
 echo "=== Updating feeds ==="
 ./scripts/feeds update -a
 
-# ========== 【彻底修复】删除有问题的包和 feed ==========
+# ========== 4. 物理净化：移除问题 feeds 和包 ==========
 echo "=== Purging problematic feeds and packages ==="
-# 删除整个 video feed（如果还存在）
-rm -rf feeds/video
-# 删除已知有问题的包（从 packages feed）
+rm -rf feeds/video feeds/telephony
 rm -rf feeds/packages/gst1-plugins-base
 rm -rf feeds/packages/onionshare-cli
 rm -rf feeds/packages/onionshare
-# 重新生成 feed 索引
+rm -rf feeds/packages/lang/rust
+rm -rf package/feeds/packages/rust
 ./scripts/feeds update -i
 
 # 安装 feeds
 ./scripts/feeds install -a
 
-# 复制三件套文件
-echo "=== Copying device-specific files ==="
-cp -v $CONFIG_DIR/mt7981-sl-3000-emmc-1g.dts target/linux/mediatek/dts/ || echo "❌ 1G DTS copy failed"
-cp -v $CONFIG_DIR/mt7981-sl-3000-emmc-512m.dts target/linux/mediatek/dts/ || echo "❌ 512M DTS copy failed"
-cp -v $CONFIG_DIR/mt7981.mk target/linux/mediatek/image/ || { echo "❌ mt7981.mk copy failed"; exit 1; }
+# ========== 5. 自动注册三件套 (双路径注入 DTS) ==========
+echo "=== 开始物理注册 SL3000 设备链 ==="
+
+# 5.1 注入 DTS 文件到两个路径（旧路径和新内核专用路径）
+# 创建目标目录（如果不存在）
+mkdir -p $DTS_PATH_OLD
+mkdir -p $DTS_PATH_NEW
+
+echo "复制 DTS 到旧路径: $DTS_PATH_OLD"
+cp -v $CONFIG_DIR/mt7981-sl-3000-emmc-1g.dts $DTS_PATH_OLD/ || { echo "❌ 1G DTS copy to old path failed"; exit 1; }
+cp -v $CONFIG_DIR/mt7981-sl-3000-emmc-512m.dts $DTS_PATH_OLD/ || { echo "❌ 512M DTS copy to old path failed"; exit 1; }
+
+echo "复制 DTS 到新内核专用路径: $DTS_PATH_NEW"
+cp -v $CONFIG_DIR/mt7981-sl-3000-emmc-1g.dts $DTS_PATH_NEW/ || { echo "❌ 1G DTS copy to new path failed"; exit 1; }
+cp -v $CONFIG_DIR/mt7981-sl-3000-emmc-512m.dts $DTS_PATH_NEW/ || { echo "❌ 512M DTS copy to new path failed"; exit 1; }
+
+# 5.2 注入设备定义文件（覆盖确保最新）
+cp -v $CONFIG_DIR/mt7981.mk $MK_FILE || { echo "❌ mt7981.mk copy failed"; exit 1; }
+
+# 验证设备定义是否已注册（检查关键字符串）
+if ! grep -q "sl_3000-emmc-1g" $MK_FILE; then
+    echo "❌ 设备定义未成功写入 $MK_FILE"
+    exit 1
+fi
+echo "✅ 设备定义已物理注册"
+
+# 5.3 注入内核配置种子
 cp -v $CONFIG_DIR/sl3000.config .config || { echo "❌ sl3000.config copy failed"; exit 1; }
 
-# 强制启用您的设备
-echo "=== Enabling devices ==="
+# 5.4 强制启用您的设备
+echo "CONFIG_TARGET_mediatek=y" >> .config
+echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-1g=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-512m=y" >> .config
 
-# 重新生成配置
+# 5.5 重新生成配置
 make defconfig
-# 确保设备选项仍然启用
+
+# 再次添加设备选项（defconfig 可能会重置）
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-1g=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-512m=y" >> .config
+make olddefconfig
 
-# ========== 【修复】改用 oldconfig 代替 olddefconfig ==========
-echo "=== Running oldconfig with verbose output ==="
-make -j1 V=s oldconfig
+# 5.6 最终验证设备是否启用
+echo "=== 验证设备启用状态 ==="
+grep "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-1g=y" .config || { echo "❌ 1G device not enabled!"; exit 1; }
+grep "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-512m=y" .config || { echo "❌ 512M device not enabled!"; exit 1; }
+echo "✅ 设备已成功注册并启用"
 
-# 列出启用的设备
-echo "=== Enabled mediatek/filogic devices ==="
-make info | grep -A 30 "Target: mediatek/filogic" | grep "sl_3000" || echo "⚠️ Devices not enabled!"
-
-# 编译
+# ========== 6. 编译 ImmortalWrt ==========
 echo "=== Building ImmortalWrt ==="
-make -j$(nproc) V=s 2>&1 | tee build.log
+make VERSION_NUMBER="1.0.0" VERSION_CODE="r1" -j$(nproc) V=s 2>&1 | tee build.log
 
 # 列出并收集固件
 echo "=== Listing generated images ==="
@@ -185,10 +159,10 @@ echo "=== Collecting firmware ==="
 find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp -v {} $OUTPUT_DIR/firmware/ \;
 cp build.log $OUTPUT_DIR/firmware/
 
-# ========== 4. 打包 mtk_uartboot ==========
+# ========== 7. 打包 mtk_uartboot ==========
 cd $SOURCE_DIR/mtk_uartboot
 tar -czf $OUTPUT_DIR/mtk_uartboot.tar.gz .
 
-# ========== 最终输出 ==========
+# ========== 8. 最终输出 ==========
 echo "✅ Build complete. Output directory contents:"
 ls -la $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware
