@@ -25,16 +25,14 @@ FILES_TO_CHECK=(
     "u-boot/configs/mt7981_emmc_rfb_defconfig"
     "u-boot/configs/mt7981_spim_nor_rfb_defconfig"
     "u-boot/arch/arm/dts/mt7981.dtsi"
-    # 移除 Kconfig 检查，因为该文件不存在且不影响编译
-    # "u-boot/board/mediatek/mt7981/Kconfig"
-    # ImmortalWrt（目录和关键文件）
+    # ImmortalWrt
     "immortalwrt/target/linux/mediatek"
     "immortalwrt/feeds.conf.default"
     "immortalwrt/scripts/feeds"
     # mtk_uartboot
     "mtk_uartboot/Cargo.toml"
     "mtk_uartboot/src/main.rs"
-    # bl-mt798x（可选，只检查目录存在）
+    # bl-mt798x
     "bl-mt798x"
 )
 
@@ -93,7 +91,7 @@ make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 
 find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.bin \; 2>/dev/null || echo "No bl2.bin for 1G nor"
 find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.elf \; 2>/dev/null || echo "No bl2.elf for 1G nor"
 
-# 复制 bl31.bin（路径已修正）
+# 复制 bl31.bin
 cp build/mt7981/release/bl31.bin $STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin 2>/dev/null || echo "No bl31.bin for emmc"
 cp build/mt7981/release/bl31.bin $STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin 2>/dev/null || echo "No bl31.bin for nor"
 
@@ -146,11 +144,19 @@ cd immortalwrt-build
 # 更新 feeds
 echo "=== Updating feeds ==="
 ./scripts/feeds update -a
-./scripts/feeds install -a
 
-# ========== 【修复】临时移除有依赖问题的包 ==========
-echo "=== Temporarily removing problematic package ==="
-rm -f package/feeds/packages/onionshare-cli/Makefile
+# ========== 【彻底修复】删除有问题的 feed 和包 ==========
+echo "=== Purging problematic feeds and packages ==="
+# 删除整个 video feed（包含大量桌面软件包，极易导致依赖问题）
+rm -rf feeds/video
+# 删除已知有问题的包（如果还在 packages feed 中）
+rm -rf feeds/packages/onionshare-cli
+rm -rf feeds/packages/onionshare
+# 重新生成 feed 索引
+./scripts/feeds update -i
+
+# 安装 feeds（此时 video feed 已不存在）
+./scripts/feeds install -a
 
 # 复制三件套文件
 echo "=== Copying device-specific files ==="
@@ -169,7 +175,10 @@ make defconfig
 # 确保设备选项仍然启用
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-1g=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-512m=y" >> .config
-make olddefconfig
+
+# 使用详细模式运行 olddefconfig
+echo "=== Running olddefconfig with verbose output ==="
+make -j1 V=s olddefconfig
 
 # 列出启用的设备
 echo "=== Enabled mediatek/filogic devices ==="
