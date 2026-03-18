@@ -85,14 +85,29 @@ cd immortalwrt-build
 echo "=== Updating feeds ==="
 ./scripts/feeds update -a
 
-# ========== 4. 物理净化：移除问题 feeds 和包 ==========
-echo "=== Purging problematic feeds and packages ==="
-rm -rf feeds/video feeds/telephony
+# ========== 4. 物理净化：批量删除依赖缺失的包 ==========
+echo "=== Purging packages with missing dependencies ==="
+
+# 删除所有依赖 rust/host 的包（根据日志中出现的包名）
+RUST_DEPS_PKGS="aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server shadow-tls shadowsocks-rust spotifyd tuic-client tuic-server yggdrasil-jumper"
+for pkg in $RUST_DEPS_PKGS; do
+    rm -rf feeds/packages/$pkg
+    rm -rf package/feeds/packages/$pkg
+done
+
+# 删除已知的其他问题包
 rm -rf feeds/packages/gst1-plugins-base
+rm -rf package/feeds/packages/gst1-plugins-base
 rm -rf feeds/packages/onionshare-cli
+rm -rf package/feeds/packages/onionshare-cli
 rm -rf feeds/packages/onionshare
-rm -rf feeds/packages/lang/rust
-rm -rf package/feeds/packages/rust
+rm -rf package/feeds/packages/onionshare
+
+# 删除整个 video 和 telephony feed（它们通常包含大量不需要的桌面软件）
+rm -rf feeds/video
+rm -rf feeds/telephony
+
+# 重新生成 feed 索引
 ./scripts/feeds update -i
 
 # 安装 feeds
@@ -101,8 +116,7 @@ rm -rf package/feeds/packages/rust
 # ========== 5. 自动注册三件套 (双路径注入 DTS) ==========
 echo "=== 开始物理注册 SL3000 设备链 ==="
 
-# 5.1 注入 DTS 文件到两个路径（旧路径和新内核专用路径）
-# 创建目标目录（如果不存在）
+# 5.1 注入 DTS 文件到两个路径
 mkdir -p $DTS_PATH_OLD
 mkdir -p $DTS_PATH_NEW
 
@@ -114,10 +128,10 @@ echo "复制 DTS 到新内核专用路径: $DTS_PATH_NEW"
 cp -v $CONFIG_DIR/mt7981-sl-3000-emmc-1g.dts $DTS_PATH_NEW/ || { echo "❌ 1G DTS copy to new path failed"; exit 1; }
 cp -v $CONFIG_DIR/mt7981-sl-3000-emmc-512m.dts $DTS_PATH_NEW/ || { echo "❌ 512M DTS copy to new path failed"; exit 1; }
 
-# 5.2 注入设备定义文件（覆盖确保最新）
+# 5.2 注入设备定义文件
 cp -v $CONFIG_DIR/mt7981.mk $MK_FILE || { echo "❌ mt7981.mk copy failed"; exit 1; }
 
-# 验证设备定义是否已注册（检查关键字符串）
+# 验证设备定义是否已注册
 if ! grep -q "sl_3000-emmc-1g" $MK_FILE; then
     echo "❌ 设备定义未成功写入 $MK_FILE"
     exit 1
