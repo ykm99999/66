@@ -13,26 +13,20 @@ STAGING_DIR_IMAGE="$IMMORTALWRT_BUILD/staging_dir/image"
 
 MISSING_FILES=()
 
-# 定义需要检查的文件列表（相对路径）
 FILES_TO_CHECK=(
-    # ATF
     "arm-trusted-firmware/plat/mediatek/mt7981/platform.mk"
     "arm-trusted-firmware/bl2/bl2_main.c"
     "arm-trusted-firmware/fdts/mt7981.dts"
     "arm-trusted-firmware/bl2/bl2.ld.S"
     "arm-trusted-firmware/tools/fiptool/fiptool.c"
-    # U-Boot
     "u-boot/configs/mt7981_emmc_rfb_defconfig"
     "u-boot/configs/mt7981_spim_nor_rfb_defconfig"
     "u-boot/arch/arm/dts/mt7981.dtsi"
-    # ImmortalWrt
     "immortalwrt/target/linux/mediatek"
     "immortalwrt/feeds.conf.default"
     "immortalwrt/scripts/feeds"
-    # mtk_uartboot
     "mtk_uartboot/Cargo.toml"
     "mtk_uartboot/src/main.rs"
-    # bl-mt798x
     "bl-mt798x"
 )
 
@@ -42,7 +36,6 @@ for FILE in "${FILES_TO_CHECK[@]}"; do
     fi
 done
 
-# 检查配置目录中的三件套文件
 CONFIG_FILES=(
     "mt7981.mk"
     "sl3000.config"
@@ -66,15 +59,15 @@ else
     echo "✅ All required files are present."
 fi
 
-# ========== 创建输出目录 ==========
 mkdir -p $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware $STAGING_DIR_IMAGE
 
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
 # ========== 1. 编译 ATF ==========
-echo "=== Building ATF 512M (EMMC) ==="
 cd $SOURCE_DIR/arm-trusted-firmware
+
+echo "=== Building ATF 512M (EMMC) ==="
 make clean
 make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=512
 find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-512m-emmc.bin \; 2>/dev/null || echo "No bl2.bin for 512M emmc"
@@ -91,17 +84,14 @@ make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 
 find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.bin \; 2>/dev/null || echo "No bl2.bin for 1G nor"
 find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.elf \; 2>/dev/null || echo "No bl2.elf for 1G nor"
 
-# 复制 bl31.bin
 cp build/mt7981/release/bl31.bin $STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin 2>/dev/null || echo "No bl31.bin for emmc"
 cp build/mt7981/release/bl31.bin $STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin 2>/dev/null || echo "No bl31.bin for nor"
 
-# 编译 ATF 自带的 fiptool
 echo "=== Compiling fiptool from ATF ==="
 make -C tools/fiptool CROSS_COMPILE=
 FIPTOOL="$PWD/tools/fiptool/fiptool"
 
 # ========== 2. 编译 U-Boot (eMMC版) 并生成 FIP ==========
-echo "=== Building U-Boot (eMMC) ==="
 cd $SOURCE_DIR/u-boot
 make clean
 if [ -f configs/mt7981_emmc_rfb_defconfig ]; then
@@ -111,13 +101,11 @@ else
     exit 1
 fi
 
-# 确保 FIP 支持已启用
 echo "CONFIG_MTK_FIP_SUPPORT=y" >> .config
 make olddefconfig
 
 make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
 
-# 检查并生成 FIP
 if [ ! -f fip.bin ] && [ ! -f u-boot.fip ]; then
     echo "⚠️ fip.bin not generated, creating manually..."
     if [ -f "$FIPTOOL" ]; then
@@ -145,17 +133,18 @@ cd immortalwrt-build
 echo "=== Updating feeds ==="
 ./scripts/feeds update -a
 
-# ========== 【彻底修复】删除有问题的 feed 和包 ==========
+# ========== 【彻底修复】删除有问题的包和 feed ==========
 echo "=== Purging problematic feeds and packages ==="
-# 删除整个 video feed（包含大量桌面软件包，极易导致依赖问题）
+# 删除整个 video feed（如果还存在）
 rm -rf feeds/video
-# 删除已知有问题的包（如果还在 packages feed 中）
+# 删除已知有问题的包（从 packages feed）
+rm -rf feeds/packages/gst1-plugins-base
 rm -rf feeds/packages/onionshare-cli
 rm -rf feeds/packages/onionshare
 # 重新生成 feed 索引
 ./scripts/feeds update -i
 
-# 安装 feeds（此时 video feed 已不存在）
+# 安装 feeds
 ./scripts/feeds install -a
 
 # 复制三件套文件
@@ -176,9 +165,9 @@ make defconfig
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-1g=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-512m=y" >> .config
 
-# 使用详细模式运行 olddefconfig
-echo "=== Running olddefconfig with verbose output ==="
-make -j1 V=s olddefconfig
+# ========== 【修复】改用 oldconfig 代替 olddefconfig ==========
+echo "=== Running oldconfig with verbose output ==="
+make -j1 V=s oldconfig
 
 # 列出启用的设备
 echo "=== Enabled mediatek/filogic devices ==="
