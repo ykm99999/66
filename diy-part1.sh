@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# ========== 全文件检测 ==========
+echo "=== Checking all required source files ==="
+
 WORKSPACE="$GITHUB_WORKSPACE"
 SOURCE_DIR="$WORKSPACE/source-repo"
 CONFIG_DIR="$WORKSPACE/main-repo/888"
@@ -8,6 +11,63 @@ OUTPUT_DIR="$WORKSPACE/output"
 IMMORTALWRT_BUILD="$WORKSPACE/immortalwrt-build"
 STAGING_DIR_IMAGE="$IMMORTALWRT_BUILD/staging_dir/image"
 
+MISSING_FILES=()
+
+# 定义需要检查的文件列表（相对路径）
+FILES_TO_CHECK=(
+    # ATF
+    "arm-trusted-firmware/plat/mediatek/mt7981/platform.mk"
+    "arm-trusted-firmware/bl2/bl2_main.c"
+    "arm-trusted-firmware/fdts/mt7981.dts"
+    "arm-trusted-firmware/bl2/bl2.ld.S"
+    "arm-trusted-firmware/tools/fiptool/fiptool.c"
+    # U-Boot
+    "u-boot/configs/mt7981_emmc_rfb_defconfig"
+    "u-boot/configs/mt7981_spim_nor_rfb_defconfig"
+    "u-boot/arch/arm/dts/mt7981.dtsi"
+    "u-boot/board/mediatek/mt7981/Kconfig"
+    # ImmortalWrt（目录和关键文件）
+    "immortalwrt/target/linux/mediatek"
+    "immortalwrt/feeds.conf.default"
+    "immortalwrt/scripts/feeds"
+    # mtk_uartboot
+    "mtk_uartboot/Cargo.toml"
+    "mtk_uartboot/src/main.rs"
+    # bl-mt798x（可选，只检查目录存在）
+    "bl-mt798x"
+)
+
+for FILE in "${FILES_TO_CHECK[@]}"; do
+    if [ ! -e "$SOURCE_DIR/$FILE" ]; then
+        MISSING_FILES+=("$SOURCE_DIR/$FILE")
+    fi
+done
+
+# 检查配置目录中的三件套文件
+CONFIG_FILES=(
+    "mt7981.mk"
+    "sl3000.config"
+    "mt7981-sl-3000-emmc-1g.dts"
+    "mt7981-sl-3000-emmc-512m.dts"
+)
+
+for FILE in "${CONFIG_FILES[@]}"; do
+    if [ ! -f "$CONFIG_DIR/$FILE" ]; then
+        MISSING_FILES+=("$CONFIG_DIR/$FILE")
+    fi
+done
+
+if [ ${#MISSING_FILES[@]} -ne 0 ]; then
+    echo "❌ Missing required files:"
+    for MISSING in "${MISSING_FILES[@]}"; do
+        echo "   - $MISSING"
+    done
+    exit 1
+else
+    echo "✅ All required files are present."
+fi
+
+# ========== 创建输出目录 ==========
 mkdir -p $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware $STAGING_DIR_IMAGE
 
 export CROSS_COMPILE=aarch64-linux-gnu-
@@ -87,8 +147,9 @@ echo "=== Updating feeds ==="
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-# 确保所有软件包正确链接（解决依赖缺失警告）
-make package/symlinks
+# ========== 【修复】临时移除有依赖问题的包 ==========
+echo "=== Temporarily removing problematic package ==="
+rm -f package/feeds/packages/onionshare-cli/Makefile
 
 # 复制三件套文件
 echo "=== Copying device-specific files ==="
@@ -102,9 +163,9 @@ echo "=== Enabling devices ==="
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-1g=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-512m=y" >> .config
 
-# 重新生成配置（使用 defconfig 重置，然后合并）
+# 重新生成配置
 make defconfig
-# 注意：defconfig 会重置配置，因此需要再次启用设备（但目标平台已选，设备会自动出现？保险起见再次添加）
+# 确保设备选项仍然启用（defconfig 可能会重置，但目标平台已选，通常会自动出现，保险起见再次添加）
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-1g=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-512m=y" >> .config
 make olddefconfig
