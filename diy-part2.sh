@@ -13,7 +13,7 @@ cd "$IMMORTALWRT_BUILD_DIR"
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# ========== 编译 ATF（已添加 DDR_TYPE=ddr4）==========
+# ========== 编译 ATF ==========
 cd $SOURCE_DIR/arm-trusted-firmware
 
 echo "=== Building ATF 512M (EMMC) ==="
@@ -34,7 +34,6 @@ make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 
 find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.bin \; 2>/dev/null || echo "No bl2.bin for 1G nor"
 find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.elf \; 2>/dev/null || echo "No bl2.elf for 1G nor"
 
-# 复制 BL31 到 staging_dir
 cp build/mt7981/release/bl31.bin $STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin 2>/dev/null || echo "No bl31.bin for emmc"
 cp build/mt7981/release/bl31.bin $STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin 2>/dev/null || echo "No bl31.bin for nor"
 
@@ -74,11 +73,13 @@ else
 fi
 cp u-boot.bin $OUTPUT_DIR/uboot/u-boot-emmc.bin
 
-# ========== 打包 mtk_uartboot（救砖工具）==========
+# ========== 回到 ImmortalWrt 构建目录 ==========
+cd "$IMMORTALWRT_BUILD_DIR"
+
+# ========== 打包 mtk_uartboot ==========
 cd $SOURCE_DIR/mtk_uartboot
 tar -czf $OUTPUT_DIR/mtk_uartboot.tar.gz .
 
-# ========== 最终输出（只显示救砖文件）==========
 echo "✅ Rescue components built successfully."
 echo "Output directory contents:"
 ls -la $OUTPUT_DIR/atf $OUTPUT_DIR/uboot
