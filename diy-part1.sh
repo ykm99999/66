@@ -25,7 +25,8 @@ FILES_TO_CHECK=(
     "u-boot/configs/mt7981_emmc_rfb_defconfig"
     "u-boot/configs/mt7981_spim_nor_rfb_defconfig"
     "u-boot/arch/arm/dts/mt7981.dtsi"
-    "u-boot/board/mediatek/mt7981/Kconfig"
+    # 移除 Kconfig 检查，因为该文件不存在且不影响编译
+    # "u-boot/board/mediatek/mt7981/Kconfig"
     # ImmortalWrt（目录和关键文件）
     "immortalwrt/target/linux/mediatek"
     "immortalwrt/feeds.conf.default"
@@ -165,7 +166,7 @@ echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-512m=y" >> .config
 
 # 重新生成配置
 make defconfig
-# 确保设备选项仍然启用（defconfig 可能会重置，但目标平台已选，通常会自动出现，保险起见再次添加）
+# 确保设备选项仍然启用
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-1g=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-512m=y" >> .config
 make olddefconfig
