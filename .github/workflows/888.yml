@@ -37,17 +37,18 @@ jobs:
       - name: Sync ImmortalWrt (official)
         run: |
           rm -rf immortalwrt
-          git clone --recursive --depth=1 https://github.com/immortalwrt/immortalwrt.git immortalwrt-temp
+          # 【唯一修改】将 clone 命令改为拉取 openwrt-24.10 分支
+          git clone --recursive --depth=1 -b openwrt-24.10 https://github.com/immortalwrt/immortalwrt.git immortalwrt-temp
           rm -rf immortalwrt-temp/.git
           mv immortalwrt-temp immortalwrt
           git add immortalwrt
-          git commit -m "Sync: ImmortalWrt official ($(date +'%Y-%m-%d'))" || echo "No changes"
+          git commit -m "Sync: ImmortalWrt official (branch openwrt-24.10) ($(date +'%Y-%m-%d'))" || echo "No changes"
 
       # ---------- ImmortalWrt (Hanwckf 优化版) ----------
       - name: Sync ImmortalWrt (hanwckf mt798x)
         run: |
           rm -rf immortalwrt-mt798x
-          # 注意：该仓库没有 mt7981 分支，直接拉取默认分支（main）
+          # 该仓库没有 mt7981 分支，直接拉取默认分支（main）
           git clone --recursive --depth=1 https://github.com/hanwckf/immortalwrt-mt798x.git immortalwrt-mt798x-temp
           rm -rf immortalwrt-mt798x-temp/.git
           mv immortalwrt-mt798x-temp immortalwrt-mt798x
