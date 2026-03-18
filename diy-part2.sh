@@ -6,6 +6,9 @@ SOURCE_DIR="$WORKSPACE/source-repo"
 OUTPUT_DIR="$WORKSPACE/output"
 STAGING_DIR_IMAGE="$WORKSPACE/immortalwrt-build/staging_dir/image"
 
+# 确保 staging_dir/image 目录存在（修复之前的错误）
+mkdir -p "$STAGING_DIR_IMAGE"
+
 # 读取 part1 保存的构建目录
 IMMORTALWRT_BUILD_DIR=$(cat $WORKSPACE/build-dir.txt)
 cd "$IMMORTALWRT_BUILD_DIR"
@@ -42,11 +45,11 @@ fi
 
 # 复制 bl31.bin 到 staging_dir（带详细输出，失败则退出）
 echo "Copying bl31.bin to staging_dir..."
-cp -v build/mt7981/release/bl31.bin $STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin || { echo "❌ Failed to copy bl31.bin for emmc"; exit 1; }
-cp -v build/mt7981/release/bl31.bin $STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin || { echo "❌ Failed to copy bl31.bin for nor"; exit 1; }
+cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin" || { echo "❌ Failed to copy bl31.bin for emmc"; exit 1; }
+cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin" || { echo "❌ Failed to copy bl31.bin for nor"; exit 1; }
 
 # 确认文件已复制
-ls -la $STAGING_DIR_IMAGE/mt7981-*.bin || { echo "❌ Copied bl31 files missing"; exit 1; }
+ls -la "$STAGING_DIR_IMAGE"/mt7981-*.bin || { echo "❌ Copied bl31 files missing"; exit 1; }
 
 echo "=== Compiling fiptool from ATF ==="
 make -C tools/fiptool CROSS_COMPILE=
@@ -79,21 +82,21 @@ if [ ! -f fip.bin ] && [ ! -f u-boot.fip ]; then
             --soc-fw "$STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin" \
             --nt-fw u-boot.bin \
             u-boot.fip
-        cp u-boot.fip $OUTPUT_DIR/uboot/fip-emmc.bin
+        cp u-boot.fip "$OUTPUT_DIR/uboot/fip-emmc.bin"
     else
         echo "❌ fiptool not found, cannot create FIP"
         exit 1
     fi
 else
-    cp fip.bin $OUTPUT_DIR/uboot/fip-emmc.bin 2>/dev/null || cp u-boot.fip $OUTPUT_DIR/uboot/fip-emmc.bin 2>/dev/null
+    cp fip.bin "$OUTPUT_DIR/uboot/fip-emmc.bin" 2>/dev/null || cp u-boot.fip "$OUTPUT_DIR/uboot/fip-emmc.bin" 2>/dev/null
 fi
-cp u-boot.bin $OUTPUT_DIR/uboot/u-boot-emmc.bin
+cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-emmc.bin"
 
 # ========== 打包 mtk_uartboot ==========
 cd $SOURCE_DIR/mtk_uartboot
-tar -czf $OUTPUT_DIR/mtk_uartboot.tar.gz .
+tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
 
 echo "✅ Rescue components built successfully."
 echo "Output directory contents:"
-ls -la $OUTPUT_DIR/atf $OUTPUT_DIR/uboot
+ls -la "$OUTPUT_DIR/atf" "$OUTPUT_DIR/uboot"
 echo "mtk_uartboot.tar.gz is in $OUTPUT_DIR"
