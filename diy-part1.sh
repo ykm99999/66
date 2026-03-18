@@ -40,7 +40,7 @@ sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 # 更新 feeds
 ./scripts/feeds update -a
 
-# ========== 定义问题包列表 ==========
+# ========== 定义问题包列表（最终版）==========
 PROBLEM_PKGS="
 aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
 pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
@@ -76,7 +76,7 @@ mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
 cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_OLD/ || exit 1
 cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_NEW/ || exit 1
 
-# 将设备定义追加到 filogic.mk（确保被构建系统加载）
+# 将设备定义追加到 filogic.mk
 cat >> $FILOGIC_MK << 'EOF'
 
 # SL3000 设备定义（由 diy-part1.sh 注入）
