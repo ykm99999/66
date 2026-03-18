@@ -9,13 +9,29 @@ IMMORTALWRT_BUILD="$WORKSPACE/immortalwrt-build"
 STAGING_DIR_IMAGE="$IMMORTALWRT_BUILD/staging_dir/image"
 DTS_PATH_OLD="target/linux/mediatek/dts"
 DTS_PATH_NEW="target/linux/mediatek/files-6.12/arch/arm64/boot/dts/mediatek"
-# 使用带前缀的设备定义文件名，确保被构建系统自动包含
+# 使用新的设备定义文件名
 MK_FILE="target/linux/mediatek/image/mt7981_sl3000.mk"
 
 mkdir -p $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware $STAGING_DIR_IMAGE
 
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
+
+# ========== 0. 验证三件套文件是否存在 ==========
+echo "=== 验证配置文件 ==="
+if [ ! -f "$CONFIG_DIR/mt7981_sl3000.mk" ]; then
+    echo "❌ 缺少 $CONFIG_DIR/mt7981_sl3000.mk"
+    exit 1
+fi
+if [ ! -f "$CONFIG_DIR/mt7981-sl-3000-emmc.dts" ]; then
+    echo "❌ 缺少 $CONFIG_DIR/mt7981-sl-3000-emmc.dts"
+    exit 1
+fi
+if [ ! -f "$CONFIG_DIR/sl3000.config" ]; then
+    echo "❌ 缺少 $CONFIG_DIR/sl3000.config"
+    exit 1
+fi
+echo "✅ 配置文件齐全"
 
 # ========== 1. 编译 ATF ==========
 cd $SOURCE_DIR/arm-trusted-firmware
@@ -80,7 +96,8 @@ cd immortalwrt-build
 # 更新 feeds
 ./scripts/feeds update -a
 
-# ========== 4. 彻底清除所有可能引起依赖问题的包 ==========
+# ========== 4. 彻底清除所有可能引起依赖问题的包（在安装 feeds 之前）==========
+echo "=== 清除问题包 ==="
 PROBLEM_PKGS="aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server shadow-tls shadowsocks-rust spotifyd tuic-client tuic-server yggdrasil-jumper gst1-plugins-base onionshare-cli onionshare weston wpewebkit"
 for pkg in $PROBLEM_PKGS; do
     find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
@@ -88,18 +105,22 @@ done
 rm -rf feeds/video feeds/telephony
 rm -rf package/feeds
 ./scripts/feeds update -i
+
+# ========== 5. 安装 feeds（此时 video 等已被删除）==========
 ./scripts/feeds install -a
+
+# 再次递归删除可能因依赖重新安装的包
 for pkg in $PROBLEM_PKGS; do
     find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
 done
 ./scripts/feeds update -i
 make package/symlinks
 
-# ========== 5. 注册三件套 ==========
+# ========== 6. 注册三件套 ==========
 mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
 cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_OLD/ || exit 1
 cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_NEW/ || exit 1
-cp -v $CONFIG_DIR/mt7981.mk $MK_FILE || exit 1
+cp -v $CONFIG_DIR/mt7981_sl3000.mk $MK_FILE || exit 1
 
 if ! grep -q "sl_3000-emmc" $MK_FILE; then
     echo "❌ 设备定义未成功写入 $MK_FILE"
@@ -111,7 +132,7 @@ echo "CONFIG_TARGET_mediatek=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
 
-# ========== 6. 生成基础配置并验证设备是否被识别 ==========
+# ========== 7. 生成基础配置并验证设备是否被识别 ==========
 make defconfig
 
 DEVICE_LIST=$(make info | grep -A 50 "Target: mediatek/filogic" | grep -o "sl_3000-emmc" | sort -u)
@@ -129,7 +150,7 @@ make olddefconfig
 
 grep "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" .config || { echo "❌ 设备未在 .config 中启用！"; exit 1; }
 
-# ========== 7. 编译 ImmortalWrt ==========
+# ========== 8. 编译 ImmortalWrt ==========
 make VERSION_NUMBER="1.0.0" VERSION_CODE="r1" -j$(nproc) V=s 2>&1 | tee build.log
 
 # 收集固件
@@ -137,7 +158,7 @@ mkdir -p $OUTPUT_DIR/firmware
 find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp -v {} $OUTPUT_DIR/firmware/ \;
 cp build.log $OUTPUT_DIR/firmware/
 
-# ========== 8. 打包 mtk_uartboot ==========
+# ========== 9. 打包 mtk_uartboot ==========
 cd $SOURCE_DIR/mtk_uartboot
 tar -czf $OUTPUT_DIR/mtk_uartboot.tar.gz .
 
