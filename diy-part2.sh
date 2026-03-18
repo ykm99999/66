@@ -34,8 +34,19 @@ make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 
 find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.bin \; 2>/dev/null || echo "No bl2.bin for 1G nor"
 find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.elf \; 2>/dev/null || echo "No bl2.elf for 1G nor"
 
-cp build/mt7981/release/bl31.bin $STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin 2>/dev/null || echo "No bl31.bin for emmc"
-cp build/mt7981/release/bl31.bin $STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin 2>/dev/null || echo "No bl31.bin for nor"
+# 检查 bl31.bin 是否存在
+if [ ! -f build/mt7981/release/bl31.bin ]; then
+    echo "❌ bl31.bin not found after ATF compilation!"
+    exit 1
+fi
+
+# 复制 bl31.bin 到 staging_dir（带详细输出，失败则退出）
+echo "Copying bl31.bin to staging_dir..."
+cp -v build/mt7981/release/bl31.bin $STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin || { echo "❌ Failed to copy bl31.bin for emmc"; exit 1; }
+cp -v build/mt7981/release/bl31.bin $STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin || { echo "❌ Failed to copy bl31.bin for nor"; exit 1; }
+
+# 确认文件已复制
+ls -la $STAGING_DIR_IMAGE/mt7981-*.bin || { echo "❌ Copied bl31 files missing"; exit 1; }
 
 echo "=== Compiling fiptool from ATF ==="
 make -C tools/fiptool CROSS_COMPILE=
@@ -59,8 +70,13 @@ make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
 if [ ! -f fip.bin ] && [ ! -f u-boot.fip ]; then
     echo "⚠️ fip.bin not generated, creating manually..."
     if [ -f "$FIPTOOL" ]; then
+        # 再次确认 staging_dir 中的 bl31 文件存在
+        if [ ! -f "$STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin" ]; then
+            echo "❌ mt7981-emmc-ddr4-bl31.bin not found in staging_dir!"
+            exit 1
+        fi
         "$FIPTOOL" create \
-            --soc-fw $STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin \
+            --soc-fw "$STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin" \
             --nt-fw u-boot.bin \
             u-boot.fip
         cp u-boot.fip $OUTPUT_DIR/uboot/fip-emmc.bin
@@ -72,9 +88,6 @@ else
     cp fip.bin $OUTPUT_DIR/uboot/fip-emmc.bin 2>/dev/null || cp u-boot.fip $OUTPUT_DIR/uboot/fip-emmc.bin 2>/dev/null
 fi
 cp u-boot.bin $OUTPUT_DIR/uboot/u-boot-emmc.bin
-
-# ========== 回到 ImmortalWrt 构建目录 ==========
-cd "$IMMORTALWRT_BUILD_DIR"
 
 # ========== 打包 mtk_uartboot ==========
 cd $SOURCE_DIR/mtk_uartboot
