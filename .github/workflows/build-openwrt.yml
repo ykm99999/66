@@ -30,11 +30,17 @@ jobs:
             python3-distutils python3-setuptools rsync unzip zlib1g-dev file wget \
             gcc-aarch64-linux-gnu device-tree-compiler
 
-      - name: Run build script
+      - name: Run diy-part1.sh (Configuration & Package Purge)
         run: |
           chmod +x main-repo/diy-part1.sh
           cd main-repo
           ./diy-part1.sh
+
+      - name: Run diy-part2.sh (Compilation)
+        run: |
+          chmod +x main-repo/diy-part2.sh
+          cd main-repo
+          ./diy-part2.sh
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
