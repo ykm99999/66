@@ -60,7 +60,7 @@
 	};
 };
 
-/* SPI-NOR 分区（与1GB版保持一致） */
+/* SPI-NOR 闪存分区布局（与救砖镜像对齐） */
 &spi0 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&spi0_flash_pins>;
@@ -101,8 +101,106 @@
 	};
 };
 
-/* eMMC、网络、引脚等节点与1GB版完全相同，以下省略以节省篇幅 */
-/* 实际使用时请从1GB版复制以下所有节点：
-   &mmc0, &eth, &pio, &uart0, &watchdog, &reg_1p8v, &reg_3p3v
-   并粘贴至此 */
-/* 注意：此处为完整文件，以下必须包含所有内容，为简洁省略，但实际文件中应有完整代码 */
+/* eMMC 链路：物理对齐 128G 存储 */
+&mmc0 {
+	status = "okay";
+	pinctrl-names = "default", "state_uhs";
+	pinctrl-0 = <&mmc0_pins_default>;
+	pinctrl-1 = <&mmc0_pins_uhs>;
+	bus-width = <8>;
+	max-frequency = <52000000>;
+	cap-mmc-highspeed;
+	cap-mmc-hw-reset;
+	vmmc-supply = <&reg_3p3v>;
+	vqmmc-supply = <&reg_1p8v>;
+	non-removable;
+	no-sd;
+	no-sdio;
+};
+
+/* 网络物理链路：MT7531 交换机 + 2.5G 上联 */
+&eth {
+	status = "okay";
+
+	gmac0: mac@0 {
+		compatible = "mediatek,eth-mac";
+		reg = <0>;
+		phy-mode = "2500base-x";
+		fixed-link {
+			speed = <2500>;
+			full-duplex;
+			pause;
+		};
+	};
+
+	mdio: mdio-bus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		switch@0 {
+			compatible = "mediatek,mt7531";
+			reg = <31>;
+			reset-gpios = <&pio 39 GPIO_ACTIVE_LOW>;
+			reset-delay-us = <10000>;
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 { reg = <0>; label = "lan1"; };
+				port@1 { reg = <1>; label = "lan2"; };
+				port@2 { reg = <2>; label = "lan3"; };
+				port@3 { reg = <3>; label = "wan"; };
+
+				port@6 {
+					reg = <6>;
+					label = "cpu";
+					ethernet = <&gmac0>;
+					phy-mode = "2500base-x";
+					fixed-link {
+						speed = <2500>;
+						full-duplex;
+						pause;
+					};
+				};
+			};
+		};
+	};
+};
+
+&pio {
+	spi0_flash_pins: spi0-pins {
+		mux {
+			function = "spi";
+			groups = "spi0", "spi0_wp_hold";
+		};
+		conf-pu {
+			pins = "SPI0_CS", "SPI0_HOLD", "SPI0_WP";
+			bias-pull-up;
+		};
+	};
+
+	mmc0_pins_default: mmc0-pins-default {
+		mux {
+			function = "flash";
+			groups = "emmc_45";
+		};
+		conf-pu {
+			pins = "EMMC_RSTB";
+			bias-pull-up;
+		};
+	};
+
+	mmc0_pins_uhs: mmc0-pins-uhs {
+		mux {
+			function = "flash";
+			groups = "emmc_45";
+		};
+	};
+};
+
+&uart0 { status = "okay"; };
+&watchdog { status = "okay"; };
+
+&reg_1p8v { status = "okay"; };
+&reg_3p3v { status = "okay"; };
