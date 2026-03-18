@@ -32,13 +32,13 @@ make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 
 find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.bin \; 2>/dev/null || echo "No bl2.bin for 1G nor"
 find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.elf \; 2>/dev/null || echo "No bl2.elf for 1G nor"
 
-# 【修复1】修正 bl31.bin 路径
+# 复制 bl31.bin（路径已修正）
 cp build/mt7981/release/bl31.bin $STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin 2>/dev/null || echo "No bl31.bin for emmc"
 cp build/mt7981/release/bl31.bin $STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin 2>/dev/null || echo "No bl31.bin for nor"
 
-# 【修复2】编译 ATF 自带的 fiptool
+# 编译 ATF 自带的 fiptool
 echo "=== Compiling fiptool from ATF ==="
-make -C tools/fiptool CROSS_COMPILE=  # 主机工具不需要交叉编译
+make -C tools/fiptool CROSS_COMPILE=
 FIPTOOL="$PWD/tools/fiptool/fiptool"
 
 # ========== 2. 编译 U-Boot (eMMC版) 并生成 FIP ==========
@@ -58,7 +58,7 @@ make olddefconfig
 
 make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
 
-# 检查是否生成 fip.bin，若没有则手动创建
+# 检查并生成 FIP
 if [ ! -f fip.bin ] && [ ! -f u-boot.fip ]; then
     echo "⚠️ fip.bin not generated, creating manually..."
     if [ -f "$FIPTOOL" ]; then
@@ -82,45 +82,46 @@ rm -rf immortalwrt-build
 cp -r $SOURCE_DIR/immortalwrt immortalwrt-build
 cd immortalwrt-build
 
+# 更新 feeds
+echo "=== Updating feeds ==="
+./scripts/feeds update -a
+./scripts/feeds install -a
+
+# 确保所有软件包正确链接（解决依赖缺失警告）
+make package/symlinks
+
 # 复制三件套文件
-echo "=== 复制三件套文件 ==="
+echo "=== Copying device-specific files ==="
 cp -v $CONFIG_DIR/mt7981-sl-3000-emmc-1g.dts target/linux/mediatek/dts/ || echo "❌ 1G DTS copy failed"
 cp -v $CONFIG_DIR/mt7981-sl-3000-emmc-512m.dts target/linux/mediatek/dts/ || echo "❌ 512M DTS copy failed"
 cp -v $CONFIG_DIR/mt7981.mk target/linux/mediatek/image/ || { echo "❌ mt7981.mk copy failed"; exit 1; }
 cp -v $CONFIG_DIR/sl3000.config .config || { echo "❌ sl3000.config copy failed"; exit 1; }
 
-# 验证复制结果
-echo "=== target/linux/mediatek/dts/ 内容 ==="
-ls -la target/linux/mediatek/dts/mt7981*.dts
-echo "=== target/linux/mediatek/image/ 内容 ==="
-ls -la target/linux/mediatek/image/mt7981.mk
-
 # 强制启用您的设备
-echo "=== 强制启用设备 ==="
+echo "=== Enabling devices ==="
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-1g=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-512m=y" >> .config
 
-# 更新 feeds
-echo "=== 更新 feeds ==="
-./scripts/feeds update -a
-./scripts/feeds install -a
-
-# 重新生成配置
+# 重新生成配置（使用 defconfig 重置，然后合并）
+make defconfig
+# 注意：defconfig 会重置配置，因此需要再次启用设备（但目标平台已选，设备会自动出现？保险起见再次添加）
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-1g=y" >> .config
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-512m=y" >> .config
 make olddefconfig
 
 # 列出启用的设备
-echo "=== 当前启用的 mediatek/filogic 设备 ==="
-make info | grep -A 30 "Target: mediatek/filogic" | grep "sl_3000" || echo "⚠️ 您的设备未在启用列表中！"
+echo "=== Enabled mediatek/filogic devices ==="
+make info | grep -A 30 "Target: mediatek/filogic" | grep "sl_3000" || echo "⚠️ Devices not enabled!"
 
 # 编译
-echo "=== 开始编译 ImmortalWrt ==="
+echo "=== Building ImmortalWrt ==="
 make -j$(nproc) V=s 2>&1 | tee build.log
 
 # 列出并收集固件
-echo "=== 列出 bin/targets/ 下所有镜像 ==="
+echo "=== Listing generated images ==="
 find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -ls
 
-echo "=== 收集固件到 output/firmware ==="
+echo "=== Collecting firmware ==="
 find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp -v {} $OUTPUT_DIR/firmware/ \;
 cp build.log $OUTPUT_DIR/firmware/
 
@@ -129,5 +130,5 @@ cd $SOURCE_DIR/mtk_uartboot
 tar -czf $OUTPUT_DIR/mtk_uartboot.tar.gz .
 
 # ========== 最终输出 ==========
-echo "✅ 构建完成，输出目录内容:"
+echo "✅ Build complete. Output directory contents:"
 ls -la $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware
