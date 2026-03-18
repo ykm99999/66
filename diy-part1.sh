@@ -97,6 +97,12 @@ cd immortalwrt-build
 
 # ========== 4. 彻底清除所有已知问题包 ==========
 echo "=== 递归删除所有问题包 ==="
+
+# 首先删除整个 telephony 和 video feed（它们包含大量问题包）
+rm -rf feeds/telephony
+rm -rf feeds/video
+
+# 问题包列表（包含所有出现过依赖缺失的包）
 PROBLEM_PKGS="
 aardvark-dns
 arp-whisper
@@ -124,6 +130,17 @@ tuic-client
 tuic-server
 yggdrasil-jumper
 gst1-plugins-base
+gst1-plugins-ugly
+libdmapsharing
+kamailio
+smartdns
+pymysql
+python-orjson
+python-paramiko
+python-pyopenssl
+python-rpds-py
+python-service-identity
+python-twisted
 onionshare-cli
 onionshare
 weston
@@ -134,11 +151,11 @@ luci-app-spotifyd
 luci-app-clamav
 luci-app-dufs
 luci-app-openclash
+luci-app-smartdns
 libextractor
 python-bcrypt
 python-cryptography
 python-maturin
-smartdns
 podman
 ruby-yaml
 "
@@ -146,9 +163,6 @@ ruby-yaml
 for pkg in $PROBLEM_PKGS; do
     find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
 done
-
-# 删除整个 video 和 telephony feed（已注释，但确保删除）
-rm -rf feeds/video feeds/telephony
 
 # 清理 package/feeds 下的符号链接
 rm -rf package/feeds
