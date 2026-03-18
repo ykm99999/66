@@ -44,7 +44,7 @@ sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 # 更新 feeds
 ./scripts/feeds update -a
 
-# ========== 定义问题包列表（此处是需要经常修改的部分）==========
+# ========== 定义问题包列表（已包含所有历史缺失包）==========
 PROBLEM_PKGS="
 aardvark-dns
 arp-whisper
@@ -74,6 +74,12 @@ yggdrasil-jumper
 gst1-plugins-base
 gst1-plugins-good
 gst1-plugins-ugly
+gst1-plugins-bad
+gst1-libav
+dmapd
+gmediarender
+gnunet
+grilo-plugins
 libdmapsharing
 kamailio
 smartdns
@@ -86,6 +92,7 @@ python-service-identity
 python-twisted
 python-docker
 python-jsonschema
+python-jsonschema-specifications
 python-referencing
 onionshare-cli
 onionshare
@@ -112,7 +119,7 @@ for pkg in $PROBLEM_PKGS; do
     find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
 done
 
-# 删除整个 video 和 telephony feed（确保删除）
+# 删除整个 video 和 telephony feed
 rm -rf feeds/video feeds/telephony
 
 # 清理 package/feeds 下的符号链接
