@@ -9,7 +9,6 @@ IMMORTALWRT_BUILD="$WORKSPACE/immortalwrt-build"
 STAGING_DIR_IMAGE="$IMMORTALWRT_BUILD/staging_dir/image"
 DTS_PATH_OLD="target/linux/mediatek/dts"
 DTS_PATH_NEW="target/linux/mediatek/files-6.12/arch/arm64/boot/dts/mediatek"
-# 使用新的设备定义文件名
 MK_FILE="target/linux/mediatek/image/mt7981_sl3000.mk"
 
 mkdir -p $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware $STAGING_DIR_IMAGE
@@ -96,27 +95,80 @@ cd immortalwrt-build
 # 更新 feeds
 ./scripts/feeds update -a
 
-# ========== 4. 彻底清除所有可能引起依赖问题的包（在安装 feeds 之前）==========
-echo "=== 清除问题包 ==="
-PROBLEM_PKGS="aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server shadow-tls shadowsocks-rust spotifyd tuic-client tuic-server yggdrasil-jumper gst1-plugins-base onionshare-cli onionshare weston wpewebkit"
+# ========== 4. 彻底清除所有已知问题包 ==========
+echo "=== 递归删除所有问题包 ==="
+PROBLEM_PKGS="
+aardvark-dns
+arp-whisper
+bottom
+cargo-c
+clamav
+dufs
+eza
+fish
+lsd
+netavark
+pdns-recursor
+procs
+python-setuptools-rust
+ripgrep
+ruby
+rust-bindgen
+rustdesk-server
+shadow-tls
+shadowsocks-rust
+shadowsocks-rust-sslocal
+shadowsocks-rust-ssserver
+spotifyd
+tuic-client
+tuic-server
+yggdrasil-jumper
+gst1-plugins-base
+onionshare-cli
+onionshare
+weston
+wpewebkit
+luci-app-passwall
+luci-app-rustdesk-server
+luci-app-spotifyd
+luci-app-clamav
+luci-app-dufs
+luci-app-openclash
+libextractor
+python-bcrypt
+python-cryptography
+python-maturin
+smartdns
+podman
+ruby-yaml
+"
+
 for pkg in $PROBLEM_PKGS; do
     find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
 done
+
+# 删除整个 video 和 telephony feed（已注释，但确保删除）
 rm -rf feeds/video feeds/telephony
+
+# 清理 package/feeds 下的符号链接
 rm -rf package/feeds
+
+# 更新 feed 索引
 ./scripts/feeds update -i
 
-# ========== 5. 安装 feeds（此时 video 等已被删除）==========
+# 安装 feeds（此时问题包已不存在）
 ./scripts/feeds install -a
 
-# 再次递归删除可能因依赖重新安装的包
+# 再次递归删除（防止某些包因依赖被重新拉取）
 for pkg in $PROBLEM_PKGS; do
     find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
 done
+
+# 再次更新索引并重建符号链接
 ./scripts/feeds update -i
 make package/symlinks
 
-# ========== 6. 注册三件套 ==========
+# ========== 5. 注册三件套 ==========
 mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
 cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_OLD/ || exit 1
 cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_NEW/ || exit 1
@@ -132,25 +184,22 @@ echo "CONFIG_TARGET_mediatek=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
 
-# ========== 7. 生成基础配置并验证设备是否被识别 ==========
+# ========== 6. 生成基础配置 ==========
 make defconfig
 
-DEVICE_LIST=$(make info | grep -A 50 "Target: mediatek/filogic" | grep -o "sl_3000-emmc" | sort -u)
-if ! echo "$DEVICE_LIST" | grep -q "sl_3000-emmc"; then
-    echo "❌ 设备 sl_3000-emmc 未被构建系统识别！可用设备："
-    make info | grep -A 50 "Target: mediatek/filogic" | grep "sl_3000" || true
-    exit 1
-fi
-
-echo "✅ 设备已识别，继续构建"
-
-# 再次写入设备选项并更新配置
+# 再次写入设备选项（defconfig 可能会重置）
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
 make olddefconfig
 
-grep "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" .config || { echo "❌ 设备未在 .config 中启用！"; exit 1; }
+# 验证设备是否在 .config 中启用
+echo "=== 验证设备启用状态 ==="
+if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" .config; then
+    echo "❌ 设备 sl_3000-emmc 未在 .config 中启用！"
+    exit 1
+fi
+echo "✅ 设备已启用"
 
-# ========== 8. 编译 ImmortalWrt ==========
+# ========== 7. 编译 ImmortalWrt ==========
 make VERSION_NUMBER="1.0.0" VERSION_CODE="r1" -j$(nproc) V=s 2>&1 | tee build.log
 
 # 收集固件
@@ -158,7 +207,7 @@ mkdir -p $OUTPUT_DIR/firmware
 find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp -v {} $OUTPUT_DIR/firmware/ \;
 cp build.log $OUTPUT_DIR/firmware/
 
-# ========== 9. 打包 mtk_uartboot ==========
+# ========== 8. 打包 mtk_uartboot ==========
 cd $SOURCE_DIR/mtk_uartboot
 tar -czf $OUTPUT_DIR/mtk_uartboot.tar.gz .
 
