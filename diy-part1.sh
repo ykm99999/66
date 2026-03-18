@@ -1,7 +1,6 @@
 #!/bin/bash
 set -e
 
-# ========== 定义路径 ==========
 WORKSPACE="$GITHUB_WORKSPACE"
 SOURCE_DIR="$WORKSPACE/source-repo"
 CONFIG_DIR="$WORKSPACE/main-repo/888"
@@ -10,9 +9,9 @@ IMMORTALWRT_BUILD="$WORKSPACE/immortalwrt-build"
 STAGING_DIR_IMAGE="$IMMORTALWRT_BUILD/staging_dir/image"
 DTS_PATH_OLD="target/linux/mediatek/dts"
 DTS_PATH_NEW="target/linux/mediatek/files-6.12/arch/arm64/boot/dts/mediatek"
-MK_FILE="target/linux/mediatek/image/mt7981.mk"
+# 使用带前缀的设备定义文件名，确保被构建系统自动包含
+MK_FILE="target/linux/mediatek/image/mt7981_sl3000.mk"
 
-# ========== 创建输出目录 ==========
 mkdir -p $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware $STAGING_DIR_IMAGE
 
 export CROSS_COMPILE=aarch64-linux-gnu-
@@ -26,11 +25,6 @@ make clean
 make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=512
 find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-512m-emmc.bin \; 2>/dev/null || echo "No bl2.bin for 512M emmc"
 find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-512m-emmc.elf \; 2>/dev/null || echo "No bl2.elf for 512M emmc"
-
-make clean
-make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=1024
-find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-emmc.bin \; 2>/dev/null || echo "No bl2.bin for 1G emmc"
-find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-emmc.elf \; 2>/dev/null || echo "No bl2.elf for 1G emmc"
 
 echo "=== Building ATF 1G (NOR - for rescue) ==="
 make clean
@@ -84,107 +78,62 @@ cp -r $SOURCE_DIR/immortalwrt immortalwrt-build
 cd immortalwrt-build
 
 # 更新 feeds
-echo "=== Updating feeds ==="
 ./scripts/feeds update -a
 
-# ========== 4. 彻底递归删除所有问题包 ==========
-echo "=== Purging problematic packages recursively ==="
-
-# 定义需要删除的包名列表（包含所有可能出现在日志中的问题包）
-PROBLEM_PKGS="aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server shadow-tls shadowsocks-rust spotifyd tuic-client tuic-server yggdrasil-jumper gst1-plugins-base onionshare-cli onionshare"
-
-# 递归删除 feeds 中所有匹配的目录（无论层级多深）
+# ========== 4. 彻底清除所有可能引起依赖问题的包 ==========
+PROBLEM_PKGS="aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server shadow-tls shadowsocks-rust spotifyd tuic-client tuic-server yggdrasil-jumper gst1-plugins-base onionshare-cli onionshare weston wpewebkit"
 for pkg in $PROBLEM_PKGS; do
     find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
 done
-
-# 删除整个 video 和 telephony feed
 rm -rf feeds/video feeds/telephony
-
-# 清理 package/feeds 下所有符号链接
 rm -rf package/feeds
-
-# 重新生成 feed 索引
 ./scripts/feeds update -i
-
-# 安装 feeds（此时问题包已被移除，不会重新安装）
 ./scripts/feeds install -a
-
-# 再次递归删除（防止某些包因依赖被重新下载）
 for pkg in $PROBLEM_PKGS; do
     find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
 done
-
-# 再次更新索引并重建符号链接
 ./scripts/feeds update -i
 make package/symlinks
 
-# ========== 5. 自动注册三件套 (双路径注入 DTS) ==========
-echo "=== 开始物理注册 SL3000 设备链 ==="
+# ========== 5. 注册三件套 ==========
+mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
+cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_OLD/ || exit 1
+cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_NEW/ || exit 1
+cp -v $CONFIG_DIR/mt7981.mk $MK_FILE || exit 1
 
-# 5.1 注入 DTS 文件到两个路径
-mkdir -p $DTS_PATH_OLD
-mkdir -p $DTS_PATH_NEW
-
-echo "复制 DTS 到旧路径: $DTS_PATH_OLD"
-cp -v $CONFIG_DIR/mt7981-sl-3000-emmc-1g.dts $DTS_PATH_OLD/ || { echo "❌ 1G DTS copy to old path failed"; exit 1; }
-cp -v $CONFIG_DIR/mt7981-sl-3000-emmc-512m.dts $DTS_PATH_OLD/ || { echo "❌ 512M DTS copy to old path failed"; exit 1; }
-
-echo "复制 DTS 到新内核专用路径: $DTS_PATH_NEW"
-cp -v $CONFIG_DIR/mt7981-sl-3000-emmc-1g.dts $DTS_PATH_NEW/ || { echo "❌ 1G DTS copy to new path failed"; exit 1; }
-cp -v $CONFIG_DIR/mt7981-sl-3000-emmc-512m.dts $DTS_PATH_NEW/ || { echo "❌ 512M DTS copy to new path failed"; exit 1; }
-
-# 5.2 注入设备定义文件
-cp -v $CONFIG_DIR/mt7981.mk $MK_FILE || { echo "❌ mt7981.mk copy failed"; exit 1; }
-
-# 验证设备定义是否已注册
-if ! grep -q "sl_3000-emmc-1g" $MK_FILE; then
+if ! grep -q "sl_3000-emmc" $MK_FILE; then
     echo "❌ 设备定义未成功写入 $MK_FILE"
     exit 1
 fi
-echo "✅ 设备定义已物理注册"
 
-# 5.3 注入内核配置种子
-cp -v $CONFIG_DIR/sl3000.config .config || { echo "❌ sl3000.config copy failed"; exit 1; }
-
-# 5.4 强制启用您的设备
+cp -v $CONFIG_DIR/sl3000.config .config || exit 1
 echo "CONFIG_TARGET_mediatek=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-1g=y" >> .config
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-512m=y" >> .config
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
 
-# 5.5 重新生成配置
+# ========== 6. 生成基础配置并验证设备是否被识别 ==========
 make defconfig
 
-# 再次添加设备选项（defconfig 可能会重置）
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-1g=y" >> .config
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-512m=y" >> .config
-
-# ========== 6. 详细模式运行 oldconfig ==========
-echo "=== Running oldconfig with verbose output ==="
-# 使用 -j1 V=s 确保详细输出，并捕获错误
-make -j1 V=s oldconfig 2>&1 | tee oldconfig.log
-if [ ${PIPESTATUS[0]} -ne 0 ]; then
-    echo "❌ oldconfig failed. Check oldconfig.log for details."
-    cat oldconfig.log
+DEVICE_LIST=$(make info | grep -A 50 "Target: mediatek/filogic" | grep -o "sl_3000-emmc" | sort -u)
+if ! echo "$DEVICE_LIST" | grep -q "sl_3000-emmc"; then
+    echo "❌ 设备 sl_3000-emmc 未被构建系统识别！可用设备："
+    make info | grep -A 50 "Target: mediatek/filogic" | grep "sl_3000" || true
     exit 1
 fi
 
-# 5.6 最终验证设备是否启用
-echo "=== 验证设备启用状态 ==="
-grep "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-1g=y" .config || { echo "❌ 1G device not enabled!"; exit 1; }
-grep "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc-512m=y" .config || { echo "❌ 512M device not enabled!"; exit 1; }
-echo "✅ 设备已成功注册并启用"
+echo "✅ 设备已识别，继续构建"
+
+# 再次写入设备选项并更新配置
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
+make olddefconfig
+
+grep "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" .config || { echo "❌ 设备未在 .config 中启用！"; exit 1; }
 
 # ========== 7. 编译 ImmortalWrt ==========
-echo "=== Building ImmortalWrt ==="
 make VERSION_NUMBER="1.0.0" VERSION_CODE="r1" -j$(nproc) V=s 2>&1 | tee build.log
 
-# 列出并收集固件
-echo "=== Listing generated images ==="
-find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -ls
-
-echo "=== Collecting firmware ==="
+# 收集固件
+mkdir -p $OUTPUT_DIR/firmware
 find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp -v {} $OUTPUT_DIR/firmware/ \;
 cp build.log $OUTPUT_DIR/firmware/
 
@@ -192,6 +141,5 @@ cp build.log $OUTPUT_DIR/firmware/
 cd $SOURCE_DIR/mtk_uartboot
 tar -czf $OUTPUT_DIR/mtk_uartboot.tar.gz .
 
-# ========== 9. 最终输出 ==========
 echo "✅ Build complete. Output directory contents:"
 ls -la $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware
