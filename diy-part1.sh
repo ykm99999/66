@@ -1,9 +1,6 @@
 #!/bin/bash
 set -e
 
-# 启用命令回显以便调试（可选，构建成功后可以删除或注释掉）
-set -x
-
 WORKSPACE="$GITHUB_WORKSPACE"
 SOURCE_DIR="$WORKSPACE/source-repo"
 CONFIG_DIR="$WORKSPACE/main-repo/888"
@@ -15,10 +12,6 @@ mkdir -p $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware $STAGING_DIR_IMA
 
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
-
-# ========== 调试：检查 888 目录内容 ==========
-echo "=== DEBUG: Contents of 888 directory ==="
-ls -la $CONFIG_DIR/
 
 # ========== 1. 编译 ATF ==========
 echo "=== Building ATF 512M (EMMC) ==="
@@ -43,7 +36,13 @@ find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-no
 cp build/mt7981/release/bl31/bl31.bin $STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin 2>/dev/null || echo "No bl31.bin for emmc"
 cp build/mt7981/release/bl31/bl31.bin $STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin 2>/dev/null || echo "No bl31.bin for nor"
 
-# ========== 2. 编译 U-Boot (eMMC版) 并生成 FIP ==========
+# ========== 2. 提前编译 fiptool（修复缺失）==========
+echo "=== Compiling fiptool ==="
+cd $IMMORTALWRT_BUILD
+make defconfig
+make tools/fiptool/compile V=s -j$(nproc)
+
+# ========== 3. 编译 U-Boot (eMMC版) 并生成 FIP ==========
 echo "=== Building U-Boot (eMMC) ==="
 cd $SOURCE_DIR/u-boot
 make clean
@@ -63,12 +62,7 @@ make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
 # 检查是否生成 fip.bin，若没有则手动创建
 if [ ! -f fip.bin ] && [ ! -f u-boot.fip ]; then
     echo "⚠️ fip.bin not generated, creating manually..."
-    # 查找 fiptool 路径
     FIPTOOL="$IMMORTALWRT_BUILD/staging_dir/host/bin/fiptool"
-    if [ ! -f "$FIPTOOL" ]; then
-        # 如果 fiptool 不存在，尝试在 build_dir 中查找
-        FIPTOOL=$(find $IMMORTALWRT_BUILD/build_dir -name fiptool -type f 2>/dev/null | head -1)
-    fi
     if [ -f "$FIPTOOL" ]; then
         "$FIPTOOL" create \
             --soc-fw $STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin \
@@ -76,7 +70,7 @@ if [ ! -f fip.bin ] && [ ! -f u-boot.fip ]; then
             u-boot.fip
         cp u-boot.fip $OUTPUT_DIR/uboot/fip-emmc.bin
     else
-        echo "❌ fiptool not found, cannot create FIP"
+        echo "❌ fiptool still not found, cannot create FIP"
         exit 1
     fi
 else
@@ -84,7 +78,7 @@ else
 fi
 cp u-boot.bin $OUTPUT_DIR/uboot/u-boot-emmc.bin
 
-# ========== 3. 编译 ImmortalWrt ==========
+# ========== 4. 编译 ImmortalWrt ==========
 cd $WORKSPACE
 rm -rf immortalwrt-build
 cp -r $SOURCE_DIR/immortalwrt immortalwrt-build
@@ -132,7 +126,7 @@ echo "=== 收集固件到 output/firmware ==="
 find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp -v {} $OUTPUT_DIR/firmware/ \;
 cp build.log $OUTPUT_DIR/firmware/
 
-# ========== 4. 打包 mtk_uartboot ==========
+# ========== 5. 打包 mtk_uartboot ==========
 cd $SOURCE_DIR/mtk_uartboot
 tar -czf $OUTPUT_DIR/mtk_uartboot.tar.gz .
 
