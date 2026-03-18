@@ -36,7 +36,7 @@ jobs:
           cd main-repo
           ./diy-part1.sh
 
-      - name: Run diy-part2.sh (Compilation)
+      - name: Run diy-part2.sh (Rescue Components Compilation)
         run: |
           chmod +x main-repo/diy-part2.sh
           cd main-repo
