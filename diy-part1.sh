@@ -46,11 +46,6 @@ sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 
 # ========== 定义问题包列表（已包含最新缺失的包）==========
 PROBLEM_PKGS="
-gnunet
-gnunet-fuse
-gnunet-fs
-grilo-plugins
-lcdgrilo
 aardvark-dns
 arp-whisper
 bottom
@@ -84,7 +79,10 @@ gst1-libav
 dmapd
 gmediarender
 gnunet
+gnunet-fuse
+gnunet-fs
 grilo-plugins
+lcdgrilo
 libdmapsharing
 kamailio
 smartdns
@@ -167,12 +165,12 @@ make defconfig
 # 再次写入设备选项（defconfig 可能会重置）
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
 
-# 使用详细模式运行 olddefconfig，并捕获输出
-echo "=== 运行 olddefconfig（详细模式）==="
-make -j1 V=s olddefconfig 2>&1 | tee olddefconfig.log
+# ========== 使用 oldconfig 更新配置（修复：原 olddefconfig 不存在）==========
+echo "=== 运行 oldconfig（详细模式）==="
+make -j1 V=s oldconfig 2>&1 | tee oldconfig.log
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
-    echo "❌ olddefconfig 失败，错误日志如下（最后50行）："
-    tail -50 olddefconfig.log
+    echo "❌ oldconfig 失败，错误日志如下（最后50行）："
+    tail -50 oldconfig.log
     exit 1
 fi
 
