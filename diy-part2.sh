@@ -16,7 +16,7 @@ cd "$IMMORTALWRT_BUILD_DIR"
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# ========== 1. 编译 ATF（救砖组件）==========
+# ========== 编译 ATF ==========
 cd $SOURCE_DIR/arm-trusted-firmware
 
 echo "=== Building ATF 512M (EMMC) ==="
@@ -53,7 +53,7 @@ echo "=== Compiling fiptool from ATF ==="
 make -C tools/fiptool CROSS_COMPILE=
 FIPTOOL="$PWD/tools/fiptool/fiptool"
 
-# ========== 2. 编译 U-Boot（eMMC版）并生成 FIP ==========
+# ========== 编译 U-Boot (eMMC版) 并生成 FIP ==========
 cd $SOURCE_DIR/u-boot
 echo "=== Building U-Boot (eMMC) ==="
 make clean
@@ -88,7 +88,7 @@ else
 fi
 cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-emmc.bin"
 
-# ========== 3. 编译 U-Boot（NOR版）并生成 FIP ==========
+# ========== 编译 U-Boot (NOR版) 并生成 FIP ==========
 cd $SOURCE_DIR/u-boot
 echo "=== Building U-Boot (NOR) ==="
 make clean
@@ -123,7 +123,7 @@ else
 fi
 cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
 
-# ========== 4. 编译 ImmortalWrt 完整固件 ==========
+# ========== 编译 ImmortalWrt 完整固件 ==========
 echo "=== Building ImmortalWrt Firmware ==="
 cd "$IMMORTALWRT_BUILD_DIR"
 
@@ -135,7 +135,7 @@ mkdir -p "$OUTPUT_DIR/firmware"
 find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp -v {} "$OUTPUT_DIR/firmware/" \;
 cp build.log "$OUTPUT_DIR/firmware/"
 
-# ========== 5. 打包 mtk_uartboot ==========
+# ========== 打包 mtk_uartboot ==========
 cd $SOURCE_DIR/mtk_uartboot
 tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
 
