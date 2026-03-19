@@ -37,7 +37,7 @@ cd immortalwrt-build
 # 修改 feeds 配置：禁用 telephony feed
 sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 
-# ========== 【新增】添加 PassWall2 的 feeds ==========
+# 添加 PassWall2 的 feeds
 echo "src-git passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages.git;main" >> feeds.conf.default
 echo "src-git passwall2 https://github.com/xiaorouji/openwrt-passwall2.git;main" >> feeds.conf.default
 
@@ -45,7 +45,6 @@ echo "src-git passwall2 https://github.com/xiaorouji/openwrt-passwall2.git;main"
 ./scripts/feeds update -a
 
 # ========== 定义问题包列表（最终版）==========
-# 注意：如果你需要保留 shadowsocks-rust、docker 等包，请将对应名称从列表中移除。
 PROBLEM_PKGS="
 aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
 pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
@@ -88,7 +87,7 @@ done
 ./scripts/feeds update -i
 make package/symlinks
 
-# ========== 注册三件套（设备树 + 设备定义直接注入 filogic.mk）==========
+# ========== 注册三件套（设备树双路径注入 + 设备定义）==========
 mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
 cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_OLD/ || exit 1
 cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_NEW/ || exit 1
