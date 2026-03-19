@@ -19,16 +19,11 @@ export ARCH=arm64
 # ========== 强制修改 ATF 源码，启用 DDR4 ==========
 echo "=== Patching ATF source to force DDR4 ==="
 cd $SOURCE_DIR/arm-trusted-firmware
-# 备份原文件（可选）
-cp plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c.bak
-# 使用 sed 在函数开头插入强制赋值，并删除原来的条件判断（或直接替换整个函数）
-# 这里采用简单的方法：将函数开头修改为直接赋值，并保留原有逻辑
-sed -i '/^void mtk_mem_init(void)/,/^}/ {
-    s/^void mtk_mem_init(void)/void mtk_mem_init(void) { mt7981_use_ddr4 = 1; /
-    /^void mtk_mem_init(void)/d
-    s/^}/}\n/
-}' plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c
-# 更稳妥的做法：直接替换整个文件内容
+
+# 确保目标目录存在
+mkdir -p plat/mediatek/mt7981/drivers/dram
+
+# 直接写入修复后的 mtk_mem_init.c 内容（强制 DDR4）
 cat > plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c << 'EOF'
 /*
  * Copyright (c) 2021, MediaTek Inc. All rights reserved.
