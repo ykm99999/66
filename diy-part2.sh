@@ -6,7 +6,7 @@ SOURCE_DIR="$WORKSPACE/source-repo"
 OUTPUT_DIR="$WORKSPACE/output"
 STAGING_DIR_IMAGE="$WORKSPACE/immortalwrt-build/staging_dir/image"
 
-# 确保 staging_dir/image 目录存在（修复之前的错误）
+# 确保 staging_dir/image 目录存在
 mkdir -p "$STAGING_DIR_IMAGE"
 
 # 读取 part1 保存的构建目录
@@ -43,7 +43,7 @@ if [ ! -f build/mt7981/release/bl31.bin ]; then
     exit 1
 fi
 
-# 复制 bl31.bin 到 staging_dir（带详细输出，失败则退出）
+# 复制 bl31.bin 到 staging_dir（两个版本）
 echo "Copying bl31.bin to staging_dir..."
 cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin" || { echo "❌ Failed to copy bl31.bin for emmc"; exit 1; }
 cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin" || { echo "❌ Failed to copy bl31.bin for nor"; exit 1; }
@@ -56,6 +56,7 @@ make -C tools/fiptool CROSS_COMPILE=
 FIPTOOL="$PWD/tools/fiptool/fiptool"
 
 # ========== 编译 U-Boot (eMMC版) 并生成 FIP ==========
+echo "=== Building U-Boot (eMMC) ==="
 cd $SOURCE_DIR/u-boot
 make clean
 if [ -f configs/mt7981_emmc_rfb_defconfig ]; then
@@ -73,7 +74,6 @@ make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
 if [ ! -f fip.bin ] && [ ! -f u-boot.fip ]; then
     echo "⚠️ fip.bin not generated, creating manually..."
     if [ -f "$FIPTOOL" ]; then
-        # 再次确认 staging_dir 中的 bl31 文件存在
         if [ ! -f "$STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin" ]; then
             echo "❌ mt7981-emmc-ddr4-bl31.bin not found in staging_dir!"
             exit 1
@@ -91,6 +91,43 @@ else
     cp fip.bin "$OUTPUT_DIR/uboot/fip-emmc.bin" 2>/dev/null || cp u-boot.fip "$OUTPUT_DIR/uboot/fip-emmc.bin" 2>/dev/null
 fi
 cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-emmc.bin"
+
+# ========== 编译 U-Boot (NOR版) 并生成 FIP ==========
+echo "=== Building U-Boot (NOR) ==="
+cd $SOURCE_DIR/u-boot
+make clean
+if [ -f configs/mt7981_spim_nor_rfb_defconfig ]; then
+    make CROSS_COMPILE=aarch64-linux-gnu- mt7981_spim_nor_rfb_defconfig
+else
+    echo "❌ mt7981_spim_nor_rfb_defconfig not found, skipping NOR U-Boot build"
+    exit 1
+fi
+
+echo "CONFIG_MTK_FIP_SUPPORT=y" >> .config
+make olddefconfig
+
+make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
+
+if [ ! -f fip.bin ] && [ ! -f u-boot.fip ]; then
+    echo "⚠️ fip.bin not generated for NOR, creating manually..."
+    if [ -f "$FIPTOOL" ]; then
+        if [ ! -f "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin" ]; then
+            echo "❌ mt7981-nor-ddr4-bl31.bin not found in staging_dir!"
+            exit 1
+        fi
+        "$FIPTOOL" create \
+            --soc-fw "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin" \
+            --nt-fw u-boot.bin \
+            u-boot.fip
+        cp u-boot.fip "$OUTPUT_DIR/uboot/fip-nor.bin"
+    else
+        echo "❌ fiptool not found, cannot create FIP"
+        exit 1
+    fi
+else
+    cp fip.bin "$OUTPUT_DIR/uboot/fip-nor.bin" 2>/dev/null || cp u-boot.fip "$OUTPUT_DIR/uboot/fip-nor.bin" 2>/dev/null
+fi
+cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
 
 # ========== 打包 mtk_uartboot ==========
 cd $SOURCE_DIR/mtk_uartboot
