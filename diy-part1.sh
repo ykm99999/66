@@ -37,7 +37,7 @@ cd immortalwrt-build
 # 修改 feeds 配置：禁用 telephony feed
 sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 
-# ========== 添加 PassWall 系列 feeds（官方新地址）==========
+# 添加 PassWall 系列 feeds（官方新地址）
 echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git" >> feeds.conf.default
 echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git" >> feeds.conf.default
 
