@@ -5,7 +5,7 @@
 #include <dt-bindings/leds/common.h>
 
 / {
-	model = "SL-3000 (512MB Rescue)";
+	model = "SL-3000 (1GB DDR4)";
 	compatible = "sl,3000-emmc", "mediatek,mt7981";
 
 	aliases {
@@ -22,10 +22,10 @@
 		bootargs = "console=ttyS0,115200n1 loglevel=8 earlycon=uart8250,mmio32,0x11002000 root=PARTLABEL=production rootwait rw rootfstype=f2fs,squashfs,ext4";
 	};
 
-	/* 512MB DDR4 内存（救砖专用） */
+	/* 1GB DDR4 内存（正常使用） */
 	memory@40000000 {
 		device_type = "memory";
-		reg = <0 0x40000000 0 0x20000000>;
+		reg = <0 0x40000000 0 0x40000000>;
 	};
 
 	leds {
