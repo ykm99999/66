@@ -50,7 +50,7 @@ extern int mt7981_ddr3_freq;
 
 void mtk_mem_init(void)
 {
-	/* 强制使用 DDR4 */
+	/* 强制使用 DDR4，忽略编译参数 */
 	mt7981_use_ddr4 = 1;
 
 #ifdef DRAM_SIZE_LIMIT
