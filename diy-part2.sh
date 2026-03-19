@@ -21,19 +21,39 @@ cd $SOURCE_DIR/arm-trusted-firmware
 
 echo "=== Building ATF 512M (EMMC) ==="
 make clean
-make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=512 DDR_TYPE=ddr4
+# 关键修正：显式指定 DDR4、BGA 封装，并传递 DRAM_USE_DDR4 标志
+make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=512 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
 find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-512m-emmc.bin \; 2>/dev/null || echo "No bl2.bin for 512M emmc"
 find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-512m-emmc.elf \; 2>/dev/null || echo "No bl2.elf for 512M emmc"
 
+# 验证是否为 DDR4 版（可选）
+if command -v strings &> /dev/null; then
+    if strings build/mt7981/release/bl2.bin | grep -qi "ddr4"; then
+        echo "✅ 512M BL2 is DDR4"
+    else
+        echo "❌ 512M BL2 is NOT DDR4, check parameters!"
+        exit 1
+    fi
+fi
+
 echo "=== Building ATF 1G (EMMC) ==="
 make clean
-make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4
+make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
 find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-emmc.bin \; 2>/dev/null || echo "No bl2.bin for 1G emmc"
 find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-emmc.elf \; 2>/dev/null || echo "No bl2.elf for 1G emmc"
 
+if command -v strings &> /dev/null; then
+    if strings build/mt7981/release/bl2.bin | grep -qi "ddr4"; then
+        echo "✅ 1G BL2 is DDR4"
+    else
+        echo "❌ 1G BL2 is NOT DDR4, check parameters!"
+        exit 1
+    fi
+fi
+
 echo "=== Building ATF 1G (NOR - for rescue) ==="
 make clean
-make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=nor LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4
+make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=nor LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
 find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.bin \; 2>/dev/null || echo "No bl2.bin for 1G nor"
 find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.elf \; 2>/dev/null || echo "No bl2.elf for 1G nor"
 
@@ -127,7 +147,7 @@ cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
 echo "=== Building ImmortalWrt Firmware ==="
 cd "$IMMORTALWRT_BUILD_DIR"
 
-# 确保 .config 已就绪（part1 已生成）
+# 确保 .config 已就绪
 make VERSION_NUMBER="1.0.0" VERSION_CODE="r1" -j$(nproc) V=s 2>&1 | tee build.log
 
 # 收集固件
