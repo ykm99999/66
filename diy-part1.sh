@@ -41,10 +41,22 @@ sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 echo "src-git passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages.git;main" >> feeds.conf.default
 echo "src-git passwall2 https://github.com/xiaorouji/openwrt-passwall2.git;main" >> feeds.conf.default
 
-# 更新 feeds
+# 更新所有 feeds
 ./scripts/feeds update -a
 
+# 确保 passwall2 feed 被正确拉取（有时可能因网络问题失败）
+if [ ! -d "feeds/passwall2" ]; then
+    echo "⚠️ passwall2 feed not found, retrying update..."
+    ./scripts/feeds update passwall2
+fi
+if [ ! -d "feeds/passwall2" ]; then
+    echo "❌ passwall2 feed still missing, continuing anyway (some packages may be missing)..."
+else
+    echo "✅ passwall2 feed successfully updated"
+fi
+
 # ========== 定义问题包列表（最终版）==========
+# 注意：如果希望保留 passwall2 中的某些包（如 shadowsocks-rust），请将其从列表中移除
 PROBLEM_PKGS="
 aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
 pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
