@@ -237,12 +237,23 @@ else
 fi
 cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
 
+# ========== 编译 ImmortalWrt 完整固件 ==========
+echo "=== Building ImmortalWrt Firmware ==="
+cd "$IMMORTALWRT_BUILD_DIR"
+
+# 确保 .config 已就绪（part1 已生成）
+make VERSION_NUMBER="1.0.0" VERSION_CODE="r1" -j$(nproc) V=s 2>&1 | tee build.log
+
+# 收集固件
+mkdir -p "$OUTPUT_DIR/firmware"
+find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp -v {} "$OUTPUT_DIR/firmware/" \;
+cp build.log "$OUTPUT_DIR/firmware/"
+
 # ========== 打包 mtk_uartboot ==========
 cd $SOURCE_DIR/mtk_uartboot
 tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
 
 # ========== 最终输出 ==========
-echo "✅ Rescue components built successfully."
-echo "Output directory contents:"
-ls -la "$OUTPUT_DIR/atf" "$OUTPUT_DIR/uboot"
+echo "✅ Build complete. Output directory contents:"
+ls -la "$OUTPUT_DIR/atf" "$OUTPUT_DIR/uboot" "$OUTPUT_DIR/firmware"
 echo "mtk_uartboot.tar.gz is in $OUTPUT_DIR"
