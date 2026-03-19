@@ -37,24 +37,20 @@ cd immortalwrt-build
 # 修改 feeds 配置：禁用 telephony feed
 sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 
-# 添加 PassWall2 的 feeds
-# passwall_packages 使用官方新地址，分支 main
-echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main" >> feeds.conf.default
-# passwall2 使用原地址，分支 master（已验证）
-echo "src-git passwall2 https://github.com/xiaorouji/openwrt-passwall2.git;master" >> feeds.conf.default
+# ========== 添加 PassWall 系列 feeds（官方新地址）==========
+# PassWall 依赖包
+echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git" >> feeds.conf.default
+# PassWall2 LuCI 和主程序（如果你需要新版）
+echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git" >> feeds.conf.default
+# 如果需要 PassWall 原版 LuCI，可取消下面注释
+# echo "src-git passwall_luci https://github.com/Openwrt-Passwall/openwrt-passwall.git" >> feeds.conf.default
 
 # 更新所有 feeds
 ./scripts/feeds update -a
 
-# 确保 passwall2 feed 被正确拉取（有时可能因网络问题失败）
+# 确保 passwall2 feed 被正确拉取（简单检查，若失败则报错退出，因为用户需要 PassWall2）
 if [ ! -d "feeds/passwall2" ]; then
-    echo "⚠️ passwall2 feed not found, retrying update..."
-    ./scripts/feeds update passwall2
-fi
-
-# 最终检查，若仍不存在，则报错退出（因为用户需要构建 PassWall2）
-if [ ! -d "feeds/passwall2" ]; then
-    echo "❌ passwall2 feed still missing. Please check the repository URL or network."
+    echo "❌ passwall2 feed failed to download. Please check the repository URL."
     exit 1
 else
     echo "✅ passwall2 feed successfully updated"
