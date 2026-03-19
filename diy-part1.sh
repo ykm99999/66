@@ -38,17 +38,13 @@ cd immortalwrt-build
 sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 
 # ========== 添加 PassWall 系列 feeds（官方新地址）==========
-# PassWall 依赖包
 echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git" >> feeds.conf.default
-# PassWall2 LuCI 和主程序（如果你需要新版）
 echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git" >> feeds.conf.default
-# 如果需要 PassWall 原版 LuCI，可取消下面注释
-# echo "src-git passwall_luci https://github.com/Openwrt-Passwall/openwrt-passwall.git" >> feeds.conf.default
 
 # 更新所有 feeds
 ./scripts/feeds update -a
 
-# 确保 passwall2 feed 被正确拉取（简单检查，若失败则报错退出，因为用户需要 PassWall2）
+# 确保 passwall2 feed 被正确拉取
 if [ ! -d "feeds/passwall2" ]; then
     echo "❌ passwall2 feed failed to download. Please check the repository URL."
     exit 1
@@ -57,7 +53,6 @@ else
 fi
 
 # ========== 定义问题包列表（最终版）==========
-# 注意：如果希望保留 passwall2 中的某些包（如 shadowsocks-rust），请将其从列表中移除
 PROBLEM_PKGS="
 aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
 pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
