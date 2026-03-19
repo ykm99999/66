@@ -37,20 +37,25 @@ cd immortalwrt-build
 # 修改 feeds 配置：禁用 telephony feed
 sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 
+# ========== 【新增】添加 PassWall2 的 feeds ==========
+echo "src-git passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages.git;main" >> feeds.conf.default
+echo "src-git passwall2 https://github.com/xiaorouji/openwrt-passwall2.git;main" >> feeds.conf.default
+
 # 更新 feeds
 ./scripts/feeds update -a
 
 # ========== 定义问题包列表（最终版）==========
+# 注意：如果你需要保留 shadowsocks-rust、docker 等包，请将对应名称从列表中移除。
 PROBLEM_PKGS="
 aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
 pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
-shadow-tls shadowsocks-rust shadowsocks-rust-sslocal shadowsocks-rust-ssserver spotifyd
-tuic-client tuic-server yggdrasil-jumper gst1-plugins-base gst1-plugins-good
-gst1-plugins-ugly gst1-plugins-bad gst1-libav dmapd gmediarender gnunet gnunet-fuse
-gnunet-fs grilo-plugins lcdgrilo libdmapsharing kamailio smartdns pymysql
-python-orjson python-paramiko python-pyopenssl python-rpds-py python-service-identity
-python-twisted python-docker python-jsonschema python-jsonschema-specifications
-python-referencing onionshare-cli onionshare weston wpewebkit luci-app-passwall
+shadow-tls spotifyd tuic-client tuic-server yggdrasil-jumper
+gst1-plugins-base gst1-plugins-good gst1-plugins-ugly gst1-plugins-bad gst1-libav
+dmapd gmediarender gnunet gnunet-fuse gnunet-fs grilo-plugins lcdgrilo libdmapsharing
+kamailio smartdns pymysql python-orjson python-paramiko python-pyopenssl
+python-rpds-py python-service-identity python-twisted python-docker
+python-jsonschema python-jsonschema-specifications python-referencing
+onionshare-cli onionshare weston wpewebkit luci-app-passwall
 luci-app-rustdesk-server luci-app-spotifyd luci-app-clamav luci-app-dufs
 luci-app-openclash luci-app-smartdns libextractor python-bcrypt python-cryptography
 python-maturin podman ruby-yaml
@@ -61,13 +66,25 @@ echo "=== 递归删除所有问题包 ==="
 for pkg in $PROBLEM_PKGS; do
     find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
 done
+
+# 删除整个 video 和 telephony feed
 rm -rf feeds/video feeds/telephony
+
+# 清理 package/feeds 下的符号链接
 rm -rf package/feeds
+
+# 更新 feed 索引
 ./scripts/feeds update -i
+
+# 安装 feeds（此时问题包已不存在）
 ./scripts/feeds install -a
+
+# 再次递归删除（防止依赖重新拉取）
 for pkg in $PROBLEM_PKGS; do
     find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
 done
+
+# 再次更新索引并重建符号链接
 ./scripts/feeds update -i
 make package/symlinks
 
@@ -82,14 +99,81 @@ cat >> $FILOGIC_MK << 'EOF'
 # SL3000 设备定义（由 diy-part1.sh 注入）
 define Device/sl_3000-emmc
   DEVICE_VENDOR := SL
-  DEVICE_MODEL := 3000 eMMC (512MB rescue)
+  DEVICE_MODEL := 3000 eMMC (1GB)
   DEVICE_DTS := mt7981-sl-3000-emmc
   DEVICE_DTS_DIR := $(DTS_DIR)/mediatek
   SUPPORTED_DEVICES := sl,3000-emmc
   DEVICE_PACKAGES := \
     kmod-usb3 kmod-usb-storage kmod-usb-storage-uas \
     f2fsck losetup mkf2fs kmod-fs-f2fs kmod-mmc \
-    luci-app-ksmbd luci-i18n-ksmbd-zh-cn ksmbd-utils
+    luci-app-ksmbd luci-i18n-ksmbd-zh-cn ksmbd-utils \
+    ~gst1-plugins-base \
+    ~gst1-plugins-good \
+    ~gst1-plugins-ugly \
+    ~gst1-plugins-bad \
+    ~gst1-libav \
+    ~dmapd \
+    ~gmediarender \
+    ~gnunet \
+    ~gnunet-fuse \
+    ~gnunet-fs \
+    ~grilo-plugins \
+    ~lcdgrilo \
+    ~libdmapsharing \
+    ~kamailio \
+    ~smartdns \
+    ~pymysql \
+    ~python-orjson \
+    ~python-paramiko \
+    ~python-pyopenssl \
+    ~python-rpds-py \
+    ~python-service-identity \
+    ~python-twisted \
+    ~python-docker \
+    ~python-jsonschema \
+    ~python-jsonschema-specifications \
+    ~python-referencing \
+    ~luci-app-passwall \
+    ~luci-app-rustdesk-server \
+    ~luci-app-spotifyd \
+    ~luci-app-clamav \
+    ~luci-app-dufs \
+    ~luci-app-openclash \
+    ~luci-app-smartdns \
+    ~libextractor \
+    ~python-bcrypt \
+    ~python-cryptography \
+    ~python-maturin \
+    ~python-setuptools-rust \
+    ~podman \
+    ~ruby \
+    ~ruby-yaml \
+    ~aardvark-dns \
+    ~netavark \
+    ~pdns-recursor \
+    ~cargo-c \
+    ~arp-whisper \
+    ~yggdrasil-jumper \
+    ~onionshare-cli \
+    ~onionshare \
+    ~weston \
+    ~wpewebkit \
+    ~shadowsocks-rust \
+    ~shadowsocks-rust-sslocal \
+    ~shadowsocks-rust-ssserver \
+    ~shadow-tls \
+    ~tuic-client \
+    ~tuic-server \
+    ~rustdesk-server \
+    ~spotifyd \
+    ~clamav \
+    ~dufs \
+    ~eza \
+    ~fish \
+    ~lsd \
+    ~bottom \
+    ~ripgrep \
+    ~procs
   IMAGES := sysupgrade.bin
   IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
 endef
