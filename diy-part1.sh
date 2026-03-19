@@ -8,7 +8,10 @@ OUTPUT_DIR="$WORKSPACE/output"
 IMMORTALWRT_BUILD="$WORKSPACE/immortalwrt-build"
 STAGING_DIR_IMAGE="$IMMORTALWRT_BUILD/staging_dir/image"
 DTS_PATH_OLD="target/linux/mediatek/dts"
-DTS_PATH_NEW="target/linux/mediatek/files-6.12/arch/arm64/boot/dts/mediatek"
+# 自动探测内核版本对应的新 DTS 路径
+KERNEL_VER=$(grep -E '^KERNEL_PATCHVER:=' target/linux/mediatek/Makefile | cut -d= -f2 | tr -d ' ')
+[ -z "$KERNEL_VER" ] && KERNEL_VER="6.6"  # 默认使用 6.6（你的内核版本）
+DTS_PATH_NEW="target/linux/mediatek/files-${KERNEL_VER}/arch/arm64/boot/dts/mediatek"
 FILOGIC_MK="target/linux/mediatek/image/filogic.mk"
 
 mkdir -p $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware $STAGING_DIR_IMAGE
@@ -37,7 +40,7 @@ cd immortalwrt-build
 # 修改 feeds 配置：禁用 telephony feed
 sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 
-# 添加 PassWall 系列 feeds（官方新地址）
+# 添加 PassWall 系列 feeds
 echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git" >> feeds.conf.default
 echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git" >> feeds.conf.default
 
@@ -100,7 +103,7 @@ mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
 cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_OLD/ || exit 1
 cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_NEW/ || exit 1
 
-# 将设备定义追加到 filogic.mk
+# 将设备定义追加到 filogic.mk（修正 DEVICE_DTS_DIR）
 cat >> $FILOGIC_MK << 'EOF'
 
 # SL3000 设备定义（由 diy-part1.sh 注入）
@@ -108,7 +111,7 @@ define Device/sl_3000-emmc
   DEVICE_VENDOR := SL
   DEVICE_MODEL := 3000 eMMC (1GB)
   DEVICE_DTS := mt7981-sl-3000-emmc
-  DEVICE_DTS_DIR := $(DTS_DIR)/mediatek
+  DEVICE_DTS_DIR := $(DTS_DIR)  # 修正：不加 /mediatek，避免路径重复
   SUPPORTED_DEVICES := sl,3000-emmc
   DEVICE_PACKAGES := \
     kmod-usb3 kmod-usb-storage kmod-usb-storage-uas \
