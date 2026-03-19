@@ -16,21 +16,121 @@ cd "$IMMORTALWRT_BUILD_DIR"
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# ========== 编译 ATF ==========
+# ========== 强制修改 ATF 源码，启用 DDR4 ==========
+echo "=== Patching ATF source to force DDR4 ==="
 cd $SOURCE_DIR/arm-trusted-firmware
+# 备份原文件（可选）
+cp plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c.bak
+# 使用 sed 在函数开头插入强制赋值，并删除原来的条件判断（或直接替换整个函数）
+# 这里采用简单的方法：将函数开头修改为直接赋值，并保留原有逻辑
+sed -i '/^void mtk_mem_init(void)/,/^}/ {
+    s/^void mtk_mem_init(void)/void mtk_mem_init(void) { mt7981_use_ddr4 = 1; /
+    /^void mtk_mem_init(void)/d
+    s/^}/}\n/
+}' plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c
+# 更稳妥的做法：直接替换整个文件内容
+cat > plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c << 'EOF'
+/*
+ * Copyright (c) 2021, MediaTek Inc. All rights reserved.
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
 
+#include <plat/common/platform.h>
+#include <common/debug.h>
+#include <lib/mmio.h>
+#include <stdarg.h>
+#include <stdio.h>
+
+/* IAP/REBB eFuse bit */
+#define IAP_REBB_SWITCH		0x11D00A0C
+#define IAP_IND			0x01
+
+extern void mtk_mem_init_real(void);
+extern int mt7981_use_ddr4;
+extern int mt7981_ddr_size_limit;
+extern int mt7981_dram_debug;
+extern int mt7981_bga_pkg;
+extern int mt7981_ddr3_freq;
+
+void mtk_mem_init(void)
+{
+	/* 强制使用 DDR4 */
+	mt7981_use_ddr4 = 1;
+
+#ifdef DRAM_SIZE_LIMIT
+	mt7981_ddr_size_limit = DRAM_SIZE_LIMIT;
+
+	if (!mt7981_use_ddr4 && mt7981_ddr_size_limit > 512)
+		mt7981_ddr_size_limit = 512;
+#endif /* DRAM_SIZE_LIMIT */
+
+#ifdef DRAM_DEBUG_LOG
+	mt7981_dram_debug = 1;
+#endif /* DRAM_DEBUG_LOG */
+
+#if defined(BOARD_BGA)
+	mt7981_bga_pkg = 1;
+#elif defined(BOARD_QFN)
+	mt7981_bga_pkg = 0;
+#endif /* BOARD_BGA */
+
+#ifdef DDR3_FREQ_2133
+	mt7981_ddr3_freq = 2133;
+#endif /* DDR3_FREQ_2133 */
+#ifdef DDR3_FREQ_1866
+	mt7981_ddr3_freq = 1866;
+#endif /* DDR3_FREQ_1866 */
+
+	NOTICE("EMI: Using DDR%u settings\n", mt7981_use_ddr4 ? 4 : 3);
+
+	mtk_mem_init_real();
+}
+
+void mtk_mem_dbg_print(const char *fmt, ...)
+{
+	va_list args;
+
+	if (!mt7981_dram_debug)
+		return;
+
+	va_start(args, fmt);
+	(void)vprintf(fmt, args);
+	va_end(args);
+}
+
+void mtk_mem_err_print(const char *fmt, ...)
+{
+	const char *prefix_str;
+	va_list args;
+
+	prefix_str = plat_log_get_prefix(LOG_LEVEL_ERROR);
+
+	while (*prefix_str != '\0') {
+		(void)putchar(*prefix_str);
+		prefix_str++;
+	}
+
+	va_start(args, fmt);
+	(void)vprintf(fmt, args);
+	va_end(args);
+}
+EOF
+echo "✅ ATF source patched for DDR4"
+
+# ========== 编译 ATF ==========
 echo "=== Building ATF 512M (EMMC) ==="
 make clean
 make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=512 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
 find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-512m-emmc.bin \; 2>/dev/null || echo "No bl2.bin for 512M emmc"
 find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-512m-emmc.elf \; 2>/dev/null || echo "No bl2.elf for 512M emmc"
 
-# 验证是否为 DDR4 版
+# 验证是否为 DDR4 版（可选）
 if command -v strings &> /dev/null; then
-    if strings build/mt7981/release/bl2.bin | grep -qi "ddr4"; then
+    if strings build/mt7981/release/bl2.bin | grep -qi "DDR4"; then
         echo "✅ 512M BL2 is DDR4"
     else
-        echo "❌ 512M BL2 is NOT DDR4, check parameters!"
+        echo "❌ 512M BL2 is NOT DDR4, check patching!"
         exit 1
     fi
 fi
@@ -42,10 +142,10 @@ find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-em
 find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-emmc.elf \; 2>/dev/null || echo "No bl2.elf for 1G emmc"
 
 if command -v strings &> /dev/null; then
-    if strings build/mt7981/release/bl2.bin | grep -qi "ddr4"; then
+    if strings build/mt7981/release/bl2.bin | grep -qi "DDR4"; then
         echo "✅ 1G BL2 is DDR4"
     else
-        echo "❌ 1G BL2 is NOT DDR4, check parameters!"
+        echo "❌ 1G BL2 is NOT DDR4, check patching!"
         exit 1
     fi
 fi
@@ -141,14 +241,6 @@ else
     cp fip.bin "$OUTPUT_DIR/uboot/fip-nor.bin" 2>/dev/null || cp u-boot.fip "$OUTPUT_DIR/uboot/fip-nor.bin" 2>/dev/null
 fi
 cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
-
-# ========== 【可选】编译 ImmortalWrt 完整固件（当前已注释，如需恢复请取消注释）==========
-# echo "=== Building ImmortalWrt Firmware ==="
-# cd "$IMMORTALWRT_BUILD_DIR"
-# make VERSION_NUMBER="1.0.0" VERSION_CODE="r1" -j$(nproc) V=s 2>&1 | tee build.log
-# mkdir -p "$OUTPUT_DIR/firmware"
-# find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp -v {} "$OUTPUT_DIR/firmware/" \;
-# cp build.log "$OUTPUT_DIR/firmware/"
 
 # ========== 打包 mtk_uartboot ==========
 cd $SOURCE_DIR/mtk_uartboot
