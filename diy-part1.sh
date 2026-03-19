@@ -38,8 +38,10 @@ cd immortalwrt-build
 sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 
 # 添加 PassWall2 的 feeds
-echo "src-git passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages.git;main" >> feeds.conf.default
-echo "src-git passwall2 https://github.com/xiaorouji/openwrt-passwall2.git;main" >> feeds.conf.default
+# passwall_packages 使用官方新地址，分支 main
+echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main" >> feeds.conf.default
+# passwall2 使用原地址，分支 master（已验证）
+echo "src-git passwall2 https://github.com/xiaorouji/openwrt-passwall2.git;master" >> feeds.conf.default
 
 # 更新所有 feeds
 ./scripts/feeds update -a
@@ -49,8 +51,11 @@ if [ ! -d "feeds/passwall2" ]; then
     echo "⚠️ passwall2 feed not found, retrying update..."
     ./scripts/feeds update passwall2
 fi
+
+# 最终检查，若仍不存在，则报错退出（因为用户需要构建 PassWall2）
 if [ ! -d "feeds/passwall2" ]; then
-    echo "❌ passwall2 feed still missing, continuing anyway (some packages may be missing)..."
+    echo "❌ passwall2 feed still missing. Please check the repository URL or network."
+    exit 1
 else
     echo "✅ passwall2 feed successfully updated"
 fi
