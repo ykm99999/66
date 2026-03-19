@@ -21,12 +21,11 @@ cd $SOURCE_DIR/arm-trusted-firmware
 
 echo "=== Building ATF 512M (EMMC) ==="
 make clean
-# 关键修正：显式指定 DDR4、BGA 封装，并传递 DRAM_USE_DDR4 标志
 make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=512 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
 find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-512m-emmc.bin \; 2>/dev/null || echo "No bl2.bin for 512M emmc"
 find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-512m-emmc.elf \; 2>/dev/null || echo "No bl2.elf for 512M emmc"
 
-# 验证是否为 DDR4 版（可选）
+# 验证是否为 DDR4 版
 if command -v strings &> /dev/null; then
     if strings build/mt7981/release/bl2.bin | grep -qi "ddr4"; then
         echo "✅ 512M BL2 is DDR4"
@@ -143,23 +142,20 @@ else
 fi
 cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
 
-# ========== 编译 ImmortalWrt 完整固件 ==========
-echo "=== Building ImmortalWrt Firmware ==="
-cd "$IMMORTALWRT_BUILD_DIR"
-
-# 确保 .config 已就绪
-make VERSION_NUMBER="1.0.0" VERSION_CODE="r1" -j$(nproc) V=s 2>&1 | tee build.log
-
-# 收集固件
-mkdir -p "$OUTPUT_DIR/firmware"
-find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp -v {} "$OUTPUT_DIR/firmware/" \;
-cp build.log "$OUTPUT_DIR/firmware/"
+# ========== 【可选】编译 ImmortalWrt 完整固件（当前已注释，如需恢复请取消注释）==========
+# echo "=== Building ImmortalWrt Firmware ==="
+# cd "$IMMORTALWRT_BUILD_DIR"
+# make VERSION_NUMBER="1.0.0" VERSION_CODE="r1" -j$(nproc) V=s 2>&1 | tee build.log
+# mkdir -p "$OUTPUT_DIR/firmware"
+# find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp -v {} "$OUTPUT_DIR/firmware/" \;
+# cp build.log "$OUTPUT_DIR/firmware/"
 
 # ========== 打包 mtk_uartboot ==========
 cd $SOURCE_DIR/mtk_uartboot
 tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
 
 # ========== 最终输出 ==========
-echo "✅ Build complete. Output directory contents:"
-ls -la "$OUTPUT_DIR/atf" "$OUTPUT_DIR/uboot" "$OUTPUT_DIR/firmware"
+echo "✅ Rescue components built successfully."
+echo "Output directory contents:"
+ls -la "$OUTPUT_DIR/atf" "$OUTPUT_DIR/uboot"
 echo "mtk_uartboot.tar.gz is in $OUTPUT_DIR"
