@@ -16,7 +16,7 @@ cd "$IMMORTALWRT_BUILD_DIR"
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# ========== 编译 ATF ==========
+# ========== 1. 编译 ATF（救砖组件）==========
 cd $SOURCE_DIR/arm-trusted-firmware
 
 echo "=== Building ATF 512M (EMMC) ==="
@@ -43,21 +43,19 @@ if [ ! -f build/mt7981/release/bl31.bin ]; then
     exit 1
 fi
 
-# 复制 bl31.bin 到 staging_dir（两个版本）
-echo "Copying bl31.bin to staging_dir..."
+# 复制 bl31.bin 到 staging_dir
 cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin" || { echo "❌ Failed to copy bl31.bin for emmc"; exit 1; }
 cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin" || { echo "❌ Failed to copy bl31.bin for nor"; exit 1; }
 
-# 确认文件已复制
 ls -la "$STAGING_DIR_IMAGE"/mt7981-*.bin || { echo "❌ Copied bl31 files missing"; exit 1; }
 
 echo "=== Compiling fiptool from ATF ==="
 make -C tools/fiptool CROSS_COMPILE=
 FIPTOOL="$PWD/tools/fiptool/fiptool"
 
-# ========== 编译 U-Boot (eMMC版) 并生成 FIP ==========
-echo "=== Building U-Boot (eMMC) ==="
+# ========== 2. 编译 U-Boot（eMMC版）并生成 FIP ==========
 cd $SOURCE_DIR/u-boot
+echo "=== Building U-Boot (eMMC) ==="
 make clean
 if [ -f configs/mt7981_emmc_rfb_defconfig ]; then
     make CROSS_COMPILE=aarch64-linux-gnu- mt7981_emmc_rfb_defconfig
@@ -65,17 +63,15 @@ else
     echo "❌ mt7981_emmc_rfb_defconfig not found!"
     exit 1
 fi
-
 echo "CONFIG_MTK_FIP_SUPPORT=y" >> .config
 make olddefconfig
-
 make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
 
 if [ ! -f fip.bin ] && [ ! -f u-boot.fip ]; then
     echo "⚠️ fip.bin not generated, creating manually..."
     if [ -f "$FIPTOOL" ]; then
         if [ ! -f "$STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin" ]; then
-            echo "❌ mt7981-emmc-ddr4-bl31.bin not found in staging_dir!"
+            echo "❌ mt7981-emmc-ddr4-bl31.bin not found!"
             exit 1
         fi
         "$FIPTOOL" create \
@@ -92,9 +88,9 @@ else
 fi
 cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-emmc.bin"
 
-# ========== 编译 U-Boot (NOR版) 并生成 FIP ==========
-echo "=== Building U-Boot (NOR) ==="
+# ========== 3. 编译 U-Boot（NOR版）并生成 FIP ==========
 cd $SOURCE_DIR/u-boot
+echo "=== Building U-Boot (NOR) ==="
 make clean
 if [ -f configs/mt7981_spim_nor_rfb_defconfig ]; then
     make CROSS_COMPILE=aarch64-linux-gnu- mt7981_spim_nor_rfb_defconfig
@@ -102,17 +98,15 @@ else
     echo "❌ mt7981_spim_nor_rfb_defconfig not found, skipping NOR U-Boot build"
     exit 1
 fi
-
 echo "CONFIG_MTK_FIP_SUPPORT=y" >> .config
 make olddefconfig
-
 make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
 
 if [ ! -f fip.bin ] && [ ! -f u-boot.fip ]; then
     echo "⚠️ fip.bin not generated for NOR, creating manually..."
     if [ -f "$FIPTOOL" ]; then
         if [ ! -f "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin" ]; then
-            echo "❌ mt7981-nor-ddr4-bl31.bin not found in staging_dir!"
+            echo "❌ mt7981-nor-ddr4-bl31.bin not found!"
             exit 1
         fi
         "$FIPTOOL" create \
@@ -129,11 +123,23 @@ else
 fi
 cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
 
-# ========== 打包 mtk_uartboot ==========
+# ========== 4. 编译 ImmortalWrt 完整固件 ==========
+echo "=== Building ImmortalWrt Firmware ==="
+cd "$IMMORTALWRT_BUILD_DIR"
+
+# 确保 .config 已就绪（part1 已生成）
+make VERSION_NUMBER="1.0.0" VERSION_CODE="r1" -j$(nproc) V=s 2>&1 | tee build.log
+
+# 收集固件
+mkdir -p "$OUTPUT_DIR/firmware"
+find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp -v {} "$OUTPUT_DIR/firmware/" \;
+cp build.log "$OUTPUT_DIR/firmware/"
+
+# ========== 5. 打包 mtk_uartboot ==========
 cd $SOURCE_DIR/mtk_uartboot
 tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
 
-echo "✅ Rescue components built successfully."
-echo "Output directory contents:"
-ls -la "$OUTPUT_DIR/atf" "$OUTPUT_DIR/uboot"
+# ========== 最终输出 ==========
+echo "✅ Build complete. Output directory contents:"
+ls -la "$OUTPUT_DIR/atf" "$OUTPUT_DIR/uboot" "$OUTPUT_DIR/firmware"
 echo "mtk_uartboot.tar.gz is in $OUTPUT_DIR"
