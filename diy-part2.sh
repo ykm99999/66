@@ -19,11 +19,7 @@ export ARCH=arm64
 # ========== 强制修改 ATF 源码，启用 DDR4 ==========
 echo "=== Patching ATF source to force DDR4 ==="
 cd $SOURCE_DIR/arm-trusted-firmware
-
-# 确保目标目录存在
 mkdir -p plat/mediatek/mt7981/drivers/dram
-
-# 直接写入修复后的 mtk_mem_init.c 内容（强制 DDR4）
 cat > plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c << 'EOF'
 /*
  * Copyright (c) 2021, MediaTek Inc. All rights reserved.
@@ -120,7 +116,6 @@ make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 
 find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-512m-emmc.bin \; 2>/dev/null || echo "No bl2.bin for 512M emmc"
 find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-512m-emmc.elf \; 2>/dev/null || echo "No bl2.elf for 512M emmc"
 
-# 验证是否为 DDR4 版（可选）
 if command -v strings &> /dev/null; then
     if strings build/mt7981/release/bl2.bin | grep -qi "DDR4"; then
         echo "✅ 512M BL2 is DDR4"
@@ -151,7 +146,14 @@ make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 
 find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.bin \; 2>/dev/null || echo "No bl2.bin for 1G nor"
 find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.elf \; 2>/dev/null || echo "No bl2.elf for 1G nor"
 
-# 检查 bl31.bin 是否存在
+# ========== 新增：编译 RAM 版 BL2 (1G, DDR4) ==========
+echo "=== Building ATF RAM (1G DDR4) ==="
+make clean
+make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 BOOT_DEVICE=ram LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
+find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-ram-1g.bin \; 2>/dev/null || echo "No bl2.bin for RAM"
+find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-ram-1g.elf \; 2>/dev/null || echo "No bl2.elf for RAM"
+
+# 检查 bl31.bin 是否存在（所有 ATF 编译完成后会生成一个 bl31.bin）
 if [ ! -f build/mt7981/release/bl31.bin ]; then
     echo "❌ bl31.bin not found after ATF compilation!"
     exit 1
@@ -237,23 +239,12 @@ else
 fi
 cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
 
-# ========== 编译 ImmortalWrt 完整固件 ==========
-echo "=== Building ImmortalWrt Firmware ==="
-cd "$IMMORTALWRT_BUILD_DIR"
-
-# 确保 .config 已就绪（part1 已生成）
-make VERSION_NUMBER="1.0.0" VERSION_CODE="r1" -j$(nproc) V=s 2>&1 | tee build.log
-
-# 收集固件
-mkdir -p "$OUTPUT_DIR/firmware"
-find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp -v {} "$OUTPUT_DIR/firmware/" \;
-cp build.log "$OUTPUT_DIR/firmware/"
-
 # ========== 打包 mtk_uartboot ==========
 cd $SOURCE_DIR/mtk_uartboot
 tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
 
 # ========== 最终输出 ==========
-echo "✅ Build complete. Output directory contents:"
-ls -la "$OUTPUT_DIR/atf" "$OUTPUT_DIR/uboot" "$OUTPUT_DIR/firmware"
+echo "✅ Rescue components built successfully."
+echo "Output directory contents:"
+ls -la "$OUTPUT_DIR/atf" "$OUTPUT_DIR/uboot"
 echo "mtk_uartboot.tar.gz is in $OUTPUT_DIR"
