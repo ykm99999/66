@@ -37,13 +37,22 @@ cd immortalwrt-build
 # 修改 feeds 配置：禁用 telephony feed
 sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 
-# 移除 PassWall 相关 feeds（暂不构建科学上网）
-# （无需添加任何行）
+# 添加 PassWall 系列 feeds（官方新地址）
+echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git" >> feeds.conf.default
+echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git" >> feeds.conf.default
 
 # 更新所有 feeds
 ./scripts/feeds update -a || { echo "❌ feeds update failed"; exit 1; }
 
-# ========== 定义问题包列表（精简版）==========
+# 确保 passwall2 feed 被正确拉取
+if [ ! -d "feeds/passwall2" ]; then
+    echo "❌ passwall2 feed failed to download. Please check the repository URL."
+    exit 1
+else
+    echo "✅ passwall2 feed successfully updated"
+fi
+
+# ========== 定义问题包列表（精简版，已排除科学上网相关包）==========
 PROBLEM_PKGS="
 aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
 pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
@@ -100,7 +109,13 @@ echo "  SUPPORTED_DEVICES := sl,3000-emmc" >> $FILOGIC_MK
 echo "  DEVICE_PACKAGES := \\" >> $FILOGIC_MK
 echo "    kmod-usb3 kmod-usb-storage kmod-usb-storage-uas \\" >> $FILOGIC_MK
 echo "    f2fsck losetup mkf2fs kmod-fs-f2fs kmod-mmc \\" >> $FILOGIC_MK
-echo "    luci-app-ksmbd luci-i18n-ksmbd-zh-cn ksmbd-utils" >> $FILOGIC_MK
+echo "    luci-app-ksmbd luci-i18n-ksmbd-zh-cn ksmbd-utils \\" >> $FILOGIC_MK
+echo "    luci-app-passwall2 \\" >> $FILOGIC_MK
+echo "    xray-core chinadns-ng \\" >> $FILOGIC_MK
+echo "    shadowsocks-libev-ss-local shadowsocks-libev-ss-redir shadowsocks-libev-ss-tunnel \\" >> $FILOGIC_MK
+echo "    shadowsocks-rust-sslocal simple-obfs \\" >> $FILOGIC_MK
+echo "    docker-ce docker-compose kmod-br-netfilter kmod-ikconfig kmod-ipt-physdev \\" >> $FILOGIC_MK
+echo "    kmod-nf-ipt6 kmod-nf-ipvs kmod-veth kmod-fs-overlay luci-app-dockerman" >> $FILOGIC_MK
 echo "  IMAGES := sysupgrade.bin" >> $FILOGIC_MK
 echo "  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata" >> $FILOGIC_MK
 echo "endef" >> $FILOGIC_MK
