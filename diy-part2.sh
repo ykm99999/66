@@ -19,7 +19,6 @@ echo "=== Patching ATF source to force DDR4 ==="
 cd $SOURCE_DIR/arm-trusted-firmware
 mkdir -p plat/mediatek/mt7981/drivers/dram
 
-# 使用 cat 写入文件（较短的版本，可保留 EOF，因为之前已证明可行）
 cat > plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c << 'EOF'
 /*
  * Copyright (c) 2021, MediaTek Inc. All rights reserved.
@@ -236,11 +235,14 @@ cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
 echo "=== Building ImmortalWrt Firmware ==="
 cd "$IMMORTALWRT_BUILD_DIR"
 
-# 在编译前验证设备是否在列表中
-echo "=== Enabled mediatek/filogic devices ==="
-make info | grep -A 30 "Target: mediatek/filogic" | grep "sl_3000" || { echo "❌ Device sl_3000-emmc not enabled!"; exit 1; }
+# 直接检查 .config 文件中设备是否启用（避免 make info 因警告失败）
+if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" .config; then
+    echo "❌ Device sl_3000-emmc not enabled in .config!"
+    exit 1
+fi
 
-make VERSION_NUMBER="1.0.0" VERSION_CODE="r1" -j$(nproc) V=s 2>&1 | tee build.log
+# 使用环境变量传递版本号（若未设置则使用默认值）
+make VERSION_NUMBER="${VERSION_NUMBER:-1.0.0}" VERSION_CODE="${VERSION_CODE:-r1}" -j$(nproc) V=s 2>&1 | tee build.log
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
     echo "❌ Firmware build failed! Last 100 lines of build.log:"
     tail -100 build.log
@@ -251,7 +253,7 @@ mkdir -p "$OUTPUT_DIR/firmware"
 find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp -v {} "$OUTPUT_DIR/firmware/" \;
 cp build.log "$OUTPUT_DIR/firmware/"
 
-# 检查是否有任何 .bin 文件生成
+# 检查是否有 sysupgrade 固件生成
 if [ ! -f "$OUTPUT_DIR/firmware/"*sysupgrade* ]; then
     echo "❌ No sysupgrade firmware files generated!"
     echo "Contents of bin/targets/ (first 50 files):"
