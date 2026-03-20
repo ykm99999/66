@@ -16,97 +16,101 @@ cd "$IMMORTALWRT_BUILD_DIR"
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# ========== 强制修改 ATF 源码，启用 DDR4 ==========
+# ========== 强制修改 ATF 源码，启用 DDR4（禁用 EOF）==========
 echo "=== Patching ATF source to force DDR4 ==="
 cd $SOURCE_DIR/arm-trusted-firmware
+
+# 确保目标目录存在
 mkdir -p plat/mediatek/mt7981/drivers/dram
-cat > plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c << 'EOF'
-/*
- * Copyright (c) 2021, MediaTek Inc. All rights reserved.
- *
- * SPDX-License-Identifier: BSD-3-Clause
- */
 
-#include <plat/common/platform.h>
-#include <common/debug.h>
-#include <lib/mmio.h>
-#include <stdarg.h>
-#include <stdio.h>
+# 逐行写入 mtk_mem_init.c
+MTK_MEM_INIT_FILE="plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c"
+echo "/*" > $MTK_MEM_INIT_FILE
+echo " * Copyright (c) 2021, MediaTek Inc. All rights reserved." >> $MTK_MEM_INIT_FILE
+echo " *" >> $MTK_MEM_INIT_FILE
+echo " * SPDX-License-Identifier: BSD-3-Clause" >> $MTK_MEM_INIT_FILE
+echo " */" >> $MTK_MEM_INIT_FILE
+echo "" >> $MTK_MEM_INIT_FILE
+echo "#include <plat/common/platform.h>" >> $MTK_MEM_INIT_FILE
+echo "#include <common/debug.h>" >> $MTK_MEM_INIT_FILE
+echo "#include <lib/mmio.h>" >> $MTK_MEM_INIT_FILE
+echo "#include <stdarg.h>" >> $MTK_MEM_INIT_FILE
+echo "#include <stdio.h>" >> $MTK_MEM_INIT_FILE
+echo "" >> $MTK_MEM_INIT_FILE
+echo "/* IAP/REBB eFuse bit */" >> $MTK_MEM_INIT_FILE
+echo "#define IAP_REBB_SWITCH		0x11D00A0C" >> $MTK_MEM_INIT_FILE
+echo "#define IAP_IND			0x01" >> $MTK_MEM_INIT_FILE
+echo "" >> $MTK_MEM_INIT_FILE
+echo "extern void mtk_mem_init_real(void);" >> $MTK_MEM_INIT_FILE
+echo "extern int mt7981_use_ddr4;" >> $MTK_MEM_INIT_FILE
+echo "extern int mt7981_ddr_size_limit;" >> $MTK_MEM_INIT_FILE
+echo "extern int mt7981_dram_debug;" >> $MTK_MEM_INIT_FILE
+echo "extern int mt7981_bga_pkg;" >> $MTK_MEM_INIT_FILE
+echo "extern int mt7981_ddr3_freq;" >> $MTK_MEM_INIT_FILE
+echo "" >> $MTK_MEM_INIT_FILE
+echo "void mtk_mem_init(void)" >> $MTK_MEM_INIT_FILE
+echo "{" >> $MTK_MEM_INIT_FILE
+echo "	/* 强制使用 DDR4 */" >> $MTK_MEM_INIT_FILE
+echo "	mt7981_use_ddr4 = 1;" >> $MTK_MEM_INIT_FILE
+echo "" >> $MTK_MEM_INIT_FILE
+echo "#ifdef DRAM_SIZE_LIMIT" >> $MTK_MEM_INIT_FILE
+echo "	mt7981_ddr_size_limit = DRAM_SIZE_LIMIT;" >> $MTK_MEM_INIT_FILE
+echo "" >> $MTK_MEM_INIT_FILE
+echo "	if (!mt7981_use_ddr4 && mt7981_ddr_size_limit > 512)" >> $MTK_MEM_INIT_FILE
+echo "		mt7981_ddr_size_limit = 512;" >> $MTK_MEM_INIT_FILE
+echo "#endif /* DRAM_SIZE_LIMIT */" >> $MTK_MEM_INIT_FILE
+echo "" >> $MTK_MEM_INIT_FILE
+echo "#ifdef DRAM_DEBUG_LOG" >> $MTK_MEM_INIT_FILE
+echo "	mt7981_dram_debug = 1;" >> $MTK_MEM_INIT_FILE
+echo "#endif /* DRAM_DEBUG_LOG */" >> $MTK_MEM_INIT_FILE
+echo "" >> $MTK_MEM_INIT_FILE
+echo "#if defined(BOARD_BGA)" >> $MTK_MEM_INIT_FILE
+echo "	mt7981_bga_pkg = 1;" >> $MTK_MEM_INIT_FILE
+echo "#elif defined(BOARD_QFN)" >> $MTK_MEM_INIT_FILE
+echo "	mt7981_bga_pkg = 0;" >> $MTK_MEM_INIT_FILE
+echo "#endif /* BOARD_BGA */" >> $MTK_MEM_INIT_FILE
+echo "" >> $MTK_MEM_INIT_FILE
+echo "#ifdef DDR3_FREQ_2133" >> $MTK_MEM_INIT_FILE
+echo "	mt7981_ddr3_freq = 2133;" >> $MTK_MEM_INIT_FILE
+echo "#endif /* DDR3_FREQ_2133 */" >> $MTK_MEM_INIT_FILE
+echo "#ifdef DDR3_FREQ_1866" >> $MTK_MEM_INIT_FILE
+echo "	mt7981_ddr3_freq = 1866;" >> $MTK_MEM_INIT_FILE
+echo "#endif /* DDR3_FREQ_1866 */" >> $MTK_MEM_INIT_FILE
+echo "" >> $MTK_MEM_INIT_FILE
+echo "	NOTICE(\"EMI: Using DDR%u settings\\n\", mt7981_use_ddr4 ? 4 : 3);" >> $MTK_MEM_INIT_FILE
+echo "" >> $MTK_MEM_INIT_FILE
+echo "	mtk_mem_init_real();" >> $MTK_MEM_INIT_FILE
+echo "}" >> $MTK_MEM_INIT_FILE
+echo "" >> $MTK_MEM_INIT_FILE
+echo "void mtk_mem_dbg_print(const char *fmt, ...)" >> $MTK_MEM_INIT_FILE
+echo "{" >> $MTK_MEM_INIT_FILE
+echo "	va_list args;" >> $MTK_MEM_INIT_FILE
+echo "" >> $MTK_MEM_INIT_FILE
+echo "	if (!mt7981_dram_debug)" >> $MTK_MEM_INIT_FILE
+echo "		return;" >> $MTK_MEM_INIT_FILE
+echo "" >> $MTK_MEM_INIT_FILE
+echo "	va_start(args, fmt);" >> $MTK_MEM_INIT_FILE
+echo "	(void)vprintf(fmt, args);" >> $MTK_MEM_INIT_FILE
+echo "	va_end(args);" >> $MTK_MEM_INIT_FILE
+echo "}" >> $MTK_MEM_INIT_FILE
+echo "" >> $MTK_MEM_INIT_FILE
+echo "void mtk_mem_err_print(const char *fmt, ...)" >> $MTK_MEM_INIT_FILE
+echo "{" >> $MTK_MEM_INIT_FILE
+echo "	const char *prefix_str;" >> $MTK_MEM_INIT_FILE
+echo "	va_list args;" >> $MTK_MEM_INIT_FILE
+echo "" >> $MTK_MEM_INIT_FILE
+echo "	prefix_str = plat_log_get_prefix(LOG_LEVEL_ERROR);" >> $MTK_MEM_INIT_FILE
+echo "" >> $MTK_MEM_INIT_FILE
+echo "	while (*prefix_str != '\\0') {" >> $MTK_MEM_INIT_FILE
+echo "		(void)putchar(*prefix_str);" >> $MTK_MEM_INIT_FILE
+echo "		prefix_str++;" >> $MTK_MEM_INIT_FILE
+echo "	}" >> $MTK_MEM_INIT_FILE
+echo "" >> $MTK_MEM_INIT_FILE
+echo "	va_start(args, fmt);" >> $MTK_MEM_INIT_FILE
+echo "	(void)vprintf(fmt, args);" >> $MTK_MEM_INIT_FILE
+echo "	va_end(args);" >> $MTK_MEM_INIT_FILE
+echo "}" >> $MTK_MEM_INIT_FILE
 
-/* IAP/REBB eFuse bit */
-#define IAP_REBB_SWITCH		0x11D00A0C
-#define IAP_IND			0x01
-
-extern void mtk_mem_init_real(void);
-extern int mt7981_use_ddr4;
-extern int mt7981_ddr_size_limit;
-extern int mt7981_dram_debug;
-extern int mt7981_bga_pkg;
-extern int mt7981_ddr3_freq;
-
-void mtk_mem_init(void)
-{
-	/* 强制使用 DDR4，忽略编译参数 */
-	mt7981_use_ddr4 = 1;
-
-#ifdef DRAM_SIZE_LIMIT
-	mt7981_ddr_size_limit = DRAM_SIZE_LIMIT;
-
-	if (!mt7981_use_ddr4 && mt7981_ddr_size_limit > 512)
-		mt7981_ddr_size_limit = 512;
-#endif /* DRAM_SIZE_LIMIT */
-
-#ifdef DRAM_DEBUG_LOG
-	mt7981_dram_debug = 1;
-#endif /* DRAM_DEBUG_LOG */
-
-#if defined(BOARD_BGA)
-	mt7981_bga_pkg = 1;
-#elif defined(BOARD_QFN)
-	mt7981_bga_pkg = 0;
-#endif /* BOARD_BGA */
-
-#ifdef DDR3_FREQ_2133
-	mt7981_ddr3_freq = 2133;
-#endif /* DDR3_FREQ_2133 */
-#ifdef DDR3_FREQ_1866
-	mt7981_ddr3_freq = 1866;
-#endif /* DDR3_FREQ_1866 */
-
-	NOTICE("EMI: Using DDR%u settings\n", mt7981_use_ddr4 ? 4 : 3);
-
-	mtk_mem_init_real();
-}
-
-void mtk_mem_dbg_print(const char *fmt, ...)
-{
-	va_list args;
-
-	if (!mt7981_dram_debug)
-		return;
-
-	va_start(args, fmt);
-	(void)vprintf(fmt, args);
-	va_end(args);
-}
-
-void mtk_mem_err_print(const char *fmt, ...)
-{
-	const char *prefix_str;
-	va_list args;
-
-	prefix_str = plat_log_get_prefix(LOG_LEVEL_ERROR);
-
-	while (*prefix_str != '\0') {
-		(void)putchar(*prefix_str);
-		prefix_str++;
-	}
-
-	va_start(args, fmt);
-	(void)vprintf(fmt, args);
-	va_end(args);
-}
-EOF
 echo "✅ ATF source patched for DDR4"
 
 # ========== 编译 ATF ==========
@@ -146,14 +150,7 @@ make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 
 find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.bin \; 2>/dev/null || echo "No bl2.bin for 1G nor"
 find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.elf \; 2>/dev/null || echo "No bl2.elf for 1G nor"
 
-# ========== 编译 RAM 版 BL2 (1G, DDR4) – 已添加 RAM_BOOT_UART_DL=1 ==========
-echo "=== Building ATF RAM (1G DDR4) ==="
-make clean
-make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 BOOT_DEVICE=ram LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1 RAM_BOOT_UART_DL=1
-find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-ram-1g.bin \; 2>/dev/null || echo "No bl2.bin for RAM"
-find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-ram-1g.elf \; 2>/dev/null || echo "No bl2.elf for RAM"
-
-# 检查 bl31.bin 是否存在（所有 ATF 编译完成后会生成一个 bl31.bin）
+# 检查 bl31.bin 是否存在
 if [ ! -f build/mt7981/release/bl31.bin ]; then
     echo "❌ bl31.bin not found after ATF compilation!"
     exit 1
@@ -239,12 +236,8 @@ else
 fi
 cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
 
-# ========== 打包 mtk_uartboot ==========
-cd $SOURCE_DIR/mtk_uartboot
-tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
+# ========== 编译 ImmortalWrt 完整固件 ==========
+echo "=== Building ImmortalWrt Firmware ==="
+cd "$IMMORTALWRT_BUILD_DIR"
 
-# ========== 最终输出 ==========
-echo "✅ Rescue components built successfully."
-echo "Output directory contents:"
-ls -la "$OUTPUT_DIR/atf" "$OUTPUT_DIR/uboot"
-echo "mtk_uartboot.tar.gz is in $OUTPUT_DIR"
+#
