@@ -8,10 +8,7 @@ OUTPUT_DIR="$WORKSPACE/output"
 IMMORTALWRT_BUILD="$WORKSPACE/immortalwrt-build"
 STAGING_DIR_IMAGE="$IMMORTALWRT_BUILD/staging_dir/image"
 DTS_PATH_OLD="target/linux/mediatek/dts"
-# 自动探测内核版本对应的新 DTS 路径
-KERNEL_VER=$(grep -E '^KERNEL_PATCHVER:=' target/linux/mediatek/Makefile | cut -d= -f2 | tr -d ' ')
-[ -z "$KERNEL_VER" ] && KERNEL_VER="6.6"  # 默认使用 6.6（你的内核版本）
-DTS_PATH_NEW="target/linux/mediatek/files-${KERNEL_VER}/arch/arm64/boot/dts/mediatek"
+DTS_PATH_NEW="target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek"
 FILOGIC_MK="target/linux/mediatek/image/filogic.mk"
 
 mkdir -p $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware $STAGING_DIR_IMAGE
@@ -40,34 +37,22 @@ cd immortalwrt-build
 # 修改 feeds 配置：禁用 telephony feed
 sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 
-# 添加 PassWall 系列 feeds
-echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git" >> feeds.conf.default
-echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git" >> feeds.conf.default
+# 移除 PassWall 相关 feeds（暂不构建科学上网）
+# （无需添加任何行）
 
 # 更新所有 feeds
 ./scripts/feeds update -a
 
-# 确保 passwall2 feed 被正确拉取
-if [ ! -d "feeds/passwall2" ]; then
-    echo "❌ passwall2 feed failed to download. Please check the repository URL."
-    exit 1
-else
-    echo "✅ passwall2 feed successfully updated"
-fi
-
-# ========== 定义问题包列表（最终版）==========
+# ========== 定义问题包列表（精简版，已移除科学上网相关包）==========
 PROBLEM_PKGS="
 aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
 pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
-shadow-tls spotifyd tuic-client tuic-server yggdrasil-jumper
 gst1-plugins-base gst1-plugins-good gst1-plugins-ugly gst1-plugins-bad gst1-libav
 dmapd gmediarender gnunet gnunet-fuse gnunet-fs grilo-plugins lcdgrilo libdmapsharing
 kamailio smartdns pymysql python-orjson python-paramiko python-pyopenssl
 python-rpds-py python-service-identity python-twisted python-docker
 python-jsonschema python-jsonschema-specifications python-referencing
-onionshare-cli onionshare weston wpewebkit luci-app-passwall
-luci-app-rustdesk-server luci-app-spotifyd luci-app-clamav luci-app-dufs
-luci-app-openclash luci-app-smartdns libextractor python-bcrypt python-cryptography
+onionshare-cli onionshare weston wpewebkit libextractor python-bcrypt python-cryptography
 python-maturin podman ruby-yaml
 "
 
@@ -103,92 +88,23 @@ mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
 cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_OLD/ || exit 1
 cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_NEW/ || exit 1
 
-# 将设备定义追加到 filogic.mk（修正 DEVICE_DTS_DIR）
-cat >> $FILOGIC_MK << 'EOF'
-
-# SL3000 设备定义（由 diy-part1.sh 注入）
-define Device/sl_3000-emmc
-  DEVICE_VENDOR := SL
-  DEVICE_MODEL := 3000 eMMC (1GB)
-  DEVICE_DTS := mt7981-sl-3000-emmc
-  DEVICE_DTS_DIR := $(DTS_DIR)  # 修正：不加 /mediatek，避免路径重复
-  SUPPORTED_DEVICES := sl,3000-emmc
-  DEVICE_PACKAGES := \
-    kmod-usb3 kmod-usb-storage kmod-usb-storage-uas \
-    f2fsck losetup mkf2fs kmod-fs-f2fs kmod-mmc \
-    luci-app-ksmbd luci-i18n-ksmbd-zh-cn ksmbd-utils \
-    ~gst1-plugins-base \
-    ~gst1-plugins-good \
-    ~gst1-plugins-ugly \
-    ~gst1-plugins-bad \
-    ~gst1-libav \
-    ~dmapd \
-    ~gmediarender \
-    ~gnunet \
-    ~gnunet-fuse \
-    ~gnunet-fs \
-    ~grilo-plugins \
-    ~lcdgrilo \
-    ~libdmapsharing \
-    ~kamailio \
-    ~smartdns \
-    ~pymysql \
-    ~python-orjson \
-    ~python-paramiko \
-    ~python-pyopenssl \
-    ~python-rpds-py \
-    ~python-service-identity \
-    ~python-twisted \
-    ~python-docker \
-    ~python-jsonschema \
-    ~python-jsonschema-specifications \
-    ~python-referencing \
-    ~luci-app-passwall \
-    ~luci-app-rustdesk-server \
-    ~luci-app-spotifyd \
-    ~luci-app-clamav \
-    ~luci-app-dufs \
-    ~luci-app-openclash \
-    ~luci-app-smartdns \
-    ~libextractor \
-    ~python-bcrypt \
-    ~python-cryptography \
-    ~python-maturin \
-    ~python-setuptools-rust \
-    ~podman \
-    ~ruby \
-    ~ruby-yaml \
-    ~aardvark-dns \
-    ~netavark \
-    ~pdns-recursor \
-    ~cargo-c \
-    ~arp-whisper \
-    ~yggdrasil-jumper \
-    ~onionshare-cli \
-    ~onionshare \
-    ~weston \
-    ~wpewebkit \
-    ~shadowsocks-rust \
-    ~shadowsocks-rust-sslocal \
-    ~shadowsocks-rust-ssserver \
-    ~shadow-tls \
-    ~tuic-client \
-    ~tuic-server \
-    ~rustdesk-server \
-    ~spotifyd \
-    ~clamav \
-    ~dufs \
-    ~eza \
-    ~fish \
-    ~lsd \
-    ~bottom \
-    ~ripgrep \
-    ~procs
-  IMAGES := sysupgrade.bin
-  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
-endef
-TARGET_DEVICES += sl_3000-emmc
-EOF
+# 将设备定义追加到 filogic.mk（禁用 EOF，改用逐行 echo）
+echo "" >> $FILOGIC_MK
+echo "# SL3000 设备定义（由 diy-part1.sh 注入）" >> $FILOGIC_MK
+echo "define Device/sl_3000-emmc" >> $FILOGIC_MK
+echo "  DEVICE_VENDOR := SL" >> $FILOGIC_MK
+echo "  DEVICE_MODEL := 3000 eMMC (1GB)" >> $FILOGIC_MK
+echo "  DEVICE_DTS := mt7981-sl-3000-emmc" >> $FILOGIC_MK
+echo "  DEVICE_DTS_DIR := \$(DTS_DIR)" >> $FILOGIC_MK
+echo "  SUPPORTED_DEVICES := sl,3000-emmc" >> $FILOGIC_MK
+echo "  DEVICE_PACKAGES := \\" >> $FILOGIC_MK
+echo "    kmod-usb3 kmod-usb-storage kmod-usb-storage-uas \\" >> $FILOGIC_MK
+echo "    f2fsck losetup mkf2fs kmod-fs-f2fs kmod-mmc \\" >> $FILOGIC_MK
+echo "    luci-app-ksmbd luci-i18n-ksmbd-zh-cn ksmbd-utils" >> $FILOGIC_MK
+echo "  IMAGES := sysupgrade.bin" >> $FILOGIC_MK
+echo "  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata" >> $FILOGIC_MK
+echo "endef" >> $FILOGIC_MK
+echo "TARGET_DEVICES += sl_3000-emmc" >> $FILOGIC_MK
 
 # 验证设备定义是否已注入
 if ! grep -q "sl_3000-emmc" $FILOGIC_MK; then
