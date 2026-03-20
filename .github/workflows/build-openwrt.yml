@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true   # 消除 Node.js 20 弃用警告
     steps:
       - name: Checkout main branch
         uses: actions/checkout@v4
@@ -30,6 +32,12 @@ jobs:
             python3-distutils python3-setuptools rsync unzip zlib1g-dev file wget \
             gcc-aarch64-linux-gnu device-tree-compiler
 
+      - name: Optimize disk space
+        run: |
+          sudo apt clean
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
+          df -h
+
       - name: Run diy-part1.sh (Configuration & Package Purge)
         run: |
           chmod +x main-repo/diy-part1.sh
@@ -41,6 +49,13 @@ jobs:
           chmod +x main-repo/diy-part2.sh
           cd main-repo
           ./diy-part2.sh
+
+      - name: List firmware files
+        run: |
+          echo "=== Generated firmware files ==="
+          ls -la output/atf/ output/uboot/ output/firmware/ || true
+          echo "=== Firmware directory contents (if exists) ==="
+          find output/ -type f -name "*.bin" -o -name "*.gz" -o -name "*sysupgrade*" | sort
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
