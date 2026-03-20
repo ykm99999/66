@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 WORKSPACE="$GITHUB_WORKSPACE"
 SOURCE_DIR="$WORKSPACE/source-repo"
@@ -41,9 +41,9 @@ sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 # （无需添加任何行）
 
 # 更新所有 feeds
-./scripts/feeds update -a
+./scripts/feeds update -a || { echo "❌ feeds update failed"; exit 1; }
 
-# ========== 定义问题包列表（精简版，已移除科学上网相关包）==========
+# ========== 定义问题包列表（精简版）==========
 PROBLEM_PKGS="
 aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
 pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
@@ -69,10 +69,10 @@ rm -rf feeds/video feeds/telephony
 rm -rf package/feeds
 
 # 更新 feed 索引
-./scripts/feeds update -i
+./scripts/feeds update -i || { echo "❌ feeds update -i failed"; exit 1; }
 
-# 安装 feeds（此时问题包已不存在）
-./scripts/feeds install -a
+# 安装 feeds
+./scripts/feeds install -a || { echo "❌ feeds install failed"; exit 1; }
 
 # 再次递归删除（防止依赖重新拉取）
 for pkg in $PROBLEM_PKGS; do
@@ -80,15 +80,15 @@ for pkg in $PROBLEM_PKGS; do
 done
 
 # 再次更新索引并重建符号链接
-./scripts/feeds update -i
-make package/symlinks
+./scripts/feeds update -i || { echo "❌ feeds update -i failed"; exit 1; }
+make package/symlinks || { echo "❌ make package/symlinks failed"; exit 1; }
 
 # ========== 注册三件套（设备树双路径注入 + 设备定义）==========
 mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
-cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_OLD/ || exit 1
-cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_NEW/ || exit 1
+cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_OLD/ || { echo "❌ Failed to copy DTS to old path"; exit 1; }
+cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_NEW/ || { echo "❌ Failed to copy DTS to new path"; exit 1; }
 
-# 将设备定义追加到 filogic.mk（禁用 EOF，改用逐行 echo）
+# 将设备定义追加到 filogic.mk（逐行 echo）
 echo "" >> $FILOGIC_MK
 echo "# SL3000 设备定义（由 diy-part1.sh 注入）" >> $FILOGIC_MK
 echo "define Device/sl_3000-emmc" >> $FILOGIC_MK
@@ -112,13 +112,13 @@ if ! grep -q "sl_3000-emmc" $FILOGIC_MK; then
     exit 1
 fi
 
-cp -v $CONFIG_DIR/sl3000.config .config || exit 1
+cp -v $CONFIG_DIR/sl3000.config .config || { echo "❌ Failed to copy config"; exit 1; }
 echo "CONFIG_TARGET_mediatek=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
 
 # ========== 生成基础配置 ==========
-make defconfig
+make defconfig || { echo "❌ make defconfig failed"; exit 1; }
 
 # 再次写入设备选项（确保存在）
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
