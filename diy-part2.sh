@@ -19,9 +19,8 @@ echo "=== Patching ATF source to force DDR4 ==="
 cd $SOURCE_DIR/arm-trusted-firmware
 mkdir -p plat/mediatek/mt7981/drivers/dram
 
-# 逐行写入 mtk_mem_init.c
-MTK_MEM_INIT_FILE="plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c"
-cat > "$MTK_MEM_INIT_FILE" << 'EOF'
+# 使用 cat 写入文件（较短的版本，可保留 EOF，因为之前已证明可行）
+cat > plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c << 'EOF'
 /*
  * Copyright (c) 2021, MediaTek Inc. All rights reserved.
  *
@@ -237,6 +236,10 @@ cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
 echo "=== Building ImmortalWrt Firmware ==="
 cd "$IMMORTALWRT_BUILD_DIR"
 
+# 在编译前验证设备是否在列表中
+echo "=== Enabled mediatek/filogic devices ==="
+make info | grep -A 30 "Target: mediatek/filogic" | grep "sl_3000" || { echo "❌ Device sl_3000-emmc not enabled!"; exit 1; }
+
 make VERSION_NUMBER="1.0.0" VERSION_CODE="r1" -j$(nproc) V=s 2>&1 | tee build.log
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
     echo "❌ Firmware build failed! Last 100 lines of build.log:"
@@ -248,7 +251,7 @@ mkdir -p "$OUTPUT_DIR/firmware"
 find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp -v {} "$OUTPUT_DIR/firmware/" \;
 cp build.log "$OUTPUT_DIR/firmware/"
 
-# 检查固件是否生成
+# 检查是否有任何 .bin 文件生成
 if [ ! -f "$OUTPUT_DIR/firmware/"*sysupgrade* ]; then
     echo "❌ No sysupgrade firmware files generated!"
     echo "Contents of bin/targets/ (first 50 files):"
