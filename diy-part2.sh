@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 WORKSPACE="$GITHUB_WORKSPACE"
 SOURCE_DIR="$WORKSPACE/source-repo"
@@ -238,6 +238,4 @@ cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
 
 # ========== 编译 ImmortalWrt 完整固件 ==========
 echo "=== Building ImmortalWrt Firmware ==="
-cd "$IMMORTALWRT_BUILD_DIR"
-
-#
+cd "$IMMORTALWRT_BU
