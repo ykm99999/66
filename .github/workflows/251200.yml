@@ -21,7 +21,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ykm99999/66
-          ref: 2512                 # 【修改】从 2512 分支获取源码
+          ref: 2512                 # ← 仅修改此处：从 2512 分支获取源码
           path: source-repo
 
       - name: Generate release tag
