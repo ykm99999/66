@@ -45,7 +45,6 @@ jobs:
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
           df -h
 
-      # ---------- 新增：缓存 dl/ 目录（源码包）和 .config ----------
       - name: Cache OpenWrt downloads
         id: cache-openwrt
         uses: actions/cache@v4
@@ -56,8 +55,6 @@ jobs:
           key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('source-repo/immortalwrt/feeds.conf.default', 'main-repo/888/sl3000.config') }}
           restore-keys: |
             ${{ runner.os }}-openwrt-dl-
-      # 说明：key 包含 feeds 配置和用户配置文件的哈希，当它们变化时缓存失效
-      # 如果缓存命中，则会恢复 dl/ 和 .config，跳过下载和配置步骤
 
       - name: Run diy-part1.sh (Configuration & Package Purge)
         run: |
@@ -76,7 +73,7 @@ jobs:
           echo "=== Generated firmware files ==="
           ls -la output/atf/ output/uboot/ output/firmware/ || true
           echo "=== Firmware directory contents ==="
-          find output/ -type f -name "*.bin" -o -name "*.gz" -o -name "*sysupgrade*" | sort
+          find output/ -type f \( -name "*.bin" -o -name "*.gz" -o -name "*sysupgrade*" \) | sort
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
