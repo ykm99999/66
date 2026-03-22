@@ -97,7 +97,7 @@ mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
 cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_OLD/ || { echo "❌ Failed to copy DTS to old path"; exit 1; }
 cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_NEW/ || { echo "❌ Failed to copy DTS to new path"; exit 1; }
 
-# 将设备定义追加到 filogic.mk（逐行 echo）
+# 将设备定义追加到 filogic.mk（包含 gpt.bin 生成规则）
 echo "" >> $FILOGIC_MK
 echo "# SL3000 设备定义（由 diy-part1.sh 注入）" >> $FILOGIC_MK
 echo "define Device/sl_3000-emmc" >> $FILOGIC_MK
@@ -116,8 +116,9 @@ echo "    shadowsocks-libev-ss-local shadowsocks-libev-ss-redir shadowsocks-libe
 echo "    shadowsocks-rust-sslocal simple-obfs \\" >> $FILOGIC_MK
 echo "    docker-ce docker-compose kmod-br-netfilter kmod-ikconfig kmod-ipt-physdev \\" >> $FILOGIC_MK
 echo "    kmod-nf-ipt6 kmod-nf-ipvs kmod-veth kmod-fs-overlay luci-app-dockerman" >> $FILOGIC_MK
-echo "  IMAGES := sysupgrade.bin" >> $FILOGIC_MK
+echo "  IMAGES := sysupgrade.bin gpt.bin" >> $FILOGIC_MK
 echo "  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata" >> $FILOGIC_MK
+echo "  IMAGE/gpt.bin := gen_gpt | pad-rootfs | check-size" >> $FILOGIC_MK
 echo "endef" >> $FILOGIC_MK
 echo "TARGET_DEVICES += sl_3000-emmc" >> $FILOGIC_MK
 
