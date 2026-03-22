@@ -45,14 +45,14 @@ jobs:
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
           df -h
 
-      - name: Cache OpenWrt downloads
+      - name: Cache OpenWrt downloads and config
         id: cache-openwrt
         uses: actions/cache@v4
         with:
           path: |
             immortalwrt-build/dl
             immortalwrt-build/.config
-          key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('source-repo/immortalwrt/feeds.conf.default', 'main-repo/888/sl3000.config') }}
+          key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('source-repo/immortalwrt/feeds.conf.default', 'main-repo/888/sl3000.config', 'main-repo/888/mt7981_sl3000.mk') }}
           restore-keys: |
             ${{ runner.os }}-openwrt-dl-
 
