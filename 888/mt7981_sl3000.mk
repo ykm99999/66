@@ -3,6 +3,9 @@
 # 硬件：MT7981B + 1GB DDR4 + 128G eMMC + 32MB SPI NOR
 #
 
+# 可选：自定义 GPT 分区布局（若默认不合适，可取消注释并按需调整）
+# GPT_LAYOUT := rootfs:2G,data:114G
+
 define Device/sl_3000-emmc
   DEVICE_VENDOR := SL
   DEVICE_MODEL := 3000 eMMC (1GB)
@@ -19,8 +22,11 @@ define Device/sl_3000-emmc
     shadowsocks-rust-sslocal simple-obfs \
     docker-ce docker-compose kmod-br-netfilter kmod-ikconfig kmod-ipt-physdev \
     kmod-nf-ipt6 kmod-nf-ipvs kmod-veth kmod-fs-overlay luci-app-dockerman
-  IMAGES := sysupgrade.bin
+  IMAGES := sysupgrade.bin gpt.bin
   IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
+  # 生成 GPT 分区镜像（包含分区表、内核、根文件系统）
+  # gen_gpt 会根据内核和根文件系统自动创建 GPT 布局，并生成可直接写入 eMMC 的镜像
+  IMAGE/gpt.bin := gen_gpt | pad-rootfs | check-size
 endef
 
 TARGET_DEVICES += sl_3000-emmc
