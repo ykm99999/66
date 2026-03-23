@@ -1,4 +1,4 @@
-name: SL3000 Final Build with Auto Release
+name: SL3000 Build for 2512 (6.12 Kernel)
 
 on:
   workflow_dispatch:
@@ -11,25 +11,18 @@ jobs:
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      - name: Checkout main branch
+      - name: Checkout main branch (configs)
         uses: actions/checkout@v4
         with:
           ref: main
           path: main-repo
 
-      - name: Checkout source branch
+      - name: Checkout 2512 branch (source)
         uses: actions/checkout@v4
         with:
           repository: ykm99999/66
-          ref: 2512                 # ← 仅修改此处：从 2512 分支获取源码
-          path: source-repo
-
-      - name: Generate release tag
-        id: release_tag
-        run: |
-          TAG_NAME="v$(date -u +'%Y%m%d-%H%M%S')"
-          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
-          echo "Release tag: $TAG_NAME"
+          ref: 2512
+          path: source-repo-2512
 
       - name: Install dependencies
         run: |
@@ -45,53 +38,27 @@ jobs:
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
           df -h
 
-      - name: Run diy-part1.sh (Configuration & Package Purge)
+      - name: Run diy-part3.sh (Configuration)
         run: |
-          chmod +x main-repo/diy-part1.sh
+          chmod +x main-repo/diy-part3.sh
           cd main-repo
-          ./diy-part1.sh
+          ./diy-part3.sh
 
-      - name: Run diy-part2.sh (Compile)
+      - name: Run diy-part4.sh (Compile)
         run: |
-          chmod +x main-repo/diy-part2.sh
+          chmod +x main-repo/diy-part4.sh
           cd main-repo
-          ./diy-part2.sh
+          ./diy-part4.sh
 
       - name: List firmware files
         run: |
-          echo "=== Generated firmware files ==="
-          ls -la output/atf/ output/uboot/ output/firmware/ || true
+          echo "=== Generated firmware files (2512) ==="
+          ls -la output-2512/atf/ output-2512/uboot/ output-2512/firmware/ || true
           echo "=== Firmware directory contents ==="
-          find output/ -type f -name "*.bin" -o -name "*.gz" -o -name "*sysupgrade*" | sort
+          find output-2512/ -type f \( -name "*.bin" -o -name "*.gz" -o -name "*sysupgrade*" \) | sort
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.release_tag.outputs.tag_name }}
-          name: "SL3000 Firmware ${{ steps.release_tag.outputs.tag_name }}"
-          body: |
-            ## 自动构建的 SL3000 固件
-            - 构建时间: ${{ steps.release_tag.outputs.tag_name }}
-            - 包含 PassWall2, Shadowsocks, Docker 等软件包
-            - 救砖全家桶: ATF, U-Boot, mtk_uartboot
-
-            ### 📦 下载说明
-            - `firmware/` 目录包含 sysupgrade 固件，可直接用于刷机
-            - `atf/` 和 `uboot/` 为救砖文件
-            - `mtk_uartboot.tar.gz` 为串口救砖工具
-          files: |
-            output/atf/*.bin
-            output/atf/*.elf
-            output/uboot/*.bin
-            output/firmware/*.bin
-            output/mtk_uartboot.tar.gz
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload artifacts (backup)
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sl3000-firmware-${{ steps.release_tag.outputs.tag_name }}
-          path: output/
+          name: sl3000-firmware-2512
+          path: output-2512/
