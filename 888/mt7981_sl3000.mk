@@ -22,11 +22,11 @@ define Device/sl_3000-emmc
     shadowsocks-rust-sslocal simple-obfs \
     docker-ce docker-compose kmod-br-netfilter kmod-ikconfig kmod-ipt-physdev \
     kmod-nf-ipt6 kmod-nf-ipvs kmod-veth kmod-fs-overlay luci-app-dockerman
-  IMAGES := sysupgrade.bin gpt.bin
+  IMAGES := sysupgrade.bin
   IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
-  # 生成 GPT 分区镜像（包含分区表、内核、根文件系统）
-  # gen_gpt 会根据内核和根文件系统自动创建 GPT 布局，并生成可直接写入 eMMC 的镜像
-  IMAGE/gpt.bin := gen_gpt | pad-rootfs | check-size
+  # 以下 GPT 镜像生成规则因当前版本不支持 gen_gpt 命令而被注释，如需生成可手动制作
+  # IMAGES += gpt.bin
+  # IMAGE/gpt.bin := gen_gpt | pad-rootfs | check-size
 endef
 
 TARGET_DEVICES += sl_3000-emmc
