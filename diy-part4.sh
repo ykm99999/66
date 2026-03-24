@@ -152,7 +152,6 @@ make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 BOOT_DEVICE=ram LOG_LE
 find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-ram-1g.bin \; 2>/dev/null || echo "No bl2.bin for RAM"
 find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-ram-1g.elf \; 2>/dev/null || echo "No bl2.elf for RAM"
 
-# 验证 RAM 版是否生成
 if [ ! -f "$OUTPUT_DIR/atf/bl2-ram-1g.bin" ]; then
     echo "❌ bl2-ram-1g.bin not generated! Check ATF compilation for RAM."
     exit 1
@@ -160,13 +159,11 @@ else
     echo "✅ bl2-ram-1g.bin generated successfully"
 fi
 
-# 检查 bl31.bin 是否存在
 if [ ! -f build/mt7981/release/bl31.bin ]; then
     echo "❌ bl31.bin not found after ATF compilation!"
     exit 1
 fi
 
-# 复制 bl31.bin 到 staging_dir
 cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin" || { echo "❌ Failed to copy bl31.bin for emmc"; exit 1; }
 cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin" || { echo "❌ Failed to copy bl31.bin for nor"; exit 1; }
 
@@ -250,13 +247,16 @@ cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
 echo "=== Building ImmortalWrt Firmware ==="
 cd "$IMMORTALWRT_BUILD_DIR"
 
-# 直接检查 .config 文件中设备是否启用
+# 强制设置版本号，避免 base-files 版本无效错误
+export VERSION_NUMBER="1.0.0"
+export VERSION_CODE="r1"
+
 if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" .config; then
     echo "❌ Device sl_3000-emmc not enabled in .config!"
     exit 1
 fi
 
-make VERSION_NUMBER="${VERSION_NUMBER:-1.0.0}" VERSION_CODE="${VERSION_CODE:-r1}" -j$(nproc) V=s 2>&1 | tee build.log
+make VERSION_NUMBER="$VERSION_NUMBER" VERSION_CODE="$VERSION_CODE" -j$(nproc) V=s 2>&1 | tee build.log
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
     echo "❌ Firmware build failed! Last 100 lines of build.log:"
     tail -100 build.log
@@ -267,7 +267,6 @@ mkdir -p "$OUTPUT_DIR/firmware"
 find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp -v {} "$OUTPUT_DIR/firmware/" \;
 cp build.log "$OUTPUT_DIR/firmware/"
 
-# 检查是否有 sysupgrade 固件生成
 if [ ! -f "$OUTPUT_DIR/firmware/"*sysupgrade* ]; then
     echo "❌ No sysupgrade firmware files generated!"
     echo "Contents of bin/targets/ (first 50 files):"
