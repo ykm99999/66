@@ -2,13 +2,13 @@
 set -euo pipefail
 
 WORKSPACE="$GITHUB_WORKSPACE"
-SOURCE_DIR="$WORKSPACE/source-repo-2512"          # 2512 分支源码目录
-CONFIG_DIR="$WORKSPACE/main-repo/888"             # 三件套仍用 888 目录
-OUTPUT_DIR="$WORKSPACE/output-2512"               # 输出目录独立
+SOURCE_DIR="$WORKSPACE/source-repo-2512"
+CONFIG_DIR="$WORKSPACE/main-repo/888"
+OUTPUT_DIR="$WORKSPACE/output-2512"
 IMMORTALWRT_BUILD="$WORKSPACE/immortalwrt-build-2512"
 STAGING_DIR_IMAGE="$IMMORTALWRT_BUILD/staging_dir/image"
 DTS_PATH_OLD="target/linux/mediatek/dts"
-DTS_PATH_NEW="target/linux/mediatek/files-6.12/arch/arm64/boot/dts/mediatek"  # 6.12 内核路径
+DTS_PATH_NEW="target/linux/mediatek/files-6.12/arch/arm64/boot/dts/mediatek"
 FILOGIC_MK="target/linux/mediatek/image/filogic.mk"
 
 mkdir -p $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware $STAGING_DIR_IMAGE
@@ -52,7 +52,7 @@ else
     echo "✅ passwall2 feed successfully updated"
 fi
 
-# ========== 定义问题包列表（精简版，与 24.10 一致）==========
+# ========== 定义问题包列表（添加 rust，避免编译）==========
 PROBLEM_PKGS="
 aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
 pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
@@ -62,7 +62,7 @@ kamailio smartdns pymysql python-orjson python-paramiko python-pyopenssl
 python-rpds-py python-service-identity python-twisted python-docker
 python-jsonschema python-jsonschema-specifications python-referencing
 onionshare-cli onionshare weston wpewebkit libextractor python-bcrypt python-cryptography
-python-maturin podman ruby-yaml
+python-maturin podman ruby-yaml rust
 "
 
 # ========== 彻底清除所有已知问题包 ==========
@@ -97,7 +97,7 @@ mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
 cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_OLD/ || { echo "❌ Failed to copy DTS to old path"; exit 1; }
 cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_NEW/ || { echo "❌ Failed to copy DTS to new path"; exit 1; }
 
-# 将设备定义追加到 filogic.mk（仅包含 sysupgrade.bin，无 gpt.bin）
+# 将设备定义追加到 filogic.mk（仅包含 sysupgrade.bin）
 echo "" >> $FILOGIC_MK
 echo "# SL3000 设备定义（由 diy-part3.sh 注入）" >> $FILOGIC_MK
 echo "define Device/sl_3000-emmc" >> $FILOGIC_MK
