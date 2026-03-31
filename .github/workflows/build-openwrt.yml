@@ -66,7 +66,7 @@ jobs:
 
       - name: Verify target device enabled
         run: |
-          cd main-repo/immortalwrt-build
+          cd immortalwrt-build
           if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" .config; then
             echo "❌ Target device sl_3000-spi-nor is not enabled in .config!"
             exit 1
