@@ -6,7 +6,8 @@
 
 / {
 	model = "SL-3000 (1GB DDR4)";
-	compatible = "sl,3000-emmc", "mediatek,mt7981";
+	/* 兼容性修复：增加 spi-nor 识别 */
+	compatible = "sl,3000-spi", "sl,3000-emmc", "mediatek,mt7981";
 
 	aliases {
 		serial0 = &uart0;
@@ -19,16 +20,16 @@
 
 	chosen {
 		stdout-path = "serial0:115200n8";
-		bootargs = "console=ttyS0,115200n1 loglevel=8 earlycon=uart8250,mmio32,0x11002000 root=PARTLABEL=production rootwait rw rootfstype=f2fs,squashfs,ext4";
+		/* 修正根分区挂载路径 */
+		bootargs = "console=ttyS0,115200n1 loglevel=8 earlycon=uart8250,mmio32,0x11002000 root=/dev/fit0 rootwait rw rootfstype=f2fs,squashfs,ext4";
 	};
 
-	/* 1GB DDR4 内存（正常使用） */
+	/* 1GB DDR4 内存：像素级物理对齐 */
 	memory@40000000 {
 		device_type = "memory";
-		reg = <0 0x40000000 0 0x40000000>;
+		reg = <0x0 0x40000000 0x0 0x40000000>;
 	};
 
-	/* 添加 1.8V 稳压器节点，用于 eMMC 的 vqmmc-supply */
 	reg_1p8v: regulator-1p8v {
 		compatible = "regulator-fixed";
 		regulator-name = "fixed-1.8V";
@@ -70,7 +71,7 @@
 	};
 };
 
-/* SPI-NOR 闪存分区布局（与救砖镜像对齐） */
+/* SPI-NOR 物理救砖分区对齐 (0x380000 为 3.5MB 关键点) */
 &spi0 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&spi0_flash_pins>;
@@ -88,30 +89,26 @@
 
 			partition@0 {
 				label = "bl2";
-				reg = <0x0 0x100000>;
+				reg = <0x0 0x100000>; /* 1MB BL2 */
 				read-only;
 			};
 
-			partition@100000 {
+			/* 物理对齐：3.5MB (0x380000) 存放 FIP */
+			partition@380000 {
 				label = "fip";
-				reg = <0x100000 0x100000>;
+				reg = <0x380000 0x80000>; 
 				read-only;
 			};
 
-			partition@200000 {
-				label = "nor-kernel";
-				reg = <0x200000 0x800000>;
-			};
-
-			partition@a00000 {
-				label = "nor-rootfs";
-				reg = <0xa00000 0x1600000>;
+			/* 物理对齐：4.0MB (0x400000) 开始固件 */
+			partition@400000 {
+				label = "firmware";
+				reg = <0x400000 0x1C00000>; /* 剩余 28MB */
 			};
 		};
 	};
 };
 
-/* eMMC 链路：物理对齐 128G 存储 */
 &mmc0 {
 	status = "okay";
 	pinctrl-names = "default", "state_uhs";
@@ -128,19 +125,13 @@
 	no-sdio;
 };
 
-/* 网络物理链路：MT7531 交换机 + 2.5G 上联 */
 &eth {
 	status = "okay";
-
 	gmac0: mac@0 {
 		compatible = "mediatek,eth-mac";
 		reg = <0>;
 		phy-mode = "2500base-x";
-		fixed-link {
-			speed = <2500>;
-			full-duplex;
-			pause;
-		};
+		fixed-link { speed = <2500>; full-duplex; pause; };
 	};
 
 	mdio: mdio-bus {
@@ -156,22 +147,16 @@
 			ports {
 				#address-cells = <1>;
 				#size-cells = <0>;
-
 				port@0 { reg = <0>; label = "lan1"; };
 				port@1 { reg = <1>; label = "lan2"; };
 				port@2 { reg = <2>; label = "lan3"; };
 				port@3 { reg = <3>; label = "wan"; };
-
 				port@6 {
 					reg = <6>;
 					label = "cpu";
 					ethernet = <&gmac0>;
 					phy-mode = "2500base-x";
-					fixed-link {
-						speed = <2500>;
-						full-duplex;
-						pause;
-					};
+					fixed-link { speed = <2500>; full-duplex; pause; };
 				};
 			};
 		};
@@ -180,38 +165,17 @@
 
 &pio {
 	spi0_flash_pins: spi0-pins {
-		mux {
-			function = "spi";
-			groups = "spi0", "spi0_wp_hold";
-		};
-		conf-pu {
-			pins = "SPI0_CS", "SPI0_HOLD", "SPI0_WP";
-			bias-pull-up;
-		};
+		mux { function = "spi"; groups = "spi0", "spi0_wp_hold"; };
+		conf-pu { pins = "SPI0_CS", "SPI0_HOLD", "SPI0_WP"; bias-pull-up; };
 	};
-
 	mmc0_pins_default: mmc0-pins-default {
-		mux {
-			function = "flash";
-			groups = "emmc_45";
-		};
-		conf-pu {
-			pins = "EMMC_RSTB";
-			bias-pull-up;
-		};
+		mux { function = "flash"; groups = "emmc_45"; };
+		conf-pu { pins = "EMMC_RSTB"; bias-pull-up; };
 	};
-
-	mmc0_pins_uhs: mmc0-pins-uhs {
-		mux {
-			function = "flash";
-			groups = "emmc_45";
-		};
-	};
+	mmc0_pins_uhs: mmc0-pins-uhs { mux { function = "flash"; groups = "emmc_45"; }; };
 };
 
 &uart0 { status = "okay"; };
 &watchdog { status = "okay"; };
-
-/* 启用稳压器节点（reg_3p3v 已在 mt7981.dtsi 中定义，这里显式启用） */
 &reg_3p3v { status = "okay"; };
 &reg_1p8v { status = "okay"; };
