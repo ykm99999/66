@@ -1,99 +1,104 @@
 #!/bin/bash
 set -euo pipefail
 
+# ==========================================
+# 核心指令：物理执行三准则 (救砖全量版 - 不构件升级包)
+# ==========================================
+
 WORKSPACE="$GITHUB_WORKSPACE"
 SOURCE_DIR="$WORKSPACE/source-repo"
 OUTPUT_DIR="$WORKSPACE/output"
-STAGING_DIR_IMAGE="$WORKSPACE/immortalwrt-build/staging_dir/image"
+# 自动获取 part1 中保存的编译目录
+IMMORTALWRT_BUILD=$(cat $WORKSPACE/build-dir.txt)
+STAGING_DIR_IMAGE="$IMMORTALWRT_BUILD/staging_dir/image"
 
-mkdir -p "$OUTPUT_DIR/atf" "$OUTPUT_DIR/uboot" "$OUTPUT_DIR/firmware" "$STAGING_DIR_IMAGE"
-
-# 强制进入 ATF 源码目录
-cd $SOURCE_DIR/arm-trusted-firmware
+mkdir -p "$OUTPUT_DIR/atf" "$OUTPUT_DIR/uboot" "$OUTPUT_DIR/firmware"
 
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# ========== 1. 强制修改 ATF 源码 (原文照抄) ==========
-echo "=== Patching ATF source for DDR4 ==="
-mkdir -p plat/mediatek/mt7981/drivers/dram
+# ========== 1. 编译 ATF (原文照抄 DDR4 1G 补丁) ==========
+echo "=== Building ATF (DDR4 1024M) ==="
+cd $SOURCE_DIR/arm-trusted-firmware
+
+# 注入 DDR4 强制初始化逻辑
 cat > plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c << 'EOF'
 #include <plat/common/platform.h>
 #include <common/debug.h>
 #include <lib/mmio.h>
 #include <stdarg.h>
 #include <stdio.h>
-#define IAP_REBB_SWITCH 0x11D00A0C
-#define IAP_IND 0x01
 extern void mtk_mem_init_real(void);
 extern int mt7981_use_ddr4;
-extern int mt7981_ddr_size_limit;
-extern int mt7981_dram_debug;
-extern int mt7981_bga_pkg;
-extern int mt7981_ddr3_freq;
 void mtk_mem_init(void) {
     mt7981_use_ddr4 = 1;
-    NOTICE("EMI: Using DDR%u settings\n", mt7981_use_ddr4 ? 4 : 3);
+    NOTICE("EMI: Forced DDR4 Mode for SL-3000\n");
     mtk_mem_init_real();
 }
-void mtk_mem_dbg_print(const char *fmt, ...) {
-    va_list args;
-    if (!mt7981_dram_debug) return;
-    va_start(args, fmt);
-    (void)vprintf(fmt, args);
-    va_end(args);
-}
+void mtk_mem_dbg_print(const char *fmt, ...) { return; }
 void mtk_mem_err_print(const char *fmt, ...) {
-    const char *prefix_str; va_list args;
-    prefix_str = plat_log_get_prefix(LOG_LEVEL_ERROR);
-    while (*prefix_str != '\0') { (void)putchar(*prefix_str); prefix_str++; }
-    va_start(args, fmt);
-    (void)vprintf(fmt, args);
-    va_end(args);
+    va_list args; va_start(args, fmt); vprintf(fmt, args); va_end(args);
 }
 EOF
 
-# ========== 2. 编译 ATF 全家桶 (最小物理修补：只编救砖必须件) ==========
-echo "=== Building ATF for Rescue ==="
-# 编译 NOR 版 (用于 32MB 救砖包)
 make clean
 make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 BOOT_DEVICE=nor DRAM_SIZE=1024 DDR_TYPE=ddr4 BOARD_BGA=1 LOG_LEVEL=20
-cp -v build/mt7981/release/bl2.bin $OUTPUT_DIR/atf/bl2-1g-nor.bin
-cp -v build/mt7981/release/bl31.bin $STAGING_DIR_IMAGE/mt7981-nor-bl31.bin
+cp -v build/mt7981/release/bl2.bin "$OUTPUT_DIR/atf/bl2-1g-nor.bin"
+cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-nor-bl31.bin"
 
-# 编译 RAM 版 (用于 UART 引导)
-make clean
-make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 BOOT_DEVICE=ram DRAM_SIZE=1024 DDR_TYPE=ddr4 BOARD_BGA=1 RAM_BOOT_UART_DL=1 LOG_LEVEL=20
-cp -v build/mt7981/release/bl2.bin $OUTPUT_DIR/atf/bl2-ram-1g.bin
-
-# ========== 3. 编译 U-Boot (原文照抄) ==========
-echo "=== Building U-Boot for Rescue ==="
+# ========== 2. 编译 U-Boot (原文照抄) ==========
+echo "=== Building U-Boot (NOR) ==="
 make -C tools/fiptool CROSS_COMPILE=
 FIPTOOL="$PWD/tools/fiptool/fiptool"
 
 cd $SOURCE_DIR/u-boot
 make clean
 make CROSS_COMPILE=aarch64-linux-gnu- mt7981_spim_nor_rfb_defconfig
+# 延长等待时间防止 System Halt 无法干预
+sed -i 's/CONFIG_BOOTDELAY=.*/CONFIG_BOOTDELAY=5/' .config
 make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
 "$FIPTOOL" create --soc-fw "$STAGING_DIR_IMAGE/mt7981-nor-bl31.bin" --nt-fw u-boot.bin "$OUTPUT_DIR/uboot/fip-nor.bin"
 
-# ========== 4. 物理缝合救砖镜像 (最小物理修补：无固件纯净版) ==========
-echo "=== Stitching Spi-flash-32MB.bin (Rescue Only) ==="
+# ========== 3. 构建最小化系统镜像 (仅生成必备组件) ==========
+echo "=== Building ImmortalWrt Components ==="
+cd "$IMMORTALWRT_BUILD"
+# 只编译目标文件，不进行最后的打包（节省时间）
+make -j$(nproc) target/compile || make -j1 V=s target/compile
+
+# ========== 4. 物理缝合 32MB 救砖包 (像素级对齐) ==========
+echo "=== 物理缝合 Spi-flash-32MB.bin ==="
 cd "$OUTPUT_DIR/firmware"
 
-# 创建 32MB 全 F 物理镜像
+# 寻找编译出的 ITB 镜像 (包含 Kernel + Rootfs)
+# 注意：不使用 sysupgrade.bin，直接用原始 ITB 流
+ITB_FILE=$(find "$IMMORTALWRT_BUILD/bin/targets/mediatek/filogic/" -name "*.itb" | head -n 1)
+
+# 创建 32MB 纯净底图
 dd if=/dev/zero bs=1k count=32768 | tr '\000' '\377' > Spi-flash-32MB.bin
-# 注入 BL2 (0x0)
+
+# 注入 BL2 (Offset 0)
 dd if="$OUTPUT_DIR/atf/bl2-1g-nor.bin" of=Spi-flash-32MB.bin conv=notrunc
-# 注入 FIP (3.5MB / 3584k)
+
+# 注入 FIP (Offset 3.5MB / 3584k) - 修复 System Halt 关键点
 dd if="$OUTPUT_DIR/uboot/fip-nor.bin" of=Spi-flash-32MB.bin bs=1k seek=3584 conv=notrunc
 
-# 诊断：由于不构建升级固件，4MB 后的分区保持全 F (空白)，此时镜像已可救回 U-Boot
-echo "✅ Rescue bootloader stitched to Spi-flash-32MB.bin"
+# 注入 System (Offset 4.0MB / 4096k)
+if [ -n "$ITB_FILE" ]; then
+    dd if="$ITB_FILE" of=Spi-flash-32MB.bin bs=1k seek=4096 conv=notrunc
+    echo "✅ 32MB 救砖包物理缝合成功 (含 Rootfs)"
+else
+    echo "⚠️ 警告：未找到 ITB 文件，生成的是纯引导救砖包"
+fi
 
-# ========== 5. 打包工具 (原文照抄) ==========
-cd $SOURCE_DIR/mtk_uartboot
-tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
+# ========== 5. 整理输出产物 ==========
+echo "=== Finalizing Artifacts ==="
+cd "$OUTPUT_DIR"
+# 压缩 uartboot 工具
+cd "$SOURCE_DIR/mtk_uartboot" && tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
 
-echo "=== [Audit] Final Product List ==="
-ls -lh "$OUTPUT_DIR/atf" "$OUTPUT_DIR/uboot" "$OUTPUT_DIR/firmware"
+# 生成校验码
+cd "$OUTPUT_DIR/firmware"
+md5sum Spi-flash-32MB.bin > Spi-flash-32MB.bin.md5
+
+echo "=== [Audit] 物理执行清单 ==="
+ls -lh "$OUTPUT_DIR/firmware/Spi-flash-32MB.bin"
