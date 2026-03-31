@@ -19,14 +19,23 @@
 
 	chosen {
 		stdout-path = "serial0:115200n8";
-		/* 默认从 eMMC 的 production 分区启动，U-Boot 可覆盖 */
 		bootargs = "console=ttyS0,115200n1 loglevel=8 earlycon=uart8250,mmio32,0x11002000 root=PARTLABEL=production rootwait rw rootfstype=f2fs,squashfs,ext4";
 	};
 
-	/* 1GB DDR4 内存 */
+	/* 1GB DDR4 内存（正常使用） */
 	memory@40000000 {
 		device_type = "memory";
 		reg = <0 0x40000000 0 0x40000000>;
+	};
+
+	/* 添加 1.8V 稳压器节点，用于 eMMC 的 vqmmc-supply */
+	reg_1p8v: regulator-1p8v {
+		compatible = "regulator-fixed";
+		regulator-name = "fixed-1.8V";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+		regulator-boot-on;
 	};
 
 	leds {
@@ -203,5 +212,6 @@
 &uart0 { status = "okay"; };
 &watchdog { status = "okay"; };
 
-&reg_1p8v { status = "okay"; };
+/* 启用稳压器节点（reg_3p3v 已在 mt7981.dtsi 中定义，这里显式启用） */
 &reg_3p3v { status = "okay"; };
+&reg_1p8v { status = "okay"; };
