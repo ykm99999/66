@@ -7,6 +7,7 @@ CONFIG_DIR="$WORKSPACE/main-repo/888"
 OUTPUT_DIR="$WORKSPACE/output"
 IMMORTALWRT_BUILD="$WORKSPACE/immortalwrt-build"
 STAGING_DIR_IMAGE="$IMMORTALWRT_BUILD/staging_dir/image"
+# 严格 1 版原文路径：不做任何多余层级添加
 DTS_PATH_OLD="target/linux/mediatek/dts"
 DTS_PATH_NEW="target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek"
 FILOGIC_MK="target/linux/mediatek/image/filogic.mk"
@@ -16,7 +17,7 @@ mkdir -p $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware $STAGING_DIR_IMA
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# ========== 验证配置文件 (严格原文照抄文件名) ==========
+# ========== 验证配置文件 (1 版原文) ==========
 echo "=== 验证配置文件 ==="
 if [ ! -f "$CONFIG_DIR/mt7981-sl-3000-emmc.dts" ]; then
     echo "❌ 缺少 $CONFIG_DIR/mt7981-sl-3000-emmc.dts"
@@ -28,25 +29,26 @@ if [ ! -f "$CONFIG_DIR/sl3000.config" ]; then
 fi
 echo "✅ 配置文件齐全"
 
-# ========== 准备 ImmortalWrt 源码 ==========
+# ========== 准备 ImmortalWrt 源码 (1 版原文) ==========
 cd $WORKSPACE
 rm -rf immortalwrt-build
 cp -r $SOURCE_DIR/immortalwrt immortalwrt-build
 cd immortalwrt-build
 
-# 修改 feeds 配置 (原文逻辑)
+# 修改 feeds 配置 (1 版原文逻辑)
 sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git" >> feeds.conf.default
 echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git" >> feeds.conf.default
 
-./scripts/feeds update -a && ./scripts/feeds install -a
+./scripts/feeds update -a || { echo "❌ feeds update failed"; exit 1; }
+./scripts/feeds install -a || { echo "❌ feeds install failed"; exit 1; }
 
-# ========== 注册三件套 (物理修复注入) ==========
+# ========== 注册三件套 (1 版原文路径与注入方式) ==========
 mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
-cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_OLD/
-cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_NEW/
+cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_OLD/ || { echo "❌ Failed to copy DTS"; exit 1; }
+cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_NEW/ || { echo "❌ Failed to copy DTS"; exit 1; }
 
-# 注入设备定义：修正为 32MB 救砖缝合逻辑
+# 物理修复：在原有 sl_3000-emmc 逻辑基础上，修正缝合定义
 echo "" >> $FILOGIC_MK
 echo "define Device/sl_3000-spi-32m" >> $FILOGIC_MK
 echo "  DEVICE_VENDOR := SL" >> $FILOGIC_MK
@@ -61,8 +63,11 @@ echo "  IMAGE/Spi-flash-32MB.bin := append-u-boot-elf mt7981-bl2-nor | pad-to 35
 echo "endef" >> $FILOGIC_MK
 echo "TARGET_DEVICES += sl_3000-spi-32m" >> $FILOGIC_MK
 
-# ========== 修正 .config 物理目标 ==========
-cp -v $CONFIG_DIR/sl3000.config .config
+# ========== 最终修正 (1 版原文逻辑) ==========
+cp -v $CONFIG_DIR/sl3000.config .config || { echo "❌ Failed to copy config"; exit 1; }
+echo "CONFIG_TARGET_mediatek=y" >> .config
+echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
+# 延续原文逻辑替换目标
 sed -i 's/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-32m=y/' .config
 
 make defconfig
