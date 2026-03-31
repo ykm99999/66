@@ -5,7 +5,7 @@
 #include <dt-bindings/leds/common.h>
 
 / {
-	model = "SL-3000 (1GB DDR4)";
+	model = "SL-3000 (1GB DDR4 Rescue Edition)";
 	compatible = "sl,3000-emmc", "mediatek,mt7981";
 
 	aliases {
@@ -19,10 +19,10 @@
 
 	chosen {
 		stdout-path = "serial0:115200n8";
-		bootargs = "console=ttyS0,115200n1 loglevel=8 earlycon=uart8250,mmio32,0x11002000 root=PARTLABEL=production rootwait rw rootfstype=f2fs,squashfs,ext4";
+		bootargs = "console=ttyS0,115200n1 loglevel=8 earlycon=uart8250,mmio32,0x11002000 root=/dev/mtdblock2 rootwait rw rootfstype=squashfs,f2fs";
 	};
 
-	/* 1GB DDR4 内存 */
+	/* 物理寻址：1GB DDR4 (基地址 0x40000000) */
 	memory@40000000 {
 		device_type = "memory";
 		reg = <0 0x40000000 0 0x40000000>;
@@ -39,18 +39,15 @@
 
 	leds {
 		compatible = "gpio-leds";
-
 		status_red_led: status-red {
 			label = "red:status";
 			gpios = <&pio 10 GPIO_ACTIVE_LOW>;
 		};
-
 		status_green_led: status-green {
 			label = "green:status";
 			gpios = <&pio 11 GPIO_ACTIVE_LOW>;
 			linux,default-trigger = "heartbeat";
 		};
-
 		status_blue_led: status-blue {
 			label = "blue:status";
 			gpios = <&pio 12 GPIO_ACTIVE_LOW>;
@@ -59,7 +56,6 @@
 
 	keys {
 		compatible = "gpio-keys";
-
 		reset {
 			label = "reset";
 			linux,code = <KEY_RESTART>;
@@ -69,7 +65,7 @@
 	};
 };
 
-/* SPI-NOR 物理对齐修复 (基于救砖镜像逻辑) */
+/* 核心：SPI-NOR 物理偏移对齐 (救砖包专供) */
 &spi0 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&spi0_flash_pins>;
@@ -85,20 +81,23 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 
+			/* 0MB -> 3.5MB: 存放 BL2 与环境变量预留 */
 			partition@0 {
 				label = "bl2";
-				reg = <0x0 0x100000>;
+				reg = <0x0 0x380000>;
 				read-only;
 			};
 
-			/* 物理修复：对齐至 3.5MB (0x380000) */
+			/* 3.5MB -> 4.0MB: 存放 FIP (U-Boot) */
+			/* 物理地址 0x380000 对应 seek=3584 */
 			partition@380000 {
-				label = "fip";
+				label = "u-boot";
 				reg = <0x380000 0x80000>;
 				read-only;
 			};
 
-			/* 物理修复：对齐至 4.0MB (0x400000) */
+			/* 4.0MB -> 32MB: 存放 Firmware (Kernel + Rootfs) */
+			/* 物理地址 0x400000 对应 seek=4096 */
 			partition@400000 {
 				label = "firmware";
 				reg = <0x400000 0x1C00000>;
@@ -107,7 +106,6 @@
 	};
 };
 
-/* 以下内容严格原文照抄，不做任何修改 */
 &mmc0 {
 	status = "okay";
 	pinctrl-names = "default", "state_uhs";
@@ -126,7 +124,6 @@
 
 &eth {
 	status = "okay";
-
 	gmac0: mac@0 {
 		compatible = "mediatek,eth-mac";
 		reg = <0>;
@@ -141,32 +138,24 @@
 	mdio: mdio-bus {
 		#address-cells = <1>;
 		#size-cells = <0>;
-
 		switch@0 {
 			compatible = "mediatek,mt7531";
 			reg = <31>;
 			reset-gpios = <&pio 39 GPIO_ACTIVE_LOW>;
 			reset-delay-us = <10000>;
-
 			ports {
 				#address-cells = <1>;
 				#size-cells = <0>;
-
 				port@0 { reg = <0>; label = "lan1"; };
 				port@1 { reg = <1>; label = "lan2"; };
 				port@2 { reg = <2>; label = "lan3"; };
 				port@3 { reg = <3>; label = "wan"; };
-
 				port@6 {
 					reg = <6>;
 					label = "cpu";
 					ethernet = <&gmac0>;
 					phy-mode = "2500base-x";
-					fixed-link {
-						speed = <2500>;
-						full-duplex;
-						pause;
-					};
+					fixed-link { speed = <2500>; full-duplex; pause; };
 				};
 			};
 		};
@@ -175,32 +164,15 @@
 
 &pio {
 	spi0_flash_pins: spi0-pins {
-		mux {
-			function = "spi";
-			groups = "spi0", "spi0_wp_hold";
-		};
-		conf-pu {
-			pins = "SPI0_CS", "SPI0_HOLD", "SPI0_WP";
-			bias-pull-up;
-		};
+		mux { function = "spi"; groups = "spi0", "spi0_wp_hold"; };
+		conf-pu { pins = "SPI0_CS", "SPI0_HOLD", "SPI0_WP"; bias-pull-up; };
 	};
-
 	mmc0_pins_default: mmc0-pins-default {
-		mux {
-			function = "flash";
-			groups = "emmc_45";
-		};
-		conf-pu {
-			pins = "EMMC_RSTB";
-			bias-pull-up;
-		};
+		mux { function = "flash"; groups = "emmc_45"; };
+		conf-pu { pins = "EMMC_RSTB"; bias-pull-up; };
 	};
-
 	mmc0_pins_uhs: mmc0-pins-uhs {
-		mux {
-			function = "flash";
-			groups = "emmc_45";
-		};
+		mux { function = "flash"; groups = "emmc_45"; };
 	};
 };
 
