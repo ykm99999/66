@@ -6,8 +6,7 @@
 
 / {
 	model = "SL-3000 (1GB DDR4)";
-	/* 兼容性修复：增加 spi-nor 识别 */
-	compatible = "sl,3000-spi", "sl,3000-emmc", "mediatek,mt7981";
+	compatible = "sl,3000-emmc", "mediatek,mt7981";
 
 	aliases {
 		serial0 = &uart0;
@@ -20,14 +19,13 @@
 
 	chosen {
 		stdout-path = "serial0:115200n8";
-		/* 修正根分区挂载路径 */
-		bootargs = "console=ttyS0,115200n1 loglevel=8 earlycon=uart8250,mmio32,0x11002000 root=/dev/fit0 rootwait rw rootfstype=f2fs,squashfs,ext4";
+		bootargs = "console=ttyS0,115200n1 loglevel=8 earlycon=uart8250,mmio32,0x11002000 root=PARTLABEL=production rootwait rw rootfstype=f2fs,squashfs,ext4";
 	};
 
-	/* 1GB DDR4 内存：像素级物理对齐 */
+	/* 1GB DDR4 内存 */
 	memory@40000000 {
 		device_type = "memory";
-		reg = <0x0 0x40000000 0x0 0x40000000>;
+		reg = <0 0x40000000 0 0x40000000>;
 	};
 
 	reg_1p8v: regulator-1p8v {
@@ -71,7 +69,7 @@
 	};
 };
 
-/* SPI-NOR 物理救砖分区对齐 (0x380000 为 3.5MB 关键点) */
+/* SPI-NOR 物理对齐修复 (基于救砖镜像逻辑) */
 &spi0 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&spi0_flash_pins>;
@@ -89,26 +87,27 @@
 
 			partition@0 {
 				label = "bl2";
-				reg = <0x0 0x100000>; /* 1MB BL2 */
+				reg = <0x0 0x100000>;
 				read-only;
 			};
 
-			/* 物理对齐：3.5MB (0x380000) 存放 FIP */
+			/* 物理修复：对齐至 3.5MB (0x380000) */
 			partition@380000 {
 				label = "fip";
-				reg = <0x380000 0x80000>; 
+				reg = <0x380000 0x80000>;
 				read-only;
 			};
 
-			/* 物理对齐：4.0MB (0x400000) 开始固件 */
+			/* 物理修复：对齐至 4.0MB (0x400000) */
 			partition@400000 {
 				label = "firmware";
-				reg = <0x400000 0x1C00000>; /* 剩余 28MB */
+				reg = <0x400000 0x1C00000>;
 			};
 		};
 	};
 };
 
+/* 以下内容严格原文照抄，不做任何修改 */
 &mmc0 {
 	status = "okay";
 	pinctrl-names = "default", "state_uhs";
@@ -127,11 +126,16 @@
 
 &eth {
 	status = "okay";
+
 	gmac0: mac@0 {
 		compatible = "mediatek,eth-mac";
 		reg = <0>;
 		phy-mode = "2500base-x";
-		fixed-link { speed = <2500>; full-duplex; pause; };
+		fixed-link {
+			speed = <2500>;
+			full-duplex;
+			pause;
+		};
 	};
 
 	mdio: mdio-bus {
@@ -147,16 +151,22 @@
 			ports {
 				#address-cells = <1>;
 				#size-cells = <0>;
+
 				port@0 { reg = <0>; label = "lan1"; };
 				port@1 { reg = <1>; label = "lan2"; };
 				port@2 { reg = <2>; label = "lan3"; };
 				port@3 { reg = <3>; label = "wan"; };
+
 				port@6 {
 					reg = <6>;
 					label = "cpu";
 					ethernet = <&gmac0>;
 					phy-mode = "2500base-x";
-					fixed-link { speed = <2500>; full-duplex; pause; };
+					fixed-link {
+						speed = <2500>;
+						full-duplex;
+						pause;
+					};
 				};
 			};
 		};
@@ -165,14 +175,33 @@
 
 &pio {
 	spi0_flash_pins: spi0-pins {
-		mux { function = "spi"; groups = "spi0", "spi0_wp_hold"; };
-		conf-pu { pins = "SPI0_CS", "SPI0_HOLD", "SPI0_WP"; bias-pull-up; };
+		mux {
+			function = "spi";
+			groups = "spi0", "spi0_wp_hold";
+		};
+		conf-pu {
+			pins = "SPI0_CS", "SPI0_HOLD", "SPI0_WP";
+			bias-pull-up;
+		};
 	};
+
 	mmc0_pins_default: mmc0-pins-default {
-		mux { function = "flash"; groups = "emmc_45"; };
-		conf-pu { pins = "EMMC_RSTB"; bias-pull-up; };
+		mux {
+			function = "flash";
+			groups = "emmc_45";
+		};
+		conf-pu {
+			pins = "EMMC_RSTB";
+			bias-pull-up;
+		};
 	};
-	mmc0_pins_uhs: mmc0-pins-uhs { mux { function = "flash"; groups = "emmc_45"; }; };
+
+	mmc0_pins_uhs: mmc0-pins-uhs {
+		mux {
+			function = "flash";
+			groups = "emmc_45";
+		};
+	};
 };
 
 &uart0 { status = "okay"; };
