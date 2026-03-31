@@ -1,93 +1,297 @@
 #!/bin/bash
 set -euo pipefail
 
-# ==========================================
-# 核心指令：物理执行三准则 (救砖全量版)
-# 严格执行：1版原文照抄，仅修复 cp 路径错误
-# ==========================================
-
 WORKSPACE="$GITHUB_WORKSPACE"
 SOURCE_DIR="$WORKSPACE/source-repo"
 OUTPUT_DIR="$WORKSPACE/output"
-IMMORTALWRT_BUILD=$(cat "$WORKSPACE/build-dir.txt")
-STAGING_DIR_IMAGE="$IMMORTALWRT_BUILD/staging_dir/image"
+STAGING_DIR_IMAGE="$WORKSPACE/immortalwrt-build/staging_dir/image"
+
+mkdir -p "$STAGING_DIR_IMAGE"
+
+IMMORTALWRT_BUILD_DIR=$(cat $WORKSPACE/build-dir.txt)
+cd "$IMMORTALWRT_BUILD_DIR"
 
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# ========== 1. 编译 ATF (严格原文照抄 1 版补丁) ==========
-echo "=== Building ATF (DDR4 1024M) ==="
-cd "$SOURCE_DIR/arm-trusted-firmware"
+# ========== 强制修改 ATF 源码，启用 DDR4 ==========
+echo "=== Patching ATF source to force DDR4 ==="
+cd $SOURCE_DIR/arm-trusted-firmware
+mkdir -p plat/mediatek/mt7981/drivers/dram
 
-# 【物理修复：完全延续你提供的 1 版源码补丁，禁止任何修改】
 cat > plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c << 'EOF'
+/*
+ * Copyright (c) 2021, MediaTek Inc. All rights reserved.
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
 #include <plat/common/platform.h>
 #include <common/debug.h>
 #include <lib/mmio.h>
 #include <stdarg.h>
 #include <stdio.h>
+
+/* IAP/REBB eFuse bit */
+#define IAP_REBB_SWITCH		0x11D00A0C
+#define IAP_IND			0x01
+
 extern void mtk_mem_init_real(void);
 extern int mt7981_use_ddr4;
-void mtk_mem_init(void) {
-    mt7981_use_ddr4 = 1;
-    NOTICE("EMI: Forced DDR4 Mode for SL-3000\n");
-    mtk_mem_init_real();
+extern int mt7981_ddr_size_limit;
+extern int mt7981_dram_debug;
+extern int mt7981_bga_pkg;
+extern int mt7981_ddr3_freq;
+
+void mtk_mem_init(void)
+{
+	/* 强制使用 DDR4 */
+	mt7981_use_ddr4 = 1;
+
+#ifdef DRAM_SIZE_LIMIT
+	mt7981_ddr_size_limit = DRAM_SIZE_LIMIT;
+
+	if (!mt7981_use_ddr4 && mt7981_ddr_size_limit > 512)
+		mt7981_ddr_size_limit = 512;
+#endif /* DRAM_SIZE_LIMIT */
+
+#ifdef DRAM_DEBUG_LOG
+	mt7981_dram_debug = 1;
+#endif /* DRAM_DEBUG_LOG */
+
+#if defined(BOARD_BGA)
+	mt7981_bga_pkg = 1;
+#elif defined(BOARD_QFN)
+	mt7981_bga_pkg = 0;
+#endif /* BOARD_BGA */
+
+#ifdef DDR3_FREQ_2133
+	mt7981_ddr3_freq = 2133;
+#endif /* DDR3_FREQ_2133 */
+#ifdef DDR3_FREQ_1866
+	mt7981_ddr3_freq = 1866;
+#endif /* DDR3_FREQ_1866 */
+
+	NOTICE("EMI: Using DDR%u settings\n", mt7981_use_ddr4 ? 4 : 3);
+
+	mtk_mem_init_real();
 }
-void mtk_mem_dbg_print(const char *fmt, ...) { return; }
-void mtk_mem_err_print(const char *fmt, ...) {
-    va_list args; va_start(args, fmt); vprintf(fmt, args); va_end(args);
+
+void mtk_mem_dbg_print(const char *fmt, ...)
+{
+	va_list args;
+
+	if (!mt7981_dram_debug)
+		return;
+
+	va_start(args, fmt);
+	(void)vprintf(fmt, args);
+	va_end(args);
+}
+
+void mtk_mem_err_print(const char *fmt, ...)
+{
+	const char *prefix_str;
+	va_list args;
+
+	prefix_str = plat_log_get_prefix(LOG_LEVEL_ERROR);
+
+	while (*prefix_str != '\0') {
+		(void)putchar(*prefix_str);
+		prefix_str++;
+	}
+
+	va_start(args, fmt);
+	(void)vprintf(fmt, args);
+	va_end(args);
 }
 EOF
+echo "✅ ATF source patched for DDR4"
 
+# ========== 编译 ATF ==========
+echo "=== Building ATF 512M (EMMC) ==="
 make clean
-make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 BOOT_DEVICE=nor DRAM_SIZE=1024 DDR_TYPE=ddr4 BOARD_BGA=1 LOG_LEVEL=20
+make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=512 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
+find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-512m-emmc.bin \; 2>/dev/null || echo "No bl2.bin for 512M emmc"
+find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-512m-emmc.elf \; 2>/dev/null || echo "No bl2.elf for 512M emmc"
 
-# 🔴 【物理修复点：解决 cp 报错，强制创建目标目录】
-mkdir -p "$OUTPUT_DIR/atf"
-mkdir -p "$STAGING_DIR_IMAGE"
+if command -v strings &> /dev/null; then
+    if strings build/mt7981/release/bl2.bin | grep -qi "DDR4"; then
+        echo "✅ 512M BL2 is DDR4"
+    else
+        echo "❌ 512M BL2 is NOT DDR4, check patching!"
+        exit 1
+    fi
+fi
 
-cp -v build/mt7981/release/bl2.bin "$OUTPUT_DIR/atf/bl2-1g-nor.bin"
-cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-nor-bl31.bin"
+echo "=== Building ATF 1G (EMMC) ==="
+make clean
+make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
+find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-emmc.bin \; 2>/dev/null || echo "No bl2.bin for 1G emmc"
+find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-emmc.elf \; 2>/dev/null || echo "No bl2.elf for 1G emmc"
 
-# ========== 2. 编译 U-Boot (延续原文逻辑) ==========
-echo "=== Building U-Boot (NOR) ==="
-cd "$SOURCE_DIR/u-boot"
+if command -v strings &> /dev/null; then
+    if strings build/mt7981/release/bl2.bin | grep -qi "DDR4"; then
+        echo "✅ 1G BL2 is DDR4"
+    else
+        echo "❌ 1G BL2 is NOT DDR4, check patching!"
+        exit 1
+    fi
+fi
+
+echo "=== Building ATF 1G (NOR - for rescue) ==="
+make clean
+make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=nor LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
+find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.bin \; 2>/dev/null || echo "No bl2.bin for 1G nor"
+find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.elf \; 2>/dev/null || echo "No bl2.elf for 1G nor"
+
+# ========== 关键：编译 RAM 版 BL2 (1G, DDR4) ==========
+echo "=== Building ATF RAM (1G DDR4) ==="
+make clean
+make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 BOOT_DEVICE=ram LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1 RAM_BOOT_UART_DL=1
+find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-ram-1g.bin \; 2>/dev/null || echo "No bl2.bin for RAM"
+find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-ram-1g.elf \; 2>/dev/null || echo "No bl2.elf for RAM"
+
+# 验证 RAM 版是否生成
+if [ ! -f "$OUTPUT_DIR/atf/bl2-ram-1g.bin" ]; then
+    echo "❌ bl2-ram-1g.bin not generated! Check ATF compilation for RAM."
+    exit 1
+else
+    echo "✅ bl2-ram-1g.bin generated successfully"
+fi
+
+# 检查 bl31.bin 是否存在（所有 ATF 编译完成后会生成一个 bl31.bin）
+if [ ! -f build/mt7981/release/bl31.bin ]; then
+    echo "❌ bl31.bin not found after ATF compilation!"
+    exit 1
+fi
+
+# 复制 bl31.bin 到 staging_dir
+cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin" || { echo "❌ Failed to copy bl31.bin for emmc"; exit 1; }
+cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin" || { echo "❌ Failed to copy bl31.bin for nor"; exit 1; }
+
+ls -la "$STAGING_DIR_IMAGE"/mt7981-*.bin || { echo "❌ Copied bl31 files missing"; exit 1; }
+
+echo "=== Compiling fiptool from ATF ==="
 make -C tools/fiptool CROSS_COMPILE=
 FIPTOOL="$PWD/tools/fiptool/fiptool"
 
+# ========== 编译 U-Boot (eMMC版) 并生成 FIP ==========
+cd $SOURCE_DIR/u-boot
+echo "=== Building U-Boot (eMMC) ==="
 make clean
-make CROSS_COMPILE=aarch64-linux-gnu- mt7981_spim_nor_rfb_defconfig
-# 延续 1 版设置
-sed -i 's/CONFIG_BOOTDELAY=.*/CONFIG_BOOTDELAY=5/' .config
+if [ -f configs/mt7981_emmc_rfb_defconfig ]; then
+    make CROSS_COMPILE=aarch64-linux-gnu- mt7981_emmc_rfb_defconfig
+else
+    echo "❌ mt7981_emmc_rfb_defconfig not found!"
+    exit 1
+fi
+echo "CONFIG_MTK_FIP_SUPPORT=y" >> .config
+make olddefconfig
 make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
-"$FIPTOOL" create --soc-fw "$STAGING_DIR_IMAGE/mt7981-nor-bl31.bin" --nt-fw u-boot.bin "$OUTPUT_DIR/uboot/fip-nor.bin"
 
-# ========== 3. 构建 Rootfs 组件 (仅构建必备 ITB) ==========
-echo "=== Building ImmortalWrt Components ==="
-cd "$IMMORTALWRT_BUILD"
-make -j$(nproc) target/compile || make -j1 V=s target/compile
+if [ ! -f fip.bin ] && [ ! -f u-boot.fip ]; then
+    echo "⚠️ fip.bin not generated for eMMC, creating manually..."
+    if [ -f "$FIPTOOL" ]; then
+        if [ ! -f "$STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin" ]; then
+            echo "❌ mt7981-emmc-ddr4-bl31.bin not found!"
+            exit 1
+        fi
+        "$FIPTOOL" create \
+            --soc-fw "$STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin" \
+            --nt-fw u-boot.bin \
+            u-boot.fip
+        cp u-boot.fip "$OUTPUT_DIR/uboot/fip-emmc.bin"
+    else
+        echo "❌ fiptool not found, cannot create FIP"
+        exit 1
+    fi
+else
+    cp fip.bin "$OUTPUT_DIR/uboot/fip-emmc.bin" 2>/dev/null || cp u-boot.fip "$OUTPUT_DIR/uboot/fip-emmc.bin" 2>/dev/null
+fi
+cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-emmc.bin"
 
-# ========== 4. 物理像素级缝合 (延续 3.5MB/4MB 逻辑) ==========
-echo "=== 物理缝合 Spi-flash-32MB.bin ==="
-cd "$OUTPUT_DIR/firmware"
-ITB_FILE=$(find "$IMMORTALWRT_BUILD/bin/targets/mediatek/filogic/" -name "*.itb" | head -n 1)
+# ========== 编译 U-Boot (NOR版) 并生成 FIP ==========
+cd $SOURCE_DIR/u-boot
+echo "=== Building U-Boot (NOR) ==="
+make clean
+if [ -f configs/mt7981_spim_nor_rfb_defconfig ]; then
+    make CROSS_COMPILE=aarch64-linux-gnu- mt7981_spim_nor_rfb_defconfig
+else
+    echo "❌ mt7981_spim_nor_rfb_defconfig not found, cannot build NOR U-Boot"
+    exit 1
+fi
+echo "CONFIG_MTK_FIP_SUPPORT=y" >> .config
+make olddefconfig
+make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
 
-# 创建 32MB 底图
-dd if=/dev/zero bs=1k count=32768 | tr '\000' '\377' > Spi-flash-32MB.bin
+if [ ! -f fip.bin ] && [ ! -f u-boot.fip ]; then
+    echo "⚠️ fip.bin not generated for NOR, creating manually..."
+    if [ -f "$FIPTOOL" ]; then
+        if [ ! -f "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin" ]; then
+            echo "❌ mt7981-nor-ddr4-bl31.bin not found!"
+            exit 1
+        fi
+        "$FIPTOOL" create \
+            --soc-fw "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin" \
+            --nt-fw u-boot.bin \
+            u-boot.fip
+        cp u-boot.fip "$OUTPUT_DIR/uboot/fip-nor.bin"
+    else
+        echo "❌ fiptool not found, cannot create FIP"
+        exit 1
+    fi
+else
+    cp fip.bin "$OUTPUT_DIR/uboot/fip-nor.bin" 2>/dev/null || cp u-boot.fip "$OUTPUT_DIR/uboot/fip-nor.bin" 2>/dev/null
+fi
+cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
 
-# 注入 BL2
-dd if="$OUTPUT_DIR/atf/bl2-1g-nor.bin" of=Spi-flash-32MB.bin conv=notrunc
+# ========== 构建 SPI-NOR 救砖固件 ==========
+echo "=== Building SPI-NOR Rescue Firmware (Spi-flash-32MB.bin) ==="
+cd "$IMMORTALWRT_BUILD_DIR"
 
-# 注入 FIP (Offset 3.5MB / 3584k)
-dd if="$OUTPUT_DIR/uboot/fip-nor.bin" of=Spi-flash-32MB.bin bs=1k seek=3584 conv=notrunc
+# 重置配置，确保目标正确
+make defconfig
 
-# 注入 System (Offset 4.0MB / 4096k)
-if [ -n "$ITB_FILE" ]; then
-    dd if="$ITB_FILE" of=Spi-flash-32MB.bin bs=1k seek=4096 conv=notrunc
-    echo "✅ 32MB 救砖全家桶缝合成功"
+# 构建指定 NOR 设备的固件（假设设备名为 sl_3000-spi-nor，若实际不同请修改）
+# 如果设备名不对，可尝试通用名 mediatek_mt7981-spi-nor
+DEVICE_NAME="sl_3000-spi-nor"
+echo "Building for device: $DEVICE_NAME"
+
+make VERSION_NUMBER="${VERSION_NUMBER:-1.0.0}" VERSION_CODE="${VERSION_CODE:-r1}" \
+    DEVICE="$DEVICE_NAME" -j$(nproc) V=s 2>&1 | tee build.log
+if [ ${PIPESTATUS[0]} -ne 0 ]; then
+    echo "❌ Firmware build failed! Last 100 lines of build.log:"
+    tail -100 build.log
+    exit 1
 fi
 
-# ========== 5. 整理产物 ==========
-cd "$OUTPUT_DIR"
-cd "$SOURCE_DIR/mtk_uartboot" && tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
-cd "$OUTPUT_DIR/firmware" && md5sum Spi-flash-32MB.bin > Spi-flash-32MB.bin.md5
+mkdir -p "$OUTPUT_DIR/firmware"
+
+# 查找生成的 SPI-NOR 镜像（通常包含 spi-nor 和 32M 字样）
+SPI_IMAGE=$(find bin/targets/ -type f -name '*spi-nor*32M*.bin' -o -name '*spi-nor*32mb*.bin' | head -1)
+if [ -z "$SPI_IMAGE" ]; then
+    echo "❌ No SPI-NOR 32MB image found!"
+    echo "Available images:"
+    find bin/targets/ -type f -name '*.bin' | head -20
+    exit 1
+fi
+
+cp -v "$SPI_IMAGE" "$OUTPUT_DIR/firmware/Spi-flash-32MB.bin"
+echo "✅ Spi-flash-32MB.bin generated and copied to $OUTPUT_DIR/firmware/"
+
+# 可选：保存构建日志
+cp build.log "$OUTPUT_DIR/firmware/"
+
+# ========== 打包 mtk_uartboot ==========
+cd $SOURCE_DIR/mtk_uartboot
+tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
+if [ $? -ne 0 ] || [ ! -f "$OUTPUT_DIR/mtk_uartboot.tar.gz" ]; then
+    echo "❌ Failed to package mtk_uartboot"
+    exit 1
+fi
+
+# ========== 最终输出 ==========
+echo "✅ Build complete. Output directory contents:"
+ls -la "$OUTPUT_DIR/atf" "$OUTPUT_DIR/uboot" "$OUTPUT_DIR/firmware"
+echo "mtk_uartboot.tar.gz is in $OUTPUT_DIR"
