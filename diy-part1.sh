@@ -22,10 +22,6 @@ if [ ! -f "$CONFIG_DIR/mt7981-sl-3000-emmc.dts" ]; then
     echo "❌ 缺少 $CONFIG_DIR/mt7981-sl-3000-emmc.dts"
     exit 1
 fi
-if [ ! -f "$CONFIG_DIR/mt7981-sl-3000-spi-nor.dts" ]; then
-    echo "❌ 缺少 $CONFIG_DIR/mt7981-sl-3000-spi-nor.dts"
-    exit 1
-fi
 if [ ! -f "$CONFIG_DIR/sl3000.config" ]; then
     echo "❌ 缺少 $CONFIG_DIR/sl3000.config"
     exit 1
@@ -99,46 +95,19 @@ make package/symlinks || { echo "❌ make package/symlinks failed"; exit 1; }
 # ========== 注册设备树（双路径） ==========
 mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
 
-# 复制 eMMC DTS
-cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_OLD/ || { echo "❌ Failed to copy eMMC DTS to old path"; exit 1; }
-cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_NEW/ || { echo "❌ Failed to copy eMMC DTS to new path"; exit 1; }
-
-# 复制 SPI-NOR DTS
-cp -v $CONFIG_DIR/mt7981-sl-3000-spi-nor.dts $DTS_PATH_OLD/ || { echo "❌ Failed to copy NOR DTS to old path"; exit 1; }
-cp -v $CONFIG_DIR/mt7981-sl-3000-spi-nor.dts $DTS_PATH_NEW/ || { echo "❌ Failed to copy NOR DTS to new path"; exit 1; }
+# 只复制唯一的 DTS 文件到两个路径
+DTS_FILE="mt7981-sl-3000-emmc.dts"
+cp -v $CONFIG_DIR/$DTS_FILE $DTS_PATH_OLD/ || { echo "❌ Failed to copy DTS to old path"; exit 1; }
+cp -v $CONFIG_DIR/$DTS_FILE $DTS_PATH_NEW/ || { echo "❌ Failed to copy DTS to new path"; exit 1; }
 
 # ========== 注入设备定义到 filogic.mk ==========
-# 添加 eMMC 设备定义（可选，保留以备后用）
-echo "" >> $FILOGIC_MK
-echo "# SL3000 eMMC 设备定义（由 diy-part1.sh 注入）" >> $FILOGIC_MK
-echo "define Device/sl_3000-emmc" >> $FILOGIC_MK
-echo "  DEVICE_VENDOR := SL" >> $FILOGIC_MK
-echo "  DEVICE_MODEL := 3000 eMMC (1GB)" >> $FILOGIC_MK
-echo "  DEVICE_DTS := mt7981-sl-3000-emmc" >> $FILOGIC_MK
-echo "  DEVICE_DTS_DIR := \$(DTS_DIR)" >> $FILOGIC_MK
-echo "  SUPPORTED_DEVICES := sl,3000-emmc" >> $FILOGIC_MK
-echo "  DEVICE_PACKAGES := \\" >> $FILOGIC_MK
-echo "    kmod-usb3 kmod-usb-storage kmod-usb-storage-uas \\" >> $FILOGIC_MK
-echo "    f2fsck losetup mkf2fs kmod-fs-f2fs kmod-mmc \\" >> $FILOGIC_MK
-echo "    luci-app-ksmbd luci-i18n-ksmbd-zh-cn ksmbd-utils \\" >> $FILOGIC_MK
-echo "    luci-app-passwall2 \\" >> $FILOGIC_MK
-echo "    xray-core chinadns-ng \\" >> $FILOGIC_MK
-echo "    shadowsocks-libev-ss-local shadowsocks-libev-ss-redir shadowsocks-libev-ss-tunnel \\" >> $FILOGIC_MK
-echo "    shadowsocks-rust-sslocal simple-obfs \\" >> $FILOGIC_MK
-echo "    docker-ce docker-compose kmod-br-netfilter kmod-ikconfig kmod-ipt-physdev \\" >> $FILOGIC_MK
-echo "    kmod-nf-ipt6 kmod-nf-ipvs kmod-veth kmod-fs-overlay luci-app-dockerman" >> $FILOGIC_MK
-echo "  IMAGES := sysupgrade.bin" >> $FILOGIC_MK
-echo "  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata" >> $FILOGIC_MK
-echo "endef" >> $FILOGIC_MK
-echo "TARGET_DEVICES += sl_3000-emmc" >> $FILOGIC_MK
-
-# 添加 SPI-NOR 救砖设备定义
+# 只注入 SPI-NOR 救砖设备定义（使用同一个 DTS）
 echo "" >> $FILOGIC_MK
 echo "# SL3000 SPI-NOR 救砖设备定义（由 diy-part1.sh 注入）" >> $FILOGIC_MK
 echo "define Device/sl_3000-spi-nor" >> $FILOGIC_MK
 echo "  DEVICE_VENDOR := SL" >> $FILOGIC_MK
 echo "  DEVICE_MODEL := 3000 SPI-NOR (32MB)" >> $FILOGIC_MK
-echo "  DEVICE_DTS := mt7981-sl-3000-spi-nor" >> $FILOGIC_MK
+echo "  DEVICE_DTS := mt7981-sl-3000-emmc" >> $FILOGIC_MK
 echo "  DEVICE_DTS_DIR := \$(DTS_DIR)" >> $FILOGIC_MK
 echo "  SUPPORTED_DEVICES := sl,3000-spi-nor" >> $FILOGIC_MK
 echo "  DEVICE_PACKAGES := \\" >> $FILOGIC_MK
@@ -152,7 +121,7 @@ echo "endef" >> $FILOGIC_MK
 echo "TARGET_DEVICES += sl_3000-spi-nor" >> $FILOGIC_MK
 
 # 验证设备定义是否已注入
-if ! grep -q "sl_3000-emmc" $FILOGIC_MK || ! grep -q "sl_3000-spi-nor" $FILOGIC_MK; then
+if ! grep -q "sl_3000-spi-nor" $FILOGIC_MK; then
     echo "❌ 设备定义未成功写入 $FILOGIC_MK"
     exit 1
 fi
@@ -190,10 +159,6 @@ echo "=== 验证设备启用状态 ==="
 if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" .config; then
     echo "❌ 救砖设备 sl_3000-spi-nor 未在 .config 中启用！"
     exit 1
-fi
-# 确保 eMMC 设备未启用（可选检查）
-if grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" .config; then
-    echo "⚠️ 警告：eMMC 设备仍被启用，可能产生不需要的镜像，但不影响救砖构建。"
 fi
 echo "✅ 救砖设备已启用"
 
