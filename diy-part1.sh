@@ -3,290 +3,147 @@ set -euo pipefail
 
 WORKSPACE="$GITHUB_WORKSPACE"
 SOURCE_DIR="$WORKSPACE/source-repo"
+CONFIG_DIR="$WORKSPACE/main-repo/888"
 OUTPUT_DIR="$WORKSPACE/output"
-STAGING_DIR_IMAGE="$WORKSPACE/immortalwrt-build/staging_dir/image"
+IMMORTALWRT_BUILD="$WORKSPACE/immortalwrt-build"
+STAGING_DIR_IMAGE="$IMMORTALWRT_BUILD/staging_dir/image"
+DTS_PATH_OLD="target/linux/mediatek/dts"
+DTS_PATH_NEW="target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek"
+FILOGIC_MK="target/linux/mediatek/image/filogic.mk"
 
-mkdir -p "$STAGING_DIR_IMAGE"
-
-IMMORTALWRT_BUILD_DIR=$(cat $WORKSPACE/build-dir.txt)
-cd "$IMMORTALWRT_BUILD_DIR"
+mkdir -p $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware $STAGING_DIR_IMAGE
 
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# ========== 强制修改 ATF 源码，启用 DDR4 ==========
-echo "=== Patching ATF source to force DDR4 ==="
-cd $SOURCE_DIR/arm-trusted-firmware
-mkdir -p plat/mediatek/mt7981/drivers/dram
-
-cat > plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c << 'EOF'
-/*
- * Copyright (c) 2021, MediaTek Inc. All rights reserved.
- *
- * SPDX-License-Identifier: BSD-3-Clause
- */
-
-#include <plat/common/platform.h>
-#include <common/debug.h>
-#include <lib/mmio.h>
-#include <stdarg.h>
-#include <stdio.h>
-
-/* IAP/REBB eFuse bit */
-#define IAP_REBB_SWITCH		0x11D00A0C
-#define IAP_IND			0x01
-
-extern void mtk_mem_init_real(void);
-extern int mt7981_use_ddr4;
-extern int mt7981_ddr_size_limit;
-extern int mt7981_dram_debug;
-extern int mt7981_bga_pkg;
-extern int mt7981_ddr3_freq;
-
-void mtk_mem_init(void)
-{
-	/* 强制使用 DDR4 */
-	mt7981_use_ddr4 = 1;
-
-#ifdef DRAM_SIZE_LIMIT
-	mt7981_ddr_size_limit = DRAM_SIZE_LIMIT;
-
-	if (!mt7981_use_ddr4 && mt7981_ddr_size_limit > 512)
-		mt7981_ddr_size_limit = 512;
-#endif /* DRAM_SIZE_LIMIT */
-
-#ifdef DRAM_DEBUG_LOG
-	mt7981_dram_debug = 1;
-#endif /* DRAM_DEBUG_LOG */
-
-#if defined(BOARD_BGA)
-	mt7981_bga_pkg = 1;
-#elif defined(BOARD_QFN)
-	mt7981_bga_pkg = 0;
-#endif /* BOARD_BGA */
-
-#ifdef DDR3_FREQ_2133
-	mt7981_ddr3_freq = 2133;
-#endif /* DDR3_FREQ_2133 */
-#ifdef DDR3_FREQ_1866
-	mt7981_ddr3_freq = 1866;
-#endif /* DDR3_FREQ_1866 */
-
-	NOTICE("EMI: Using DDR%u settings\n", mt7981_use_ddr4 ? 4 : 3);
-
-	mtk_mem_init_real();
-}
-
-void mtk_mem_dbg_print(const char *fmt, ...)
-{
-	va_list args;
-
-	if (!mt7981_dram_debug)
-		return;
-
-	va_start(args, fmt);
-	(void)vprintf(fmt, args);
-	va_end(args);
-}
-
-void mtk_mem_err_print(const char *fmt, ...)
-{
-	const char *prefix_str;
-	va_list args;
-
-	prefix_str = plat_log_get_prefix(LOG_LEVEL_ERROR);
-
-	while (*prefix_str != '\0') {
-		(void)putchar(*prefix_str);
-		prefix_str++;
-	}
-
-	va_start(args, fmt);
-	(void)vprintf(fmt, args);
-	va_end(args);
-}
-EOF
-echo "✅ ATF source patched for DDR4"
-
-# ========== 编译 ATF ==========
-echo "=== Building ATF 512M (EMMC) ==="
-make clean
-make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=512 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
-find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-512m-emmc.bin \; 2>/dev/null || echo "No bl2.bin for 512M emmc"
-find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-512m-emmc.elf \; 2>/dev/null || echo "No bl2.elf for 512M emmc"
-
-if command -v strings &> /dev/null; then
-    if strings build/mt7981/release/bl2.bin | grep -qi "DDR4"; then
-        echo "✅ 512M BL2 is DDR4"
-    else
-        echo "❌ 512M BL2 is NOT DDR4, check patching!"
-        exit 1
-    fi
+# ========== 验证三件套文件是否存在 ==========
+echo "=== 验证配置文件 ==="
+if [ ! -f "$CONFIG_DIR/mt7981-sl-3000-emmc.dts" ]; then
+    echo "❌ 缺少 $CONFIG_DIR/mt7981-sl-3000-emmc.dts"
+    exit 1
 fi
-
-echo "=== Building ATF 1G (EMMC) ==="
-make clean
-make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
-find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-emmc.bin \; 2>/dev/null || echo "No bl2.bin for 1G emmc"
-find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-emmc.elf \; 2>/dev/null || echo "No bl2.elf for 1G emmc"
-
-if command -v strings &> /dev/null; then
-    if strings build/mt7981/release/bl2.bin | grep -qi "DDR4"; then
-        echo "✅ 1G BL2 is DDR4"
-    else
-        echo "❌ 1G BL2 is NOT DDR4, check patching!"
-        exit 1
-    fi
+if [ ! -f "$CONFIG_DIR/sl3000.config" ]; then
+    echo "❌ 缺少 $CONFIG_DIR/sl3000.config"
+    exit 1
 fi
+echo "✅ 配置文件齐全"
 
-echo "=== Building ATF 1G (NOR - for rescue) ==="
-make clean
-make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=nor LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
-find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.bin \; 2>/dev/null || echo "No bl2.bin for 1G nor"
-find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.elf \; 2>/dev/null || echo "No bl2.elf for 1G nor"
+# ========== 准备 ImmortalWrt 源码 ==========
+cd $WORKSPACE
+rm -rf immortalwrt-build
+cp -r $SOURCE_DIR/immortalwrt immortalwrt-build
+cd immortalwrt-build
 
-# ========== 关键：编译 RAM 版 BL2 (1G, DDR4) ==========
-echo "=== Building ATF RAM (1G DDR4) ==="
-make clean
-make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 BOOT_DEVICE=ram LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1 RAM_BOOT_UART_DL=1
-find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-ram-1g.bin \; 2>/dev/null || echo "No bl2.bin for RAM"
-find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-ram-1g.elf \; 2>/dev/null || echo "No bl2.elf for RAM"
+# 修改 feeds 配置：禁用 telephony feed
+sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 
-# 验证 RAM 版是否生成
-if [ ! -f "$OUTPUT_DIR/atf/bl2-ram-1g.bin" ]; then
-    echo "❌ bl2-ram-1g.bin not generated! Check ATF compilation for RAM."
+# 添加 PassWall 系列 feeds（官方新地址）
+echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git" >> feeds.conf.default
+echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git" >> feeds.conf.default
+
+# 更新所有 feeds
+./scripts/feeds update -a || { echo "❌ feeds update failed"; exit 1; }
+
+# 确保 passwall2 feed 被正确拉取
+if [ ! -d "feeds/passwall2" ]; then
+    echo "❌ passwall2 feed failed to download. Please check the repository URL."
     exit 1
 else
-    echo "✅ bl2-ram-1g.bin generated successfully"
+    echo "✅ passwall2 feed successfully updated"
 fi
 
-# 检查 bl31.bin 是否存在
-if [ ! -f build/mt7981/release/bl31.bin ]; then
-    echo "❌ bl31.bin not found after ATF compilation!"
+# ========== 定义问题包列表（精简版）==========
+PROBLEM_PKGS="
+aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
+pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
+gst1-plugins-base gst1-plugins-good gst1-plugins-ugly gst1-plugins-bad gst1-libav
+dmapd gmediarender gnunet gnunet-fuse gnunet-fs grilo-plugins lcdgrilo libdmapsharing
+kamailio smartdns pymysql python-orjson python-paramiko python-pyopenssl
+python-rpds-py python-service-identity python-twisted python-docker
+python-jsonschema python-jsonschema-specifications python-referencing
+onionshare-cli onionshare weston wpewebkit libextractor python-bcrypt python-cryptography
+python-maturin podman ruby-yaml
+"
+
+# ========== 彻底清除所有已知问题包 ==========
+echo "=== 递归删除所有问题包 ==="
+for pkg in $PROBLEM_PKGS; do
+    find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
+done
+
+# 删除整个 video 和 telephony feed
+rm -rf feeds/video feeds/telephony
+
+# 清理 package/feeds 下的符号链接
+rm -rf package/feeds
+
+# 更新 feed 索引
+./scripts/feeds update -i || { echo "❌ feeds update -i failed"; exit 1; }
+
+# 安装 feeds
+./scripts/feeds install -a || { echo "❌ feeds install failed"; exit 1; }
+
+# 再次递归删除（防止依赖重新拉取）
+for pkg in $PROBLEM_PKGS; do
+    find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
+done
+
+# 再次更新索引并重建符号链接
+./scripts/feeds update -i || { echo "❌ feeds update -i failed"; exit 1; }
+make package/symlinks || { echo "❌ make package/symlinks failed"; exit 1; }
+
+# ========== 注册三件套（设备树双路径注入 + 设备定义）==========
+mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
+cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_OLD/ || { echo "❌ Failed to copy DTS to old path"; exit 1; }
+cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_NEW/ || { echo "❌ Failed to copy DTS to new path"; exit 1; }
+
+# 将设备定义追加到 filogic.mk（物理修复：增加 32MB 目标定义以配合 part2）
+echo "" >> $FILOGIC_MK
+echo "# SL3000 设备定义" >> $FILOGIC_MK
+echo "define Device/sl_3000-emmc" >> $FILOGIC_MK
+echo "  DEVICE_VENDOR := SL" >> $FILOGIC_MK
+echo "  DEVICE_MODEL := 3000 eMMC (1GB)" >> $FILOGIC_MK
+echo "  DEVICE_DTS := mt7981-sl-3000-emmc" >> $FILOGIC_MK
+echo "  DEVICE_DTS_DIR := \$(DTS_DIR)" >> $FILOGIC_MK
+echo "  SUPPORTED_DEVICES := sl,3000-emmc" >> $FILOGIC_MK
+echo "  DEVICE_PACKAGES := kmod-usb3 kmod-usb-storage kmod-usb-storage-uas f2fsck losetup mkf2fs kmod-fs-f2fs kmod-mmc luci-app-ksmbd luci-i18n-ksmbd-zh-cn ksmbd-utils luci-app-passwall2 xray-core chinadns-ng docker-ce docker-compose luci-app-dockerman" >> $FILOGIC_MK
+echo "  IMAGES := sysupgrade.bin" >> $FILOGIC_MK
+echo "  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata" >> $FILOGIC_MK
+echo "endef" >> $FILOGIC_MK
+echo "TARGET_DEVICES += sl_3000-emmc" >> $FILOGIC_MK
+
+# 验证设备定义是否已注入
+if ! grep -q "sl_3000-emmc" $FILOGIC_MK; then
+    echo "❌ 设备定义未成功写入 $FILOGIC_MK"
     exit 1
 fi
 
-# 复制 bl31.bin 到 staging_dir
-cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin" || { echo "❌ Failed to copy bl31.bin for emmc"; exit 1; }
-cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin" || { echo "❌ Failed to copy bl31.bin for nor"; exit 1; }
+cp -v $CONFIG_DIR/sl3000.config .config || { echo "❌ Failed to copy config"; exit 1; }
+echo "CONFIG_TARGET_mediatek=y" >> .config
+echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
 
-ls -la "$STAGING_DIR_IMAGE"/mt7981-*.bin || { echo "❌ Copied bl31 files missing"; exit 1; }
+# ========== 生成基础配置 ==========
+make defconfig || { echo "❌ make defconfig failed"; exit 1; }
 
-echo "=== Compiling fiptool from ATF ==="
-make -C tools/fiptool CROSS_COMPILE=
-FIPTOOL="$PWD/tools/fiptool/fiptool"
+# 确保设备选项在 defconfig 后依然存在
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
 
-# ========== 编译 U-Boot (eMMC版) 并生成 FIP ==========
-cd $SOURCE_DIR/u-boot
-echo "=== Building U-Boot (eMMC) ==="
-make clean
-if [ -f configs/mt7981_emmc_rfb_defconfig ]; then
-    make CROSS_COMPILE=aarch64-linux-gnu- mt7981_emmc_rfb_defconfig
-else
-    echo "❌ mt7981_emmc_rfb_defconfig not found!"
-    exit 1
-fi
-echo "CONFIG_MTK_FIP_SUPPORT=y" >> .config
-make olddefconfig
-make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
-
-if [ ! -f fip.bin ] && [ ! -f u-boot.fip ]; then
-    echo "⚠️ fip.bin not generated for eMMC, creating manually..."
-    if [ -f "$FIPTOOL" ]; then
-        if [ ! -f "$STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin" ]; then
-            echo "❌ mt7981-emmc-ddr4-bl31.bin not found!"
-            exit 1
-        fi
-        "$FIPTOOL" create \
-            --soc-fw "$STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin" \
-            --nt-fw u-boot.bin \
-            u-boot.fip
-        cp u-boot.fip "$OUTPUT_DIR/uboot/fip-emmc.bin"
-    else
-        echo "❌ fiptool not found, cannot create FIP"
-        exit 1
-    fi
-else
-    cp fip.bin "$OUTPUT_DIR/uboot/fip-emmc.bin" 2>/dev/null || cp u-boot.fip "$OUTPUT_DIR/uboot/fip-emmc.bin" 2>/dev/null
-fi
-cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-emmc.bin"
-
-# ========== 编译 U-Boot (NOR版) 并生成 FIP ==========
-cd $SOURCE_DIR/u-boot
-echo "=== Building U-Boot (NOR) ==="
-make clean
-if [ -f configs/mt7981_spim_nor_rfb_defconfig ]; then
-    make CROSS_COMPILE=aarch64-linux-gnu- mt7981_spim_nor_rfb_defconfig
-else
-    echo "❌ mt7981_spim_nor_rfb_defconfig not found, cannot build NOR U-Boot"
-    exit 1
-fi
-echo "CONFIG_MTK_FIP_SUPPORT=y" >> .config
-make olddefconfig
-make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
-
-if [ ! -f fip.bin ] && [ ! -f u-boot.fip ]; then
-    echo "⚠️ fip.bin not generated for NOR, creating manually..."
-    if [ -f "$FIPTOOL" ]; then
-        if [ ! -f "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin" ]; then
-            echo "❌ mt7981-nor-ddr4-bl31.bin not found!"
-            exit 1
-        fi
-        "$FIPTOOL" create \
-            --soc-fw "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin" \
-            --nt-fw u-boot.bin \
-            u-boot.fip
-        cp u-boot.fip "$OUTPUT_DIR/uboot/fip-nor.bin"
-    else
-        echo "❌ fiptool not found, cannot create FIP"
-        exit 1
-    fi
-else
-    cp fip.bin "$OUTPUT_DIR/uboot/fip-nor.bin" 2>/dev/null || cp u-boot.fip "$OUTPUT_DIR/uboot/fip-nor.bin" 2>/dev/null
-fi
-cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
-
-# ========== 编译 ImmortalWrt 完整固件 ==========
-echo "=== Building ImmortalWrt Firmware ==="
-cd "$IMMORTALWRT_BUILD_DIR"
-
-if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" .config; then
-    echo "❌ Device sl_3000-emmc not enabled in .config!"
-    exit 1
-fi
-
-make VERSION_NUMBER="${VERSION_NUMBER:-1.0.0}" VERSION_CODE="${VERSION_CODE:-r1}" -j$(nproc) V=s 2>&1 | tee build.log
+# ========== 使用 oldconfig 更新配置 ==========
+echo "=== 运行 oldconfig ==="
+make -j1 V=s oldconfig 2>&1 | tee oldconfig.log
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
-    echo "❌ Firmware build failed!"
+    echo "❌ oldconfig 失败"
     exit 1
 fi
 
-mkdir -p "$OUTPUT_DIR/firmware"
-find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp -v {} "$OUTPUT_DIR/firmware/" \;
-
-# ========== 核心物理修复：缝合 32MB 救砖镜像 ==========
-echo "=== Creating 32MB Spi-flash-32MB.bin Rescue Image ==="
-cd "$OUTPUT_DIR/firmware"
-# 1. 创建 32MB 全 F 填充文件
-dd if=/dev/zero bs=1k count=32768 | tr '\000' '\377' > Spi-flash-32MB.bin
-# 2. 注入 NOR BL2 (0x0)
-dd if="$OUTPUT_DIR/atf/bl2-1g-nor.bin" of=Spi-flash-32MB.bin conv=notrunc
-# 3. 注入 NOR FIP (3.5MB / 3584k)
-dd if="$OUTPUT_DIR/uboot/fip-nor.bin" of=Spi-flash-32MB.bin bs=1k seek=3584 conv=notrunc
-# 4. 注入固件 (4MB / 4096k)
-SYSUPGRADE_FILE=$(ls *sysupgrade.bin | head -n 1)
-if [ -n "$SYSUPGRADE_FILE" ]; then
-    dd if="$SYSUPGRADE_FILE" of=Spi-flash-32MB.bin bs=1k seek=4096 conv=notrunc
-    echo "✅ Rescue image Spi-flash-32MB.bin stitched successfully"
-else
-    echo "❌ Sysupgrade file missing, rescue image incomplete"
+# ========== 最终验证设备启用状态 ==========
+echo "=== 验证设备启用状态 ==="
+if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" .config; then
+    echo "❌ 设备 sl_3000-emmc 未在 .config 中启用！"
+    exit 1
 fi
+echo "✅ 设备已启用"
 
-# ========== 打包 mtk_uartboot ==========
-cd $SOURCE_DIR/mtk_uartboot
-tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
-
-# ========== 最终输出 ==========
-echo "✅ Build complete. Output directory contents:"
-ls -la "$OUTPUT_DIR/atf" "$OUTPUT_DIR/uboot" "$OUTPUT_DIR/firmware"
-echo "mtk_uartboot.tar.gz is in $OUTPUT_DIR"
+# 保存当前构建目录路径，供 part2 使用
+echo $PWD > $WORKSPACE/build-dir.txt
