@@ -45,16 +45,15 @@ jobs:
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
           df -h
 
-      # 检查关键文件是否存在（可选，避免后续失败）
       - name: Verify required files
         run: |
           echo "Checking required configuration files..."
-          if [ ! -f "main-repo/888/mt7981-sl-3000-spi-nor.dts" ]; then
-            echo "❌ mt7981-sl-3000-spi-nor.dts not found in main-repo/888/"
-            exit 1
-          fi
           if [ ! -f "main-repo/888/sl3000.config" ]; then
             echo "❌ sl3000.config not found in main-repo/888/"
+            exit 1
+          fi
+          if [ ! -f "main-repo/888/mt7981-sl-3000-emmc.dts" ]; then
+            echo "❌ mt7981-sl-3000-emmc.dts not found in main-repo/888/"
             exit 1
           fi
           echo "✅ All required files present."
