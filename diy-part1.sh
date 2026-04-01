@@ -167,22 +167,23 @@ echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
 # 生成基础配置
 make defconfig || { echo "❌ make defconfig failed"; exit 1; }
 
-# 使用 scripts/config 工具强制启用两个设备（避免 defconfig 覆盖）
-./scripts/config --enable CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc
-./scripts/config --enable CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor
+# 再次确保设备选项存在（defconfig 可能覆盖）
+sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000/d' .config
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
 
-# ========== 运行 oldconfig ==========
-echo "=== 运行 oldconfig ==="
-make -j1 V=s oldconfig 2>&1 | tee oldconfig.log
+# 使用 olddefconfig 更新配置并保留现有选项
+echo "=== 运行 olddefconfig ==="
+make olddefconfig 2>&1 | tee oldconfig.log
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
-    echo "❌ oldconfig 失败，错误日志如下（最后50行）："
-    tail -50 oldconfig.log
+    echo "❌ olddefconfig 失败"
     exit 1
 fi
 
-# 再次强制启用设备（防止 oldconfig 意外覆盖）
-./scripts/config --enable CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc
-./scripts/config --enable CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor
+# 再次确保设备选项未被覆盖
+sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000/d' .config
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
 
 # ========== 验证设备是否在 .config 中启用 ==========
 echo "=== 验证设备启用状态 ==="
