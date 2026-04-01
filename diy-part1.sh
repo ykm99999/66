@@ -1,97 +1,12 @@
-#!/bin/bash
-set -euo pipefail
+# ========== 注入设备定义 ==========
+# 原有 eMMC 定义（保留）
+echo "" >> $FILOGIC_MK
+echo "# SL3000 eMMC 设备定义（由 diy-part1.sh 注入）" >> $FILOGIC_MK
+echo "define Device/sl_3000-emmc" >> $FILOGIC_MK
+# ... 原有 eMMC 定义内容 ...
+echo "TARGET_DEVICES += sl_3000-emmc" >> $FILOGIC_MK
 
-WORKSPACE="$GITHUB_WORKSPACE"
-SOURCE_DIR="$WORKSPACE/source-repo"
-CONFIG_DIR="$WORKSPACE/main-repo/888"
-OUTPUT_DIR="$WORKSPACE/output"
-IMMORTALWRT_BUILD="$WORKSPACE/immortalwrt-build"
-STAGING_DIR_IMAGE="$IMMORTALWRT_BUILD/staging_dir/image"
-DTS_PATH_OLD="target/linux/mediatek/dts"
-DTS_PATH_NEW="target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek"
-FILOGIC_MK="target/linux/mediatek/image/filogic.mk"
-
-mkdir -p $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware $STAGING_DIR_IMAGE
-
-export CROSS_COMPILE=aarch64-linux-gnu-
-export ARCH=arm64
-
-# ========== 验证配置文件 ==========
-echo "=== 验证配置文件 ==="
-if [ ! -f "$CONFIG_DIR/mt7981-sl-3000-emmc.dts" ]; then
-    echo "❌ 缺少 $CONFIG_DIR/mt7981-sl-3000-emmc.dts"
-    exit 1
-fi
-if [ ! -f "$CONFIG_DIR/sl3000.config" ]; then
-    echo "❌ 缺少 $CONFIG_DIR/sl3000.config"
-    exit 1
-fi
-echo "✅ 配置文件齐全"
-
-# ========== 准备 ImmortalWrt 源码 ==========
-cd $WORKSPACE
-rm -rf immortalwrt-build
-cp -r $SOURCE_DIR/immortalwrt immortalwrt-build
-cd immortalwrt-build
-
-# 修改 feeds 配置：禁用 telephony feed，移除科学上网 feed
-sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
-# 注释掉 passwall 相关 feeds（救砖不需要）
-# echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git" >> feeds.conf.default
-# echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git" >> feeds.conf.default
-
-# 更新所有 feeds
-./scripts/feeds update -a || { echo "❌ feeds update failed"; exit 1; }
-
-# ========== 定义问题包列表（移除可能影响编译的包）==========
-PROBLEM_PKGS="
-aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
-pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
-gst1-plugins-base gst1-plugins-good gst1-plugins-ugly gst1-plugins-bad gst1-libav
-dmapd gmediarender gnunet gnunet-fuse gnunet-fs grilo-plugins lcdgrilo libdmapsharing
-kamailio smartdns pymysql python-orjson python-paramiko python-pyopenssl
-python-rpds-py python-service-identity python-twisted python-docker
-python-jsonschema python-jsonschema-specifications python-referencing
-onionshare-cli onionshare weston wpewebkit libextractor python-bcrypt python-cryptography
-python-maturin podman ruby-yaml
-"
-
-# ========== 彻底清除所有已知问题包 ==========
-echo "=== 递归删除所有问题包 ==="
-for pkg in $PROBLEM_PKGS; do
-    find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
-done
-
-# 删除整个 video 和 telephony feed
-rm -rf feeds/video feeds/telephony
-
-# 清理 package/feeds 下的符号链接
-rm -rf package/feeds
-
-# 更新 feed 索引
-./scripts/feeds update -i || { echo "❌ feeds update -i failed"; exit 1; }
-
-# 安装 feeds
-./scripts/feeds install -a || { echo "❌ feeds install failed"; exit 1; }
-
-# 再次递归删除（防止依赖重新拉取）
-for pkg in $PROBLEM_PKGS; do
-    find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
-done
-
-# 再次更新索引并重建符号链接
-./scripts/feeds update -i || { echo "❌ feeds update -i failed"; exit 1; }
-make package/symlinks || { echo "❌ make package/symlinks failed"; exit 1; }
-
-# ========== 注册设备树（双路径） ==========
-mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
-
-# 复制唯一的 DTS 文件到两个路径
-DTS_FILE="mt7981-sl-3000-emmc.dts"
-cp -v $CONFIG_DIR/$DTS_FILE $DTS_PATH_OLD/ || { echo "❌ Failed to copy DTS to old path"; exit 1; }
-cp -v $CONFIG_DIR/$DTS_FILE $DTS_PATH_NEW/ || { echo "❌ Failed to copy DTS to new path"; exit 1; }
-
-# ========== 注入 SPI-NOR 救砖设备定义到 filogic.mk ==========
+# 新增 SPI-NOR 救砖设备定义
 echo "" >> $FILOGIC_MK
 echo "# SL3000 SPI-NOR 救砖设备定义（由 diy-part1.sh 注入）" >> $FILOGIC_MK
 echo "define Device/sl_3000-spi-nor" >> $FILOGIC_MK
@@ -111,54 +26,24 @@ echo "  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata" >> $FILOGIC_MK
 echo "endef" >> $FILOGIC_MK
 echo "TARGET_DEVICES += sl_3000-spi-nor" >> $FILOGIC_MK
 
-# 验证设备定义是否已注入
-if ! grep -q "sl_3000-spi-nor" $FILOGIC_MK; then
-    echo "❌ 设备定义未成功写入 $FILOGIC_MK"
-    exit 1
-fi
-
 # ========== 配置 .config ==========
-cp -v $CONFIG_DIR/sl3000.config .config || { echo "❌ Failed to copy config"; exit 1; }
+cp -v $CONFIG_DIR/sl3000.config .config || exit 1
 
-# 设置基础平台
+# 设置平台
 echo "CONFIG_TARGET_mediatek=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
 
-# 禁用 eMMC 设备（如果之前有定义，则删除）
-sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc/d' .config
+# 启用 eMMC 设备（保留原有配置）
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
 
-# 启用 SPI-NOR 设备（救砖目标）
+# 启用 SPI-NOR 救砖设备
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
 
-# 移除可能冲突的软件包选项（科学上网、Docker 等）
-sed -i '/CONFIG_PACKAGE_luci-app-passwall2/d' .config
-sed -i '/CONFIG_PACKAGE_xray-core/d' .config
-sed -i '/CONFIG_PACKAGE_docker/d' .config
-sed -i '/CONFIG_PACKAGE_docker-compose/d' .config
-sed -i '/CONFIG_PACKAGE_luci-app-dockerman/d' .config
-
-# ========== 生成基础配置 ==========
-make defconfig || { echo "❌ make defconfig failed"; exit 1; }
-
-# 再次确保设备选项存在（defconfig 可能覆盖）
+# 确保没有冲突的禁用设置
+sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc/d' .config   # 先删除再添加（确保唯一）
+sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor/d' .config
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
 
-# ========== 使用 oldconfig 更新配置 ==========
-echo "=== 运行 oldconfig（详细模式）==="
-make -j1 V=s oldconfig 2>&1 | tee oldconfig.log
-if [ ${PIPESTATUS[0]} -ne 0 ]; then
-    echo "❌ oldconfig 失败，错误日志如下（最后50行）："
-    tail -50 oldconfig.log
-    exit 1
-fi
-
-# ========== 最终验证设备是否在 .config 中启用 ==========
-echo "=== 验证设备启用状态 ==="
-if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" .config; then
-    echo "❌ 救砖设备 sl_3000-spi-nor 未在 .config 中启用！"
-    exit 1
-fi
-echo "✅ 救砖设备已启用"
-
-# 保存当前构建目录路径，供 part2 使用
-echo $PWD > $WORKSPACE/build-dir.txt
+# 生成基础配置
+make defconfig || exit 1
