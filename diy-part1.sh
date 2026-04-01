@@ -16,7 +16,7 @@ mkdir -p $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware $STAGING_DIR_IMA
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# ========== 验证配置文件是否存在 ==========
+# ========== 验证配置文件 ==========
 echo "=== 验证配置文件 ==="
 if [ ! -f "$CONFIG_DIR/mt7981-sl-3000-emmc.dts" ]; then
     echo "❌ 缺少 $CONFIG_DIR/mt7981-sl-3000-emmc.dts"
@@ -34,25 +34,16 @@ rm -rf immortalwrt-build
 cp -r $SOURCE_DIR/immortalwrt immortalwrt-build
 cd immortalwrt-build
 
-# 修改 feeds 配置：禁用 telephony feed
+# 修改 feeds 配置：禁用 telephony feed，移除科学上网 feed
 sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
-
-# 添加 PassWall 系列 feeds（官方新地址）
-echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git" >> feeds.conf.default
-echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git" >> feeds.conf.default
+# 注释掉 passwall 相关 feeds（救砖不需要）
+# echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git" >> feeds.conf.default
+# echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git" >> feeds.conf.default
 
 # 更新所有 feeds
 ./scripts/feeds update -a || { echo "❌ feeds update failed"; exit 1; }
 
-# 确保 passwall2 feed 被正确拉取
-if [ ! -d "feeds/passwall2" ]; then
-    echo "❌ passwall2 feed failed to download. Please check the repository URL."
-    exit 1
-else
-    echo "✅ passwall2 feed successfully updated"
-fi
-
-# ========== 定义问题包列表（精简版，已排除科学上网相关包）==========
+# ========== 定义问题包列表（移除可能影响编译的包）==========
 PROBLEM_PKGS="
 aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
 pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
@@ -95,13 +86,12 @@ make package/symlinks || { echo "❌ make package/symlinks failed"; exit 1; }
 # ========== 注册设备树（双路径） ==========
 mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
 
-# 只复制唯一的 DTS 文件到两个路径
+# 复制唯一的 DTS 文件到两个路径
 DTS_FILE="mt7981-sl-3000-emmc.dts"
 cp -v $CONFIG_DIR/$DTS_FILE $DTS_PATH_OLD/ || { echo "❌ Failed to copy DTS to old path"; exit 1; }
 cp -v $CONFIG_DIR/$DTS_FILE $DTS_PATH_NEW/ || { echo "❌ Failed to copy DTS to new path"; exit 1; }
 
-# ========== 注入设备定义到 filogic.mk ==========
-# 只注入 SPI-NOR 救砖设备定义（使用同一个 DTS）
+# ========== 注入 SPI-NOR 救砖设备定义到 filogic.mk ==========
 echo "" >> $FILOGIC_MK
 echo "# SL3000 SPI-NOR 救砖设备定义（由 diy-part1.sh 注入）" >> $FILOGIC_MK
 echo "define Device/sl_3000-spi-nor" >> $FILOGIC_MK
@@ -112,10 +102,11 @@ echo "  DEVICE_DTS_DIR := \$(DTS_DIR)" >> $FILOGIC_MK
 echo "  SUPPORTED_DEVICES := sl,3000-spi-nor" >> $FILOGIC_MK
 echo "  DEVICE_PACKAGES := \\" >> $FILOGIC_MK
 echo "    kmod-usb3 kmod-usb-storage \\" >> $FILOGIC_MK
-echo "    luci-app-passwall2 xray-core chinadns-ng \\" >> $FILOGIC_MK
-echo "    shadowsocks-libev-ss-local shadowsocks-libev-ss-redir \\" >> $FILOGIC_MK
-echo "    shadowsocks-rust-sslocal simple-obfs" >> $FILOGIC_MK
+echo "    block-mount \\" >> $FILOGIC_MK
+echo "    uboot-envtools \\" >> $FILOGIC_MK
+echo "    ttyd" >> $FILOGIC_MK
 echo "  IMAGES := sysupgrade.bin" >> $FILOGIC_MK
+echo "  IMAGE_SIZE := 32768k" >> $FILOGIC_MK
 echo "  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata" >> $FILOGIC_MK
 echo "endef" >> $FILOGIC_MK
 echo "TARGET_DEVICES += sl_3000-spi-nor" >> $FILOGIC_MK
@@ -138,6 +129,13 @@ sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc/d' .config
 
 # 启用 SPI-NOR 设备（救砖目标）
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
+
+# 移除可能冲突的软件包选项（科学上网、Docker 等）
+sed -i '/CONFIG_PACKAGE_luci-app-passwall2/d' .config
+sed -i '/CONFIG_PACKAGE_xray-core/d' .config
+sed -i '/CONFIG_PACKAGE_docker/d' .config
+sed -i '/CONFIG_PACKAGE_docker-compose/d' .config
+sed -i '/CONFIG_PACKAGE_luci-app-dockerman/d' .config
 
 # ========== 生成基础配置 ==========
 make defconfig || { echo "❌ make defconfig failed"; exit 1; }
