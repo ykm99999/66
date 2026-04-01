@@ -200,7 +200,7 @@ if [ ! -f .config ]; then
     exit 1
 fi
 
-# 直接检查 .config 文件中设备是否启用（避免 make info 因警告失败）
+# 直接检查 .config 文件中设备是否启用
 if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" .config; then
     echo "❌ Device sl_3000-spi-nor not enabled in .config!"
     exit 1
@@ -217,15 +217,10 @@ fi
 
 mkdir -p "$OUTPUT_DIR/firmware"
 
-# 查找生成的 SPI-NOR 镜像（通常包含 spi-nor 和 32M 字样）
-SPI_IMAGE=$(find bin/targets/ -type f -name '*spi-nor*32M*.bin' -o -name '*spi-nor*32mb*.bin' | head -1)
+# 查找生成的 SPI-NOR 镜像（名称包含 spi-nor 且小于 34MB）
+SPI_IMAGE=$(find bin/targets/ -type f -name '*spi-nor*.bin' -size -34M | head -1)
 if [ -z "$SPI_IMAGE" ]; then
-    # 尝试查找任何 bin 文件（可能命名不同）
-    SPI_IMAGE=$(find bin/targets/ -type f -name '*.bin' | grep -E 'spi-nor|nor' | head -1)
-fi
-
-if [ -z "$SPI_IMAGE" ]; then
-    echo "❌ No SPI-NOR image found!"
+    echo "❌ No suitable SPI-NOR image under 34MB found!"
     echo "Available images:"
     find bin/targets/ -type f -name '*.bin' | head -20
     exit 1
