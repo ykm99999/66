@@ -22,13 +22,13 @@
 		bootargs = "console=ttyS0,115200n1 loglevel=8 earlycon=uart8250,mmio32,0x11002000 root=PARTLABEL=production rootwait rw rootfstype=f2fs,squashfs,ext4";
 	};
 
-	/* 1GB DDR4 内存（正常使用） */
+	/* 1GB DDR4 内存 */
 	memory@40000000 {
 		device_type = "memory";
 		reg = <0 0x40000000 0 0x40000000>;
 	};
 
-	/* 添加 1.8V 稳压器节点，用于 eMMC 的 vqmmc-supply */
+	/* 1.8V 稳压器，用于 eMMC vqmmc-supply */
 	reg_1p8v: regulator-1p8v {
 		compatible = "regulator-fixed";
 		regulator-name = "fixed-1.8V";
@@ -70,7 +70,7 @@
 	};
 };
 
-/* SPI-NOR 闪存分区布局（与救砖镜像对齐） */
+/* SPI-NOR 闪存分区布局（与 U-Boot 实际分区对齐） */
 &spi0 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&spi0_flash_pins>;
@@ -87,31 +87,38 @@
 			#size-cells = <1>;
 
 			partition@0 {
-				label = "bl2";
+				label = "BL2";
 				reg = <0x0 0x100000>;
 				read-only;
 			};
 
 			partition@100000 {
-				label = "fip";
-				reg = <0x100000 0x100000>;
+				label = "Config";
+				reg = <0x100000 0x80000>;
 				read-only;
 			};
 
-			partition@200000 {
-				label = "nor-kernel";
-				reg = <0x200000 0x800000>;
+			partition@180000 {
+				label = "Factory";
+				reg = <0x180000 0x200000>;
+				read-only;
 			};
 
-			partition@a00000 {
-				label = "nor-rootfs";
-				reg = <0xa00000 0x1600000>;
+			partition@380000 {
+				label = "FIP";
+				reg = <0x380000 0x200000>;
+				read-only;
+			};
+
+			partition@580000 {
+				label = "firmware";
+				reg = <0x580000 0x1900000>;  /* 25MB, 实际使用 0x580000-0x1e80000 */
 			};
 		};
 	};
 };
 
-/* eMMC 链路：物理对齐 128G 存储 */
+/* eMMC 链路 */
 &mmc0 {
 	status = "okay";
 	pinctrl-names = "default", "state_uhs";
@@ -128,7 +135,7 @@
 	no-sdio;
 };
 
-/* 网络物理链路：MT7531 交换机 + 2.5G 上联 */
+/* 网络：MT7531 交换机 + 2.5G 上联 */
 &eth {
 	status = "okay";
 
@@ -212,6 +219,6 @@
 &uart0 { status = "okay"; };
 &watchdog { status = "okay"; };
 
-/* 启用稳压器节点（reg_3p3v 已在 mt7981.dtsi 中定义，这里显式启用） */
+/* 启用稳压器节点 */
 &reg_3p3v { status = "okay"; };
 &reg_1p8v { status = "okay"; };
