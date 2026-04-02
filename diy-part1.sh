@@ -26,8 +26,8 @@ if [ ! -f "$CONFIG_DIR/mt7981-sl-3000-emmc.dts" ]; then
     echo "❌ 缺少 $CONFIG_DIR/mt7981-sl-3000-emmc.dts"
     exit 1
 fi
-if [ ! -f "$CONFIG_DIR/sl3000.config" ]; then
-    echo "❌ 缺少 $CONFIG_DIR/sl3000.config"
+if [ ! -f "$CONFIG_DIR/sl3000-mini.config" ]; then
+    echo "❌ 缺少 $CONFIG_DIR/sl3000-mini.config"
     exit 1
 fi
 echo "✅ 配置文件齐全"
@@ -38,10 +38,9 @@ rm -rf immortalwrt-build
 cp -r $SOURCE_DIR/immortalwrt immortalwrt-build
 cd immortalwrt-build
 
-# 修改 feeds 配置
+# 修改 feeds 配置（禁用 telephony，移除 passwall）
 sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
-echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git" >> feeds.conf.default
-echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git" >> feeds.conf.default
+sed -i '/passwall/d' feeds.conf.default
 
 # 更新 feeds
 ./scripts/feeds update -a || exit 1
@@ -62,54 +61,42 @@ if ! grep -q "sl_3000-spi-nor" $FILOGIC_MK; then
 fi
 echo "✅ 设备定义已注入"
 
-# 复制基础配置
-cp -v $CONFIG_DIR/sl3000.config .config || exit 1
+# 复制极简配置
+cp -v $CONFIG_DIR/sl3000-mini.config .config || exit 1
 
-# 强制写入平台和设备（使用 sed 删除旧配置并添加新配置）
-sed -i '/CONFIG_TARGET_mediatek=y/d' .config
-sed -i '/CONFIG_TARGET_mediatek_filogic=y/d' .config
-sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc/d' .config
-sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor/d' .config
-echo "CONFIG_TARGET_mediatek=y" >> .config
-echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
+# 强制启用平台和救砖设备，禁用 eMMC
+./scripts/config --enable CONFIG_TARGET_mediatek
+./scripts/config --enable CONFIG_TARGET_mediatek_filogic
+./scripts/config --enable CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor
+./scripts/config --disable CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc
 
-# 禁用有问题的 luci 应用（避免依赖警告）
-for pkg in clamav dufs openclash rustdesk-server smartdns; do
-    sed -i "/CONFIG_PACKAGE_luci-app-${pkg}/d" .config
-    echo "# CONFIG_PACKAGE_luci-app-${pkg} is not set" >> .config
-done
+# 确保所有无线、科学上网、Docker 相关配置被禁用（极简配置已无，但防御）
+./scripts/config --disable CONFIG_PACKAGE_kmod-mt7915e
+./scripts/config --disable CONFIG_PACKAGE_kmod-mt76
+./scripts/config --disable CONFIG_PACKAGE_xray-core
+./scripts/config --disable CONFIG_PACKAGE_docker-ce
+./scripts/config --disable CONFIG_PACKAGE_luci-app-passwall2
 
 # 生成基础配置
 make defconfig || exit 1
 
-# defconfig 后再次强制写入（因为 defconfig 可能重置）
-sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc/d' .config
-sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor/d' .config
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
+# 再次确保设备启用（defconfig 可能重置）
+./scripts/config --enable CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor
+./scripts/config --disable CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc
 
 # 运行 oldconfig
 make oldconfig || exit 1
 
-# oldconfig 后再次强制写入
-sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc/d' .config
-sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor/d' .config
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
+# 最后强制确保
+./scripts/config --enable CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor
 
-# 最终验证
+# 验证
 echo "=== 验证设备启用状态 ==="
-if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" .config; then
-    echo "❌ eMMC 设备未启用！"
-    exit 1
-fi
 if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" .config; then
     echo "❌ 救砖设备未启用！"
     exit 1
 fi
-echo "✅ 两个设备均已启用"
+echo "✅ 救砖设备已启用"
 
 # 保存构建目录
 echo $PWD > $WORKSPACE/build-dir.txt
