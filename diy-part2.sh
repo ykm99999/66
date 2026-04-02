@@ -256,10 +256,13 @@ if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000" .config; then
     exit 1
 fi
 
-make VERSION_NUMBER="${VERSION_NUMBER:-1.0.0}" VERSION_CODE="${VERSION_CODE:-r1}" -j$(nproc) V=s 2>&1 | tee build.log
+# 构建固件，并记录详细日志
+echo "Starting build at $(date)" > build.log
+make VERSION_NUMBER="${VERSION_NUMBER:-1.0.0}" VERSION_CODE="${VERSION_CODE:-r1}" -j$(nproc) V=s 2>&1 | tee -a build.log
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
-    echo "❌ Firmware build failed! Last 100 lines of build.log:"
-    tail -100 build.log
+    echo "❌ Firmware build failed! Last 200 lines of build.log:" >> /dev/stderr
+    tail -200 build.log >> /dev/stderr
+    echo "❌ Build failed. Full build.log is available as artifact." >> /dev/stderr
     exit 1
 fi
 
@@ -289,12 +292,4 @@ if [ ! -f "$OUTPUT_DIR/firmware/"*sysupgrade* ] && [ ! -f "$OUTPUT_DIR/firmware/
     echo "❌ No firmware files generated!"
     echo "Contents of bin/targets/ (first 50 files):"
     find bin/targets/ -type f | head -50
-    echo "Last 100 lines of build.log:"
-    tail -100 build.log
-    exit 1
-fi
-
-# ========== 打包 mtk_uartboot ==========
-cd $SOURCE_DIR/mtk_uartboot
-tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
-if [ $?
+    echo "Last 100 line
