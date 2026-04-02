@@ -65,32 +65,39 @@ echo "✅ 设备定义已注入"
 # 复制基础配置
 cp -v $CONFIG_DIR/sl3000.config .config || exit 1
 
-# 强制启用平台和设备（使用 scripts/config）
-./scripts/config --enable CONFIG_TARGET_mediatek
-./scripts/config --enable CONFIG_TARGET_mediatek_filogic
-./scripts/config --enable CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc
-./scripts/config --enable CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor
+# 强制写入平台和设备（使用 sed 删除旧配置并添加新配置）
+sed -i '/CONFIG_TARGET_mediatek=y/d' .config
+sed -i '/CONFIG_TARGET_mediatek_filogic=y/d' .config
+sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc/d' .config
+sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor/d' .config
+echo "CONFIG_TARGET_mediatek=y" >> .config
+echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
 
 # 禁用有问题的 luci 应用（避免依赖警告）
-./scripts/config --disable CONFIG_PACKAGE_luci-app-clamav
-./scripts/config --disable CONFIG_PACKAGE_luci-app-dufs
-./scripts/config --disable CONFIG_PACKAGE_luci-app-openclash
-./scripts/config --disable CONFIG_PACKAGE_luci-app-rustdesk-server
-./scripts/config --disable CONFIG_PACKAGE_luci-app-smartdns
+for pkg in clamav dufs openclash rustdesk-server smartdns; do
+    sed -i "/CONFIG_PACKAGE_luci-app-${pkg}/d" .config
+    echo "# CONFIG_PACKAGE_luci-app-${pkg} is not set" >> .config
+done
 
 # 生成基础配置
 make defconfig || exit 1
 
-# defconfig 后再次强制启用（因为 defconfig 可能会重置）
-./scripts/config --enable CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc
-./scripts/config --enable CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor
+# defconfig 后再次强制写入（因为 defconfig 可能重置）
+sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc/d' .config
+sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor/d' .config
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
 
 # 运行 oldconfig
 make oldconfig || exit 1
 
-# oldconfig 后再次强制启用（最关键的一步）
-./scripts/config --enable CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc
-./scripts/config --enable CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor
+# oldconfig 后再次强制写入
+sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc/d' .config
+sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor/d' .config
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
 
 # 最终验证
 echo "=== 验证设备启用状态 ==="
