@@ -34,7 +34,7 @@ define Device/sl_3000-spi-nor
     uboot-envtools \
     ttyd
   IMAGES := sysupgrade.bin
-  IMAGE_SIZE := 32768k
+  IMAGE_SIZE := 25600k
   IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
 endef
 
