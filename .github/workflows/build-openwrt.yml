@@ -52,10 +52,24 @@ jobs:
           ./diy-part1.sh
 
       - name: Run diy-part2.sh (Compile)
+        id: compile
         run: |
           chmod +x main-repo/diy-part2.sh
           cd main-repo
           ./diy-part2.sh
+        continue-on-error: true
+
+      - name: Upload build log on failure
+        if: steps.compile.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: immortalwrt-build/build.log
+          if-no-files-found: warn
+
+      - name: Fail the job if compilation failed
+        if: steps.compile.outcome == 'failure'
+        run: exit 1
 
       - name: List firmware files
         run: |
@@ -72,12 +86,13 @@ jobs:
           body: |
             ## 自动构建的 SL3000 固件
             - 构建时间: ${{ steps.release_tag.outputs.tag_name }}
-            - 包含 PassWall2, Shadowsocks, Docker 等软件包
+            - **eMMC 固件**（完整版）：包含 PassWall2, Shadowsocks, Docker 等软件包
+            - **SPI‑NOR 救砖镜像**（精简版）：`Spi-flash-32MB.bin`，用于救援系统
             - 救砖全家桶: ATF, U-Boot, mtk_uartboot
 
             ### 📦 下载说明
-            - `firmware/` 目录包含 sysupgrade 固件，可直接用于刷机
-            - `atf/` 和 `uboot/` 为救砖文件
+            - `firmware/` 目录包含 eMMC sysupgrade 固件（可直接刷机）和救砖镜像
+            - `atf/` 和 `uboot/` 为底层引导文件
             - `mtk_uartboot.tar.gz` 为串口救砖工具
           files: |
             output/atf/*.bin
