@@ -16,7 +16,7 @@ mkdir -p $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware $STAGING_DIR_IMA
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# 验证三件套文件是否存在
+# 验证三件套文件
 echo "=== 验证配置文件 ==="
 if [ ! -f "$CONFIG_DIR/mt7981_sl3000.mk" ]; then
     echo "❌ 缺少 $CONFIG_DIR/mt7981_sl3000.mk"
@@ -38,108 +38,61 @@ rm -rf immortalwrt-build
 cp -r $SOURCE_DIR/immortalwrt immortalwrt-build
 cd immortalwrt-build
 
-# 修改 feeds 配置：禁用 telephony feed
+# 修改 feeds 配置
 sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
-
-# 添加 PassWall 系列 feeds（官方新地址）
 echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git" >> feeds.conf.default
 echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git" >> feeds.conf.default
 
-# 更新所有 feeds
-./scripts/feeds update -a || { echo "❌ feeds update failed"; exit 1; }
+# 更新 feeds
+./scripts/feeds update -a || exit 1
+./scripts/feeds install -a || exit 1
+make package/symlinks || exit 1
 
-# 确保 passwall2 feed 被正确拉取
-if [ ! -d "feeds/passwall2" ]; then
-    echo "❌ passwall2 feed failed to download. Please check the repository URL."
-    exit 1
-else
-    echo "✅ passwall2 feed successfully updated"
-fi
-
-# ========== 定义问题包列表（精简版） ==========
-PROBLEM_PKGS="
-aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
-pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
-gst1-plugins-base gst1-plugins-good gst1-plugins-ugly gst1-plugins-bad gst1-libav
-dmapd gmediarender gnunet gnunet-fuse gnunet-fs grilo-plugins lcdgrilo libdmapsharing
-kamailio smartdns pymysql python-orjson python-paramiko python-pyopenssl
-python-rpds-py python-service-identity python-twisted python-docker
-python-jsonschema python-jsonschema-specifications python-referencing
-onionshare-cli onionshare weston wpewebkit libextractor python-bcrypt python-cryptography
-python-maturin podman ruby-yaml
-"
-
-# ========== 彻底清除所有已知问题包 ==========
-echo "=== 递归删除所有问题包 ==="
-for pkg in $PROBLEM_PKGS; do
-    find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
-done
-
-# 删除整个 video 和 telephony feed
-rm -rf feeds/video feeds/telephony
-
-# 清理 package/feeds 下的符号链接
-rm -rf package/feeds
-
-# 更新 feed 索引
-./scripts/feeds update -i || { echo "❌ feeds update -i failed"; exit 1; }
-
-# 安装 feeds
-./scripts/feeds install -a || { echo "❌ feeds install failed"; exit 1; }
-
-# 再次递归删除（防止依赖重新拉取）
-for pkg in $PROBLEM_PKGS; do
-    find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
-done
-
-# 再次更新索引并重建符号链接
-./scripts/feeds update -i || { echo "❌ feeds update -i failed"; exit 1; }
-make package/symlinks || { echo "❌ make package/symlinks failed"; exit 1; }
-
-# ========== 注册设备树（双路径） ==========
+# 注册设备树
 mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
-cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_OLD/ || { echo "❌ Failed to copy DTS to old path"; exit 1; }
-cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_NEW/ || { echo "❌ Failed to copy DTS to new path"; exit 1; }
+cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_OLD/ || exit 1
+cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_NEW/ || exit 1
 
-# ========== 追加设备定义到 filogic.mk ==========
+# 追加设备定义到 filogic.mk
 echo "" >> $FILOGIC_MK
 cat $CONFIG_DIR/mt7981_sl3000.mk >> $FILOGIC_MK
-
-# 验证设备定义是否已追加
 if ! grep -q "sl_3000-spi-nor" $FILOGIC_MK; then
-    echo "❌ 设备定义未成功写入 $FILOGIC_MK"
+    echo "❌ 设备定义未成功写入"
     exit 1
 fi
 echo "✅ 设备定义已注入"
 
-# ========== 配置 .config ==========
-cp -v $CONFIG_DIR/sl3000.config .config || { echo "❌ Failed to copy config"; exit 1; }
+# 复制基础配置
+cp -v $CONFIG_DIR/sl3000.config .config || exit 1
 
-# 设置基础平台
-echo "CONFIG_TARGET_mediatek=y" >> .config
-echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
+# 强制启用平台和设备（使用 scripts/config）
+./scripts/config --enable CONFIG_TARGET_mediatek
+./scripts/config --enable CONFIG_TARGET_mediatek_filogic
+./scripts/config --enable CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc
+./scripts/config --enable CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor
 
-# 启用两个设备
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
+# 禁用有问题的 luci 应用（避免依赖警告）
+./scripts/config --disable CONFIG_PACKAGE_luci-app-clamav
+./scripts/config --disable CONFIG_PACKAGE_luci-app-dufs
+./scripts/config --disable CONFIG_PACKAGE_luci-app-openclash
+./scripts/config --disable CONFIG_PACKAGE_luci-app-rustdesk-server
+./scripts/config --disable CONFIG_PACKAGE_luci-app-smartdns
 
-# ========== 生成基础配置 ==========
-make defconfig || { echo "❌ make defconfig failed"; exit 1; }
+# 生成基础配置
+make defconfig || exit 1
 
-# 再次确保设备选项存在（defconfig 可能覆盖）
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
+# defconfig 后再次强制启用（因为 defconfig 可能会重置）
+./scripts/config --enable CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc
+./scripts/config --enable CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor
 
-# ========== 使用 oldconfig 更新配置 ==========
-echo "=== 运行 oldconfig（详细模式）==="
-make -j1 V=s oldconfig 2>&1 | tee oldconfig.log
-if [ ${PIPESTATUS[0]} -ne 0 ]; then
-    echo "❌ oldconfig 失败，错误日志如下（最后50行）："
-    tail -50 oldconfig.log
-    exit 1
-fi
+# 运行 oldconfig
+make oldconfig || exit 1
 
-# ========== 最终验证设备是否在 .config 中启用 ==========
+# oldconfig 后再次强制启用（最关键的一步）
+./scripts/config --enable CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc
+./scripts/config --enable CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor
+
+# 最终验证
 echo "=== 验证设备启用状态 ==="
 if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" .config; then
     echo "❌ eMMC 设备未启用！"
@@ -151,5 +104,5 @@ if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" .config; 
 fi
 echo "✅ 两个设备均已启用"
 
-# 保存当前构建目录路径，供 part2 使用
+# 保存构建目录
 echo $PWD > $WORKSPACE/build-dir.txt
