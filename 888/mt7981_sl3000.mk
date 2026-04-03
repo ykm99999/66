@@ -1,4 +1,4 @@
-# SL3000 eMMC 设备定义（原有，支持科学上网、Docker）
+# SL3000 eMMC 设备定义（精简版，无科学上网、Docker）
 define Device/sl_3000-emmc
   DEVICE_VENDOR := SL
   DEVICE_MODEL := 3000 eMMC (1GB)
@@ -8,20 +8,14 @@ define Device/sl_3000-emmc
   DEVICE_PACKAGES := \
     kmod-usb3 kmod-usb-storage kmod-usb-storage-uas \
     f2fsck losetup mkf2fs kmod-fs-f2fs kmod-mmc \
-    luci-app-ksmbd luci-i18n-ksmbd-zh-cn ksmbd-utils \
-    luci-app-passwall2 \
-    xray-core chinadns-ng \
-    shadowsocks-libev-ss-local shadowsocks-libev-ss-redir shadowsocks-libev-ss-tunnel \
-    shadowsocks-rust-sslocal simple-obfs \
-    docker-ce docker-compose kmod-br-netfilter kmod-ikconfig kmod-ipt-physdev \
-    kmod-nf-ipt6 kmod-nf-ipvs kmod-veth kmod-fs-overlay luci-app-dockerman
+    luci-app-ksmbd luci-i18n-ksmbd-zh-cn ksmbd-utils
   IMAGES := sysupgrade.bin
   IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
 endef
 
 TARGET_DEVICES += sl_3000-emmc
 
-# SL3000 SPI-NOR 救砖设备定义（新增，仅救砖必要包，限制 32MB）
+# SL3000 SPI-NOR 救砖设备定义（不变）
 define Device/sl_3000-spi-nor
   DEVICE_VENDOR := SL
   DEVICE_MODEL := 3000 SPI-NOR (32MB)
