@@ -14,15 +14,21 @@ cd "$IMMORTALWRT_BUILD_DIR"
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# 强制修改 ATF 源码，启用 DDR4（省略具体代码，请保留原有完整补丁）
+# ========== 强制修改 ATF 源码，启用 DDR4 ==========
+echo "=== Patching ATF source to force DDR4 ==="
 cd $SOURCE_DIR/arm-trusted-firmware
 mkdir -p plat/mediatek/mt7981/drivers/dram
-cat > plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c << 'EOF'
-/* 此处粘贴您之前成功的完整代码 */
-EOF
-echo "✅ ATF source patched"
 
-# 编译 ATF（只编译 NOR 和 RAM 版，因为救砖不需要 eMMC 版）
+# 从预置的补丁文件复制（避免使用 EOF）
+if [ -f "$WORKSPACE/main-repo/patches/mtk_mem_init.c" ]; then
+    cp "$WORKSPACE/main-repo/patches/mtk_mem_init.c" plat/mediatek/mt7981/drivers/dram/
+    echo "✅ ATF source patched for DDR4"
+else
+    echo "❌ Missing patch file: $WORKSPACE/main-repo/patches/mtk_mem_init.c"
+    exit 1
+fi
+
+# ========== 编译 ATF（只编译 NOR 和 RAM 版） ==========
 echo "=== Building ATF 1G (NOR) ==="
 make clean
 make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=nor LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
@@ -41,13 +47,14 @@ if [ ! -f build/mt7981/release/bl31.bin ]; then
 fi
 cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin"
 
-# 编译 fiptool
+# ========== 编译 fiptool ==========
+echo "=== Compiling fiptool ==="
 make -C tools/fiptool CROSS_COMPILE=
 FIPTOOL="$PWD/tools/fiptool/fiptool"
 mkdir -p $SOURCE_DIR/u-boot/tools
 cp -f $FIPTOOL $SOURCE_DIR/u-boot/tools/fiptool
 
-# 编译 U-Boot (NOR版)
+# ========== 编译 U-Boot (NOR版) ==========
 cd $SOURCE_DIR/u-boot
 make clean
 if [ -f configs/mt7981_spim_nor_rfb_defconfig ]; then
@@ -68,7 +75,7 @@ else
 fi
 cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
 
-# 构建 SPI-NOR 救砖固件
+# ========== 构建 SPI-NOR 救砖固件 ==========
 cd "$IMMORTALWRT_BUILD_DIR"
 if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" .config; then
     echo "❌ Rescue device not enabled"
@@ -92,7 +99,7 @@ fi
 cp "$SPI_IMAGE" "$OUTPUT_DIR/firmware/Spi-flash-32MB.bin"
 echo "✅ SPI-NOR rescue image saved as Spi-flash-32MB.bin"
 
-# 打包 mtk_uartboot
+# ========== 打包 mtk_uartboot ==========
 cd $SOURCE_DIR/mtk_uartboot
 tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
 
