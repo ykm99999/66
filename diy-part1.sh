@@ -34,15 +34,17 @@ rm -rf immortalwrt-build
 cp -r $SOURCE_DIR/immortalwrt immortalwrt-build
 cd immortalwrt-build
 
-# 修改 feeds 配置：禁用 telephony feed，不添加 passwall
+# 修改 feeds 配置：禁用 telephony feed，不添加 passwall（救砖不需要）
 sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
+# 注释掉可能存在的 passwall 源（避免拉取无关包）
+# sed -i '/passwall/d' feeds.conf.default
 
 # 更新 feeds
 ./scripts/feeds update -a || exit 1
 ./scripts/feeds install -a || exit 1
 make package/symlinks || exit 1
 
-# 删除有问题的包（与之前相同，但不影响救砖）
+# 删除可能导致编译错误的问题包（保留基础环境）
 PROBLEM_PKGS="
 aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
 pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
@@ -67,26 +69,25 @@ done
 ./scripts/feeds update -i || exit 1
 make package/symlinks || exit 1
 
-# 注册设备树
+# 注册设备树（双路径）
 mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
 cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_OLD/ || exit 1
 cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_NEW/ || exit 1
 
-# 追加设备定义到 filogic.mk（只保留救砖设备定义）
+# 追加设备定义到 filogic.mk（只包含救砖设备）
 mkdir -p "$(dirname "$FILOGIC_MK")"
 touch "$FILOGIC_MK"
 echo "" >> $FILOGIC_MK
-# 假设 $CONFIG_DIR/mt7981_sl3000.mk 中只包含救砖设备定义
 cat $CONFIG_DIR/mt7981_sl3000.mk >> $FILOGIC_MK 2>/dev/null || {
     echo "❌ 缺少 $CONFIG_DIR/mt7981_sl3000.mk"
     exit 1
 }
 echo "✅ 设备定义已注入"
 
-# 复制基础配置
+# 复制基础配置（极简版，已移除无线、USB、科学上网、Docker）
 cp -v $CONFIG_DIR/sl3000.config .config || exit 1
 
-# 设置平台并只启用救砖设备
+# 强制设置平台，只启用救砖设备
 sed -i '/CONFIG_TARGET_mediatek/d' .config
 sed -i '/CONFIG_TARGET_mediatek_filogic/d' .config
 echo "CONFIG_TARGET_mediatek=y" >> .config
