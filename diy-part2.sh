@@ -17,14 +17,109 @@ export ARCH=arm64
 # ========== 强制修改 ATF 源码，启用 DDR4 ==========
 echo "=== Patching ATF source to force DDR4 ==="
 cd $SOURCE_DIR/arm-trusted-firmware
+
+# 修复 emi.h 路径问题（将实际文件链接到 include 目录）
+mkdir -p include/drivers/mediatek
+if [ -f plat/mediatek/mt7981/drivers/dram/emi.h ]; then
+    ln -sf ../../../plat/mediatek/mt7981/drivers/dram/emi.h include/drivers/mediatek/emi.h
+    echo "✅ 已创建 emi.h 软链接"
+else
+    echo "❌ 未找到 plat/mediatek/mt7981/drivers/dram/emi.h"
+    exit 1
+fi
+
 mkdir -p plat/mediatek/mt7981/drivers/dram
 
 cat > plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c << 'EOF'
-/* 请粘贴您之前正确的完整代码（由于篇幅，此处省略，您需自行补充） */
-EOF
-echo "✅ ATF source patched"
+/*
+ * Copyright (c) 2021, MediaTek Inc. All rights reserved.
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
 
-# 编译 ATF（仅 NOR 和 RAM 版）
+#include <plat/common/platform.h>
+#include <common/debug.h>
+#include <lib/mmio.h>
+#include <stdarg.h>
+#include <stdio.h>
+
+/* IAP/REBB eFuse bit */
+#define IAP_REBB_SWITCH		0x11D00A0C
+#define IAP_IND			0x01
+
+extern void mtk_mem_init_real(void);
+extern int mt7981_use_ddr4;
+extern int mt7981_ddr_size_limit;
+extern int mt7981_dram_debug;
+extern int mt7981_bga_pkg;
+extern int mt7981_ddr3_freq;
+
+void mtk_mem_init(void)
+{
+	/* 强制使用 DDR4 */
+	mt7981_use_ddr4 = 1;
+
+#ifdef DRAM_SIZE_LIMIT
+	mt7981_ddr_size_limit = DRAM_SIZE_LIMIT;
+
+	if (!mt7981_use_ddr4 && mt7981_ddr_size_limit > 512)
+		mt7981_ddr_size_limit = 512;
+#endif /* DRAM_SIZE_LIMIT */
+
+#ifdef DRAM_DEBUG_LOG
+	mt7981_dram_debug = 1;
+#endif /* DRAM_DEBUG_LOG */
+
+#if defined(BOARD_BGA)
+	mt7981_bga_pkg = 1;
+#elif defined(BOARD_QFN)
+	mt7981_bga_pkg = 0;
+#endif /* BOARD_BGA */
+
+#ifdef DDR3_FREQ_2133
+	mt7981_ddr3_freq = 2133;
+#endif /* DDR3_FREQ_2133 */
+#ifdef DDR3_FREQ_1866
+	mt7981_ddr3_freq = 1866;
+#endif /* DDR3_FREQ_1866 */
+
+	NOTICE("EMI: Using DDR%u settings\n", mt7981_use_ddr4 ? 4 : 3);
+
+	mtk_mem_init_real();
+}
+
+void mtk_mem_dbg_print(const char *fmt, ...)
+{
+	va_list args;
+
+	if (!mt7981_dram_debug)
+		return;
+
+	va_start(args, fmt);
+	(void)vprintf(fmt, args);
+	va_end(args);
+}
+
+void mtk_mem_err_print(const char *fmt, ...)
+{
+	const char *prefix_str;
+	va_list args;
+
+	prefix_str = plat_log_get_prefix(LOG_LEVEL_ERROR);
+
+	while (*prefix_str != '\0') {
+		(void)putchar(*prefix_str);
+		prefix_str++;
+	}
+
+	va_start(args, fmt);
+	(void)vprintf(fmt, args);
+	va_end(args);
+}
+EOF
+echo "✅ ATF source patched for DDR4"
+
+# ========== 编译 ATF（只编译 NOR 和 RAM 版） ==========
 echo "=== Building ATF 1G (NOR) ==="
 make clean
 make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=nor LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
@@ -43,14 +138,14 @@ if [ ! -f build/mt7981/release/bl31.bin ]; then
 fi
 cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin"
 
-# 编译 fiptool
+# ========== 编译 fiptool ==========
 echo "=== Compiling fiptool ==="
 make -C tools/fiptool CROSS_COMPILE=
 FIPTOOL="$PWD/tools/fiptool/fiptool"
 mkdir -p $SOURCE_DIR/u-boot/tools
 cp -f $FIPTOOL $SOURCE_DIR/u-boot/tools/fiptool
 
-# 编译 U-Boot (NOR版)
+# ========== 编译 U-Boot (NOR版) ==========
 cd $SOURCE_DIR/u-boot
 make clean
 if [ -f configs/mt7981_spim_nor_rfb_defconfig ]; then
@@ -71,7 +166,7 @@ else
 fi
 cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
 
-# 构建 SPI-NOR 救砖固件
+# ========== 构建 SPI-NOR 救砖固件 ==========
 cd "$IMMORTALWRT_BUILD_DIR"
 if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" .config; then
     echo "❌ Rescue device not enabled"
@@ -95,7 +190,7 @@ fi
 cp "$SPI_IMAGE" "$OUTPUT_DIR/firmware/Spi-flash-32MB.bin"
 echo "✅ SPI-NOR rescue image saved as Spi-flash-32MB.bin"
 
-# 打包 mtk_uartboot
+# ========== 打包 mtk_uartboot ==========
 cd $SOURCE_DIR/mtk_uartboot
 tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
 
