@@ -42,7 +42,7 @@ sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 ./scripts/feeds install -a || exit 1
 make package/symlinks || exit 1
 
-# 删除可能导致编译错误的包（不影响救砖）
+# 删除可能导致编译错误的包（包括 mt76）
 PROBLEM_PKGS="
 aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
 pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
@@ -66,6 +66,12 @@ for pkg in $PROBLEM_PKGS; do
 done
 ./scripts/feeds update -i || exit 1
 make package/symlinks || exit 1
+
+# ========== 关键：删除 mt76 包（无线驱动） ==========
+if [ -d package/kernel/mt76 ]; then
+    rm -rf package/kernel/mt76
+    echo "✅ 已删除 package/kernel/mt76"
+fi
 
 # 注册设备树
 mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
@@ -94,7 +100,7 @@ sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000/d' .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
 echo "# CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc is not set" >> .config
 
-# ========== 强制禁用所有无线驱动（使用 sed） ==========
+# 强制禁用无线驱动（使用 sed）
 echo "=== 强制禁用无线驱动 ==="
 sed -i '/CONFIG_PACKAGE_kmod-mt7915e/d' .config
 sed -i '/CONFIG_PACKAGE_kmod-mt7915-firmware/d' .config
