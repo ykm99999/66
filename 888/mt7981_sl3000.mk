@@ -11,10 +11,11 @@ define Device/mt7981_sl3000_emmc
     block-mount e2fsprogs f2fs-tools \
     kmod-fs-ext4 kmod-fs-f2fs \
     kmod-mtd kmod-mtd-rw \
-    kmod-sdhci-mtk \
+    kmod-mmc-mtk \
     dropbear \
     lsblk blkid mount-utils \
-    mtd-utils uboot-envtools
+    mtd-utils uboot-envtools \
+    kmod-mt7981-eth kmod-mt7531   # 添加有线网络驱动
   IMAGES := sysupgrade.bin
   IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
 endef
