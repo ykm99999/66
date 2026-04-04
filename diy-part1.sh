@@ -46,7 +46,7 @@ sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 ./scripts/feeds install -a || exit 1
 make package/symlinks || exit 1
 
-# 删除可能导致问题的包（不影响救砖）
+# 删除可能导致编译错误的包（不影响救砖）
 PROBLEM_PKGS="
 aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
 pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
