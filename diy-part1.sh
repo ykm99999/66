@@ -18,8 +18,8 @@ export ARCH=arm64
 
 # 验证配置文件
 echo "=== 验证配置文件 ==="
-if [ ! -f "$CONFIG_DIR/mt7981-sl-3000-emmc.dts" ]; then
-    echo "❌ 缺少 $CONFIG_DIR/mt7981-sl-3000-emmc.dts"
+if [ ! -f "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" ]; then
+    echo "❌ 缺少 $CONFIG_DIR/mt7981b-sl3000-emmc.dts"
     exit 1
 fi
 if [ ! -f "$CONFIG_DIR/sl3000.config" ]; then
@@ -42,7 +42,7 @@ sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 ./scripts/feeds install -a || exit 1
 make package/symlinks || exit 1
 
-# 删除可能导致编译错误的包（包括 mt76）
+# 删除可能导致编译错误的包（不影响救砖）
 PROBLEM_PKGS="
 aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
 pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
@@ -67,7 +67,7 @@ done
 ./scripts/feeds update -i || exit 1
 make package/symlinks || exit 1
 
-# ========== 关键：删除 mt76 包（无线驱动） ==========
+# 删除 mt76 无线驱动包（避免编译错误）
 if [ -d package/kernel/mt76 ]; then
     rm -rf package/kernel/mt76
     echo "✅ 已删除 package/kernel/mt76"
@@ -75,8 +75,8 @@ fi
 
 # 注册设备树
 mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
-cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_OLD/ || exit 1
-cp -v $CONFIG_DIR/mt7981-sl-3000-emmc.dts $DTS_PATH_NEW/ || exit 1
+cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts $DTS_PATH_OLD/ || exit 1
+cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts $DTS_PATH_NEW/ || exit 1
 
 # 追加设备定义（只包含救砖设备）
 mkdir -p "$(dirname "$FILOGIC_MK")"
@@ -91,7 +91,7 @@ echo "✅ 设备定义已注入"
 # 复制基础配置
 cp -v $CONFIG_DIR/sl3000.config .config || exit 1
 
-# 强制启用平台和救砖设备，禁用 eMMC
+# 强制设置平台，只启用救砖设备
 sed -i '/CONFIG_TARGET_mediatek/d' .config
 sed -i '/CONFIG_TARGET_mediatek_filogic/d' .config
 echo "CONFIG_TARGET_mediatek=y" >> .config
@@ -100,13 +100,10 @@ sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000/d' .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
 echo "# CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc is not set" >> .config
 
-# 强制禁用无线驱动（使用 sed）
-echo "=== 强制禁用无线驱动 ==="
+# 强制禁用所有无线驱动
 sed -i '/CONFIG_PACKAGE_kmod-mt7915e/d' .config
 sed -i '/CONFIG_PACKAGE_kmod-mt7915-firmware/d' .config
 sed -i '/CONFIG_PACKAGE_kmod-mt76/d' .config
-sed -i '/CONFIG_PACKAGE_kmod-mt76-core/d' .config
-sed -i '/CONFIG_PACKAGE_kmod-mt76-connac/d' .config
 echo "# CONFIG_PACKAGE_kmod-mt7915e is not set" >> .config
 echo "# CONFIG_PACKAGE_kmod-mt7915-firmware is not set" >> .config
 echo "# CONFIG_PACKAGE_kmod-mt76 is not set" >> .config
@@ -114,11 +111,9 @@ echo "# CONFIG_PACKAGE_kmod-mt76 is not set" >> .config
 # 生成基础配置
 make defconfig || exit 1
 
-# defconfig 后再次确保救砖设备存在且无线禁用
+# defconfig 后再次确保救砖设备存在
 sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000/d' .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
-sed -i '/CONFIG_PACKAGE_kmod-mt7915e/d' .config
-echo "# CONFIG_PACKAGE_kmod-mt7915e is not set" >> .config
 
 # 运行 oldconfig
 echo "=== 运行 oldconfig ==="
@@ -127,8 +122,6 @@ make oldconfig || exit 1
 # oldconfig 后再次强制写入
 sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000/d' .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
-sed -i '/CONFIG_PACKAGE_kmod-mt7915e/d' .config
-echo "# CONFIG_PACKAGE_kmod-mt7915e is not set" >> .config
 
 # 最终验证
 echo "=== 验证设备启用状态 ==="
@@ -137,13 +130,6 @@ if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" .config; 
     exit 1
 fi
 echo "✅ 救砖设备已启用"
-
-echo "=== 验证无线驱动已禁用 ==="
-if grep -q "CONFIG_PACKAGE_kmod-mt7915e=y" .config; then
-    echo "❌ 无线驱动仍被启用！"
-    exit 1
-fi
-echo "✅ 无线驱动已禁用"
 
 # 保存构建目录
 echo $PWD > $WORKSPACE/build-dir.txt
