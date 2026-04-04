@@ -94,17 +94,13 @@ sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000/d' .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
 echo "# CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc is not set" >> .config
 
-# ========== 关键：强制禁用所有无线驱动 ==========
+# ========== 强制禁用所有无线驱动（使用 sed） ==========
 echo "=== 强制禁用无线驱动 ==="
-./scripts/config --disable CONFIG_PACKAGE_kmod-mt7915e
-./scripts/config --disable CONFIG_PACKAGE_kmod-mt7915-firmware
-./scripts/config --disable CONFIG_PACKAGE_kmod-mt76
-./scripts/config --disable CONFIG_PACKAGE_kmod-mt76-core
-./scripts/config --disable CONFIG_PACKAGE_kmod-mt76-connac
-# 如果 scripts/config 不可用，则使用 sed 直接修改 .config
 sed -i '/CONFIG_PACKAGE_kmod-mt7915e/d' .config
 sed -i '/CONFIG_PACKAGE_kmod-mt7915-firmware/d' .config
 sed -i '/CONFIG_PACKAGE_kmod-mt76/d' .config
+sed -i '/CONFIG_PACKAGE_kmod-mt76-core/d' .config
+sed -i '/CONFIG_PACKAGE_kmod-mt76-connac/d' .config
 echo "# CONFIG_PACKAGE_kmod-mt7915e is not set" >> .config
 echo "# CONFIG_PACKAGE_kmod-mt7915-firmware is not set" >> .config
 echo "# CONFIG_PACKAGE_kmod-mt76 is not set" >> .config
