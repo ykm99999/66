@@ -111,6 +111,12 @@ echo "# CONFIG_PACKAGE_kmod-mt76 is not set" >> .config
 # 生成基础配置
 make defconfig || exit 1
 
+# ========== 强制禁用 readline 相关库（避免编译错误） ==========
+sed -i '/CONFIG_PACKAGE_libreadline/d' .config
+sed -i '/CONFIG_PACKAGE_libhistory/d' .config
+echo "# CONFIG_PACKAGE_libreadline is not set" >> .config
+echo "# CONFIG_PACKAGE_libhistory is not set" >> .config
+
 # defconfig 后再次确保救砖设备存在
 sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000/d' .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
