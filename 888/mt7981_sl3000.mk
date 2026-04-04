@@ -1,4 +1,3 @@
-# SL3000 SPI-NOR 救砖设备定义
 define Device/sl_3000-spi-nor
   DEVICE_VENDOR := SL
   DEVICE_MODEL := 3000 SPI-NOR (32MB)
@@ -6,7 +5,6 @@ define Device/sl_3000-spi-nor
   DEVICE_DTS_DIR := $(DTS_DIR)
   SUPPORTED_DEVICES := sl,3000-spi-nor
   DEVICE_PACKAGES := \
-    kmod-usb3 kmod-usb-storage \
     block-mount \
     uboot-envtools \
     ttyd
