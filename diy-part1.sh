@@ -26,6 +26,10 @@ if [ ! -f "$CONFIG_DIR/sl3000.config" ]; then
     echo "❌ 缺少 $CONFIG_DIR/sl3000.config"
     exit 1
 fi
+if [ ! -f "$CONFIG_DIR/mt7981_sl3000.mk" ]; then
+    echo "❌ 缺少 $CONFIG_DIR/mt7981_sl3000.mk"
+    exit 1
+fi
 echo "✅ 配置文件齐全"
 
 # 准备 ImmortalWrt 源码
@@ -42,7 +46,7 @@ sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 ./scripts/feeds install -a || exit 1
 make package/symlinks || exit 1
 
-# 删除可能导致编译错误的包（不影响救砖）
+# 删除可能导致问题的包（不影响救砖）
 PROBLEM_PKGS="
 aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
 pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
@@ -67,7 +71,7 @@ done
 ./scripts/feeds update -i || exit 1
 make package/symlinks || exit 1
 
-# 删除 mt76 无线驱动包（避免编译错误）
+# 删除 mt76 无线驱动包
 if [ -d package/kernel/mt76 ]; then
     rm -rf package/kernel/mt76
     echo "✅ 已删除 package/kernel/mt76"
@@ -78,14 +82,11 @@ mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
 cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts $DTS_PATH_OLD/ || exit 1
 cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts $DTS_PATH_NEW/ || exit 1
 
-# 追加设备定义（只包含救砖设备）
+# 追加设备定义
 mkdir -p "$(dirname "$FILOGIC_MK")"
 touch "$FILOGIC_MK"
 echo "" >> $FILOGIC_MK
-cat $CONFIG_DIR/mt7981_sl3000.mk >> $FILOGIC_MK 2>/dev/null || {
-    echo "❌ 缺少 $CONFIG_DIR/mt7981_sl3000.mk"
-    exit 1
-}
+cat $CONFIG_DIR/mt7981_sl3000.mk >> $FILOGIC_MK
 echo "✅ 设备定义已注入"
 
 # 复制基础配置
@@ -111,13 +112,13 @@ echo "# CONFIG_PACKAGE_kmod-mt76 is not set" >> .config
 # 生成基础配置
 make defconfig || exit 1
 
-# ========== 强制禁用 readline 相关库（避免编译错误） ==========
+# 强制禁用 readline 相关库
 sed -i '/CONFIG_PACKAGE_libreadline/d' .config
 sed -i '/CONFIG_PACKAGE_libhistory/d' .config
 echo "# CONFIG_PACKAGE_libreadline is not set" >> .config
 echo "# CONFIG_PACKAGE_libhistory is not set" >> .config
 
-# defconfig 后再次确保救砖设备存在
+# 再次确保救砖设备存在
 sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000/d' .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
 
