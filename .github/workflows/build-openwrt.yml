@@ -1,4 +1,4 @@
-name: SL3000 Final Build with Auto Release
+name: SL3000 Rescue Build with Auto Release
 
 on:
   workflow_dispatch:
@@ -72,6 +72,11 @@ jobs:
             - 构建时间: ${{ steps.release_tag.outputs.tag_name }}
             - 救砖镜像: `Spi-flash-32MB.bin`
             - 包含 ATF, U-Boot, mtk_uartboot
+
+            ### 📦 下载说明
+            - `firmware/Spi-flash-32MB.bin` 为 SPI‑NOR 救砖镜像
+            - `atf/` 和 `uboot/` 为底层引导文件
+            - `mtk_uartboot.tar.gz` 为串口救砖工具包
           files: |
             output/atf/*.bin
             output/atf/*.elf
