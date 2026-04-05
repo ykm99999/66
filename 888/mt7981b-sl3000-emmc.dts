@@ -19,16 +19,16 @@
 
 	chosen {
 		stdout-path = "serial0:115200n8";
-		/* 修复：移除硬编码分区索引，增强固件兼容性 */
 		bootargs = "console=ttyS0,115200n1 loglevel=8 earlycon=uart8250,mmio32,0x11002000 rootwait";
 	};
 
-	/* 物理锁定：1GB DDR4 内存映射 */
+	/* 1GB DDR4 内存 */
 	memory@40000000 {
 		device_type = "memory";
 		reg = <0x0 0x40000000 0x0 0x40000000>;
 	};
 
+	/* 稳压器，用于 eMMC */
 	reg_1p8v: regulator-1p8v {
 		compatible = "regulator-fixed";
 		regulator-name = "fixed-1.8V";
@@ -75,6 +75,7 @@
 	};
 };
 
+/* SPI-NOR 闪存分区布局（与 U-Boot 实际分区对齐） */
 &spi0 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&spi0_flash_pins>;
@@ -110,20 +111,16 @@
 				reg = <0x380000 0x200000>;
 				read-only;
 			};
-			/* 物理对齐：5.5MB (0x580000) 起始，适配救砖包缝合逻辑 */
+			/* firmware 分区起始 0x580000，大小 25MB (与 IMAGE_SIZE 匹配) */
 			partition@580000 {
 				label = "firmware";
 				reg = <0x580000 0x1900000>;
-				compatible = "denx,uimage";
-			};
-			partition@1e80000 {
-				label = "storage";
-				reg = <0x1e80000 0x180000>;
 			};
 		};
 	};
 };
 
+/* eMMC 配置 */
 &mmc0 {
 	status = "okay";
 	pinctrl-names = "default", "state_uhs";
@@ -133,15 +130,15 @@
 	max-frequency = <52000000>;
 	cap-mmc-highspeed;
 	cap-mmc-hw-reset;
-	mmc-hs200-1_8v; /* 修复：解锁 eMMC 高速性能 */
+	mmc-hs200-1_8v;
 	vmmc-supply = <&reg_3p3v>;
 	vqmmc-supply = <&reg_1p8v>;
 	non-removable;
-	full-pwr-cycle;
 	no-sd;
 	no-sdio;
 };
 
+/* 网络：MT7531 交换机 + 2.5G 上联 */
 &eth {
 	status = "okay";
 
@@ -191,6 +188,14 @@
 	};
 };
 
+/* USB 完全禁用（您的设备无 USB 口） */
+&usb_phy {
+	status = "disabled";
+};
+&xhci {
+	status = "disabled";
+};
+
 &pio {
 	spi0_flash_pins: spi0-pins {
 		mux {
@@ -224,5 +229,3 @@
 
 &uart0 { status = "okay"; };
 &watchdog { status = "okay"; };
-&usb_phy { status = "okay"; };
-&xhci { status = "okay"; };
