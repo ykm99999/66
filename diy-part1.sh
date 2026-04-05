@@ -26,10 +26,6 @@ if [ ! -f "$CONFIG_DIR/sl3000.config" ]; then
     echo "❌ 缺少 $CONFIG_DIR/sl3000.config"
     exit 1
 fi
-if [ ! -f "$CONFIG_DIR/mt7981_sl3000.mk" ]; then
-    echo "❌ 缺少 $CONFIG_DIR/mt7981_sl3000.mk"
-    exit 1
-fi
 echo "✅ 配置文件齐全"
 
 # 准备 ImmortalWrt 源码
@@ -40,7 +36,6 @@ cd immortalwrt-build
 
 # 修改 feeds 配置：禁用 telephony feed，保留 passwall（如果需要科学上网）
 sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
-# 如果您不需要科学上网，可以注释下面两行；如果需要则保留
 echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git" >> feeds.conf.default
 echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git" >> feeds.conf.default
 
@@ -74,19 +69,19 @@ done
 ./scripts/feeds update -i || exit 1
 make package/symlinks || exit 1
 
-# 注意：不再删除 mt76（因为 eMMC 固件需要无线）
+# 注意：mt76 驱动已还原，不再删除
 
 # 注册设备树
 mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
 cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts $DTS_PATH_OLD/ || exit 1
 cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts $DTS_PATH_NEW/ || exit 1
 
-# 追加设备定义（包含两个设备）
+# 追加设备定义（两个设备）
 mkdir -p "$(dirname "$FILOGIC_MK")"
 touch "$FILOGIC_MK"
 cat >> $FILOGIC_MK << 'EOF'
 
-# SL3000 eMMC 完整版设备定义
+# SL3000 eMMC 完整版设备定义（含科学上网、Docker）
 define Device/mt7981_sl3000_emmc
   DEVICE_VENDOR := SL
   DEVICE_MODEL := SL3000
@@ -103,13 +98,18 @@ define Device/mt7981_sl3000_emmc
     dropbear \
     lsblk blkid mount-utils \
     mtd-utils uboot-envtools \
-    kmod-mt7981-eth kmod-mt7531
+    kmod-mt7981-eth kmod-mt7531 \
+    luci-app-passwall2 xray-core chinadns-ng \
+    shadowsocks-libev-ss-local shadowsocks-libev-ss-redir shadowsocks-libev-ss-tunnel \
+    shadowsocks-rust-sslocal simple-obfs \
+    docker-ce docker-compose kmod-br-netfilter kmod-ikconfig kmod-ipt-physdev \
+    kmod-nf-ipt6 kmod-nf-ipvs kmod-veth kmod-fs-overlay luci-app-dockerman
   IMAGES := sysupgrade.bin
   IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
 endef
 TARGET_DEVICES += mt7981_sl3000_emmc
 
-# SL3000 SPI-NOR 救砖设备定义
+# SL3000 SPI-NOR 救砖设备定义（精简）
 define Device/sl_3000-spi-nor
   DEVICE_VENDOR := SL
   DEVICE_MODEL := 3000 SPI-NOR (32MB)
@@ -139,11 +139,7 @@ sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000/d' .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_emmc=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
 
-# 确保无线驱动被启用（eMMC 固件需要）
-if [ -f scripts/config ]; then
-    ./scripts/config --enable CONFIG_PACKAGE_kmod-mt7915e
-    ./scripts/config --enable CONFIG_PACKAGE_kmod-mt7915-firmware
-fi
+# 确保无线驱动被启用
 sed -i '/CONFIG_PACKAGE_kmod-mt7915e/d' .config
 echo "CONFIG_PACKAGE_kmod-mt7915e=y" >> .config
 echo "CONFIG_PACKAGE_kmod-mt7915-firmware=y" >> .config
