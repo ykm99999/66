@@ -28,7 +28,7 @@ else
     exit 1
 fi
 
-# 替换 emicfg.c 为最小化实现（避免未定义符号）
+# 替换 emicfg.c 为最小化实现
 cat > plat/mediatek/mt7981/drivers/dram/emicfg.c << 'EOF'
 #include <stdint.h>
 
@@ -134,6 +134,12 @@ void mtk_mem_err_print(const char *fmt, ...)
 }
 EOF
 echo "✅ ATF source patched for DDR4"
+
+# 修复 bl2_plat_init.c 中的重复声明
+if [ -f plat/mediatek/mt7981/bl2/bl2_plat_init.c ]; then
+    sed -i '/extern void mtk_mem_init(void);/d' plat/mediatek/mt7981/bl2/bl2_plat_init.c
+    echo "✅ 已删除 bl2_plat_init.c 中的重复声明"
+fi
 
 # ========== 编译 ATF（只编译 NOR 和 RAM 版） ==========
 echo "=== Building ATF 1G (NOR) ==="
