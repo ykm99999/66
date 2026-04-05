@@ -26,6 +26,10 @@ if [ ! -f "$CONFIG_DIR/sl3000.config" ]; then
     echo "❌ 缺少 $CONFIG_DIR/sl3000.config"
     exit 1
 fi
+if [ ! -f "$CONFIG_DIR/mt7981_sl3000.mk" ]; then
+    echo "❌ 缺少 $CONFIG_DIR/mt7981_sl3000.mk"
+    exit 1
+fi
 echo "✅ 配置文件齐全"
 
 # 准备 ImmortalWrt 源码
@@ -34,16 +38,18 @@ rm -rf immortalwrt-build
 cp -r $SOURCE_DIR/immortalwrt immortalwrt-build
 cd immortalwrt-build
 
-# 修改 feeds 配置：禁用 telephony feed，移除 passwall 源
+# 修改 feeds 配置：禁用 telephony feed，保留 passwall（如果需要科学上网）
 sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
-sed -i '/passwall/d' feeds.conf.default   # 移除 passwall feeds（救砖不需要）
+# 如果您不需要科学上网，可以注释下面两行；如果需要则保留
+echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git" >> feeds.conf.default
+echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git" >> feeds.conf.default
 
 # 更新 feeds
 ./scripts/feeds update -a || exit 1
 ./scripts/feeds install -a || exit 1
 make package/symlinks || exit 1
 
-# 删除问题包（防止依赖冲突）
+# 删除可能导致问题的包（不影响核心功能）
 PROBLEM_PKGS="
 aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
 pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
@@ -68,20 +74,40 @@ done
 ./scripts/feeds update -i || exit 1
 make package/symlinks || exit 1
 
-# ========== 彻底删除无线驱动源码（包括可能从 feeds 拉取的） ==========
-rm -rf package/kernel/mt76
-rm -rf feeds/packages/kernel/mt76
-rm -rf build_dir/target-*/linux-*/mt76-*
+# 注意：不再删除 mt76（因为 eMMC 固件需要无线）
 
 # 注册设备树
 mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
 cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts $DTS_PATH_OLD/ || exit 1
 cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts $DTS_PATH_NEW/ || exit 1
 
-# 注入救砖设备定义（只包含救砖设备）
+# 追加设备定义（包含两个设备）
 mkdir -p "$(dirname "$FILOGIC_MK")"
 touch "$FILOGIC_MK"
 cat >> $FILOGIC_MK << 'EOF'
+
+# SL3000 eMMC 完整版设备定义
+define Device/mt7981_sl3000_emmc
+  DEVICE_VENDOR := SL
+  DEVICE_MODEL := SL3000
+  DEVICE_VARIANT := eMMC
+  DEVICE_DTS := mt7981b-sl3000-emmc
+  SUPPORTED_DEVICES := sl,sl3000
+  KERNEL_LOADADDR := 0x48000000
+  DEVICE_PACKAGES := \
+    luci luci-base luci-mod-system luci-theme-bootstrap \
+    block-mount e2fsprogs f2fs-tools \
+    kmod-fs-ext4 kmod-fs-f2fs \
+    kmod-mtd kmod-mtd-rw \
+    kmod-mmc-mtk \
+    dropbear \
+    lsblk blkid mount-utils \
+    mtd-utils uboot-envtools \
+    kmod-mt7981-eth kmod-mt7531
+  IMAGES := sysupgrade.bin
+  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
+endef
+TARGET_DEVICES += mt7981_sl3000_emmc
 
 # SL3000 SPI-NOR 救砖设备定义
 define Device/sl_3000-spi-nor
@@ -104,34 +130,30 @@ echo "✅ 设备定义已注入"
 # 复制基础配置
 cp -v $CONFIG_DIR/sl3000.config .config || exit 1
 
-# 强制设置平台，只启用救砖设备
+# 强制设置平台并启用两个设备
 sed -i '/CONFIG_TARGET_mediatek/d' .config
 sed -i '/CONFIG_TARGET_mediatek_filogic/d' .config
 echo "CONFIG_TARGET_mediatek=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
 sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000/d' .config
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_emmc=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
 
-# 强制禁用所有无线驱动（双重保险）
+# 确保无线驱动被启用（eMMC 固件需要）
 if [ -f scripts/config ]; then
-    ./scripts/config --disable CONFIG_PACKAGE_kmod-mt7915e
-    ./scripts/config --disable CONFIG_PACKAGE_kmod-mt7915-firmware
-    ./scripts/config --disable CONFIG_PACKAGE_kmod-mt76
-    ./scripts/config --disable CONFIG_MTK_WIFI
-    ./scripts/config --disable CONFIG_MTK_AP
+    ./scripts/config --enable CONFIG_PACKAGE_kmod-mt7915e
+    ./scripts/config --enable CONFIG_PACKAGE_kmod-mt7915-firmware
 fi
 sed -i '/CONFIG_PACKAGE_kmod-mt7915e/d' .config
-sed -i '/CONFIG_PACKAGE_kmod-mt7915-firmware/d' .config
-sed -i '/CONFIG_PACKAGE_kmod-mt76/d' .config
-echo "# CONFIG_PACKAGE_kmod-mt7915e is not set" >> .config
-echo "# CONFIG_PACKAGE_kmod-mt7915-firmware is not set" >> .config
-echo "# CONFIG_PACKAGE_kmod-mt76 is not set" >> .config
+echo "CONFIG_PACKAGE_kmod-mt7915e=y" >> .config
+echo "CONFIG_PACKAGE_kmod-mt7915-firmware=y" >> .config
 
 # 生成基础配置
 make defconfig || exit 1
 
-# 再次确保救砖设备存在
+# defconfig 后再次确保两个设备存在
 sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000/d' .config
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_emmc=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
 
 # 运行 oldconfig
@@ -140,15 +162,20 @@ make oldconfig || exit 1
 
 # oldconfig 后再次强制写入
 sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000/d' .config
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_emmc=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
 
 # 最终验证
 echo "=== 验证设备启用状态 ==="
+if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_emmc=y" .config; then
+    echo "❌ eMMC 设备未启用！"
+    exit 1
+fi
 if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" .config; then
     echo "❌ 救砖设备未启用！"
     exit 1
 fi
-echo "✅ 救砖设备已启用"
+echo "✅ 两个设备均已启用"
 
 # 保存构建目录
 echo $PWD > $WORKSPACE/build-dir.txt
