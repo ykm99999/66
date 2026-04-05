@@ -16,7 +16,7 @@ mkdir -p $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware $STAGING_DIR_IMA
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# ========== 验证三件套文件是否存在 ==========
+# 验证配置文件
 echo "=== 验证配置文件 ==="
 if [ ! -f "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" ]; then
     echo "❌ 缺少 $CONFIG_DIR/mt7981b-sl3000-emmc.dts"
@@ -28,7 +28,7 @@ if [ ! -f "$CONFIG_DIR/sl3000.config" ]; then
 fi
 echo "✅ 配置文件齐全"
 
-# ========== 准备 ImmortalWrt 源码 ==========
+# 准备 ImmortalWrt 源码
 cd $WORKSPACE
 rm -rf immortalwrt-build
 cp -r $SOURCE_DIR/immortalwrt immortalwrt-build
@@ -52,7 +52,7 @@ else
     echo "✅ passwall2 feed successfully updated"
 fi
 
-# ========== 定义问题包列表（精简版，已排除科学上网相关包）==========
+# ========== 定义问题包列表（精简版） ==========
 PROBLEM_PKGS="
 aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
 pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
@@ -92,14 +92,14 @@ done
 ./scripts/feeds update -i || { echo "❌ feeds update -i failed"; exit 1; }
 make package/symlinks || { echo "❌ make package/symlinks failed"; exit 1; }
 
-# ========== 注册设备树（双路径注入）==========
+# ========== 注册设备树（双路径） ==========
 mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
-cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts $DTS_PATH_OLD/ || { echo "❌ Failed to copy DTS to old path"; exit 1; }
-cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts $DTS_PATH_NEW/ || { echo "❌ Failed to copy DTS to new path"; exit 1; }
+cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts $DTS_PATH_OLD/ || exit 1
+cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts $DTS_PATH_NEW/ || exit 1
 
-# ========== 追加设备定义到 filogic.mk（保留原 eMMC 定义，追加救砖定义）==========
+# ========== 追加设备定义到 filogic.mk ==========
 echo "" >> $FILOGIC_MK
-echo "# SL3000 设备定义（由 diy-part1.sh 注入）" >> $FILOGIC_MK
+echo "# SL3000 eMMC 设备定义（保留，但不启用）" >> $FILOGIC_MK
 echo "define Device/sl_3000-emmc" >> $FILOGIC_MK
 echo "  DEVICE_VENDOR := SL" >> $FILOGIC_MK
 echo "  DEVICE_MODEL := 3000 eMMC (1GB)" >> $FILOGIC_MK
@@ -121,9 +121,8 @@ echo "  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata" >> $FILOGIC_MK
 echo "endef" >> $FILOGIC_MK
 echo "TARGET_DEVICES += sl_3000-emmc" >> $FILOGIC_MK
 
-# 追加救砖设备定义
 echo "" >> $FILOGIC_MK
-echo "# SL3000 SPI-NOR 救砖设备定义（新增）" >> $FILOGIC_MK
+echo "# SL3000 SPI-NOR 救砖设备定义" >> $FILOGIC_MK
 echo "define Device/sl_3000-spi-nor" >> $FILOGIC_MK
 echo "  DEVICE_VENDOR := SL" >> $FILOGIC_MK
 echo "  DEVICE_MODEL := 3000 SPI-NOR (32MB)" >> $FILOGIC_MK
@@ -141,46 +140,32 @@ echo "  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata" >> $FILOGIC_MK
 echo "endef" >> $FILOGIC_MK
 echo "TARGET_DEVICES += sl_3000-spi-nor" >> $FILOGIC_MK
 
-# 验证设备定义是否已注入
+# 验证
 if ! grep -q "sl_3000-spi-nor" $FILOGIC_MK; then
-    echo "❌ 救砖设备定义未成功写入 $FILOGIC_MK"
+    echo "❌ 救砖设备定义未写入"
     exit 1
 fi
 
-# ========== 配置 .config（只启用救砖设备）==========
-cp -v $CONFIG_DIR/sl3000.config .config || { echo "❌ Failed to copy config"; exit 1; }
+# ========== 配置 .config ==========
+cp -v $CONFIG_DIR/sl3000.config .config || exit 1
 
-# 设置基础平台
 echo "CONFIG_TARGET_mediatek=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-
-# 只启用救砖设备，禁用 eMMC 设备
-sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc/d' .config
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
-
-# ========== 生成基础配置 ==========
-make defconfig || { echo "❌ make defconfig failed"; exit 1; }
-
-# 再次确保救砖设备选项存在（defconfig 可能覆盖）
+# 只启用救砖设备
 sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000/d' .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
 
-# ========== 使用 oldconfig 更新配置 ==========
-echo "=== 运行 oldconfig（详细模式）==="
-make -j1 V=s oldconfig 2>&1 | tee oldconfig.log
-if [ ${PIPESTATUS[0]} -ne 0 ]; then
-    echo "❌ oldconfig 失败，错误日志如下（最后50行）："
-    tail -50 oldconfig.log
-    exit 1
-fi
+make defconfig || exit 1
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
 
-# ========== 最终验证设备是否在 .config 中启用 ==========
-echo "=== 验证设备启用状态 ==="
+make oldconfig || exit 1
+sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000/d' .config
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
+
 if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" .config; then
-    echo "❌ 救砖设备 sl_3000-spi-nor 未在 .config 中启用！"
+    echo "❌ 救砖设备未启用"
     exit 1
 fi
 echo "✅ 救砖设备已启用"
 
-# 保存当前构建目录路径，供 part2 使用
 echo $PWD > $WORKSPACE/build-dir.txt
