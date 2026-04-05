@@ -34,25 +34,16 @@ rm -rf immortalwrt-build
 cp -r $SOURCE_DIR/immortalwrt immortalwrt-build
 cd immortalwrt-build
 
-# 修改 feeds 配置：禁用 telephony feed
+# 修改 feeds 配置：禁用 telephony feed，移除 passwall 源
 sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
+sed -i '/passwall/d' feeds.conf.default   # 移除 passwall feeds（救砖不需要）
 
-# 添加 PassWall 系列 feeds（官方新地址）
-echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git" >> feeds.conf.default
-echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git" >> feeds.conf.default
+# 更新 feeds
+./scripts/feeds update -a || exit 1
+./scripts/feeds install -a || exit 1
+make package/symlinks || exit 1
 
-# 更新所有 feeds
-./scripts/feeds update -a || { echo "❌ feeds update failed"; exit 1; }
-
-# 确保 passwall2 feed 被正确拉取
-if [ ! -d "feeds/passwall2" ]; then
-    echo "❌ passwall2 feed failed to download. Please check the repository URL."
-    exit 1
-else
-    echo "✅ passwall2 feed successfully updated"
-fi
-
-# ========== 定义问题包列表（精简版） ==========
+# 删除问题包（防止依赖冲突）
 PROBLEM_PKGS="
 aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
 pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
@@ -64,108 +55,100 @@ python-jsonschema python-jsonschema-specifications python-referencing
 onionshare-cli onionshare weston wpewebkit libextractor python-bcrypt python-cryptography
 python-maturin podman ruby-yaml
 "
-
-# ========== 彻底清除所有已知问题包 ==========
-echo "=== 递归删除所有问题包 ==="
 for pkg in $PROBLEM_PKGS; do
     find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
 done
-
-# 删除整个 video 和 telephony feed
 rm -rf feeds/video feeds/telephony
-
-# 清理 package/feeds 下的符号链接
 rm -rf package/feeds
-
-# 更新 feed 索引
-./scripts/feeds update -i || { echo "❌ feeds update -i failed"; exit 1; }
-
-# 安装 feeds
-./scripts/feeds install -a || { echo "❌ feeds install failed"; exit 1; }
-
-# 再次递归删除（防止依赖重新拉取）
+./scripts/feeds update -i || exit 1
+./scripts/feeds install -a || exit 1
 for pkg in $PROBLEM_PKGS; do
     find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
 done
+./scripts/feeds update -i || exit 1
+make package/symlinks || exit 1
 
-# 再次更新索引并重建符号链接
-./scripts/feeds update -i || { echo "❌ feeds update -i failed"; exit 1; }
-make package/symlinks || { echo "❌ make package/symlinks failed"; exit 1; }
+# ========== 彻底删除无线驱动源码（包括可能从 feeds 拉取的） ==========
+rm -rf package/kernel/mt76
+rm -rf feeds/packages/kernel/mt76
+rm -rf build_dir/target-*/linux-*/mt76-*
 
-# ========== 注册设备树（双路径） ==========
+# 注册设备树
 mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
 cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts $DTS_PATH_OLD/ || exit 1
 cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts $DTS_PATH_NEW/ || exit 1
 
-# ========== 追加设备定义到 filogic.mk ==========
-echo "" >> $FILOGIC_MK
-echo "# SL3000 eMMC 设备定义（保留，但不启用）" >> $FILOGIC_MK
-echo "define Device/sl_3000-emmc" >> $FILOGIC_MK
-echo "  DEVICE_VENDOR := SL" >> $FILOGIC_MK
-echo "  DEVICE_MODEL := 3000 eMMC (1GB)" >> $FILOGIC_MK
-echo "  DEVICE_DTS := mt7981b-sl3000-emmc" >> $FILOGIC_MK
-echo "  DEVICE_DTS_DIR := \$(DTS_DIR)" >> $FILOGIC_MK
-echo "  SUPPORTED_DEVICES := sl,3000-emmc" >> $FILOGIC_MK
-echo "  DEVICE_PACKAGES := \\" >> $FILOGIC_MK
-echo "    kmod-usb3 kmod-usb-storage kmod-usb-storage-uas \\" >> $FILOGIC_MK
-echo "    f2fsck losetup mkf2fs kmod-fs-f2fs kmod-mmc \\" >> $FILOGIC_MK
-echo "    luci-app-ksmbd luci-i18n-ksmbd-zh-cn ksmbd-utils \\" >> $FILOGIC_MK
-echo "    luci-app-passwall2 \\" >> $FILOGIC_MK
-echo "    xray-core chinadns-ng \\" >> $FILOGIC_MK
-echo "    shadowsocks-libev-ss-local shadowsocks-libev-ss-redir shadowsocks-libev-ss-tunnel \\" >> $FILOGIC_MK
-echo "    shadowsocks-rust-sslocal simple-obfs \\" >> $FILOGIC_MK
-echo "    docker-ce docker-compose kmod-br-netfilter kmod-ikconfig kmod-ipt-physdev \\" >> $FILOGIC_MK
-echo "    kmod-nf-ipt6 kmod-nf-ipvs kmod-veth kmod-fs-overlay luci-app-dockerman" >> $FILOGIC_MK
-echo "  IMAGES := sysupgrade.bin" >> $FILOGIC_MK
-echo "  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata" >> $FILOGIC_MK
-echo "endef" >> $FILOGIC_MK
-echo "TARGET_DEVICES += sl_3000-emmc" >> $FILOGIC_MK
+# 注入救砖设备定义（只包含救砖设备）
+mkdir -p "$(dirname "$FILOGIC_MK")"
+touch "$FILOGIC_MK"
+cat >> $FILOGIC_MK << 'EOF'
 
-echo "" >> $FILOGIC_MK
-echo "# SL3000 SPI-NOR 救砖设备定义" >> $FILOGIC_MK
-echo "define Device/sl_3000-spi-nor" >> $FILOGIC_MK
-echo "  DEVICE_VENDOR := SL" >> $FILOGIC_MK
-echo "  DEVICE_MODEL := 3000 SPI-NOR (32MB)" >> $FILOGIC_MK
-echo "  DEVICE_DTS := mt7981b-sl3000-emmc" >> $FILOGIC_MK
-echo "  DEVICE_DTS_DIR := \$(DTS_DIR)" >> $FILOGIC_MK
-echo "  SUPPORTED_DEVICES := sl,3000-spi-nor" >> $FILOGIC_MK
-echo "  DEVICE_PACKAGES := \\" >> $FILOGIC_MK
-echo "    kmod-usb3 kmod-usb-storage \\" >> $FILOGIC_MK
-echo "    block-mount \\" >> $FILOGIC_MK
-echo "    uboot-envtools \\" >> $FILOGIC_MK
-echo "    ttyd" >> $FILOGIC_MK
-echo "  IMAGES := sysupgrade.bin" >> $FILOGIC_MK
-echo "  IMAGE_SIZE := 32768k" >> $FILOGIC_MK
-echo "  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata" >> $FILOGIC_MK
-echo "endef" >> $FILOGIC_MK
-echo "TARGET_DEVICES += sl_3000-spi-nor" >> $FILOGIC_MK
+# SL3000 SPI-NOR 救砖设备定义
+define Device/sl_3000-spi-nor
+  DEVICE_VENDOR := SL
+  DEVICE_MODEL := 3000 SPI-NOR (32MB)
+  DEVICE_DTS := mt7981b-sl3000-emmc
+  DEVICE_DTS_DIR := $(DTS_DIR)
+  SUPPORTED_DEVICES := sl,3000-spi-nor
+  DEVICE_PACKAGES := \
+    block-mount \
+    uboot-envtools
+  IMAGES := sysupgrade.bin
+  IMAGE_SIZE := 25600k
+  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
+endef
+TARGET_DEVICES += sl_3000-spi-nor
+EOF
+echo "✅ 设备定义已注入"
 
-# 验证
-if ! grep -q "sl_3000-spi-nor" $FILOGIC_MK; then
-    echo "❌ 救砖设备定义未写入"
-    exit 1
-fi
-
-# ========== 配置 .config ==========
+# 复制基础配置
 cp -v $CONFIG_DIR/sl3000.config .config || exit 1
 
+# 强制设置平台，只启用救砖设备
+sed -i '/CONFIG_TARGET_mediatek/d' .config
+sed -i '/CONFIG_TARGET_mediatek_filogic/d' .config
 echo "CONFIG_TARGET_mediatek=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-# 只启用救砖设备
 sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000/d' .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
 
+# 强制禁用所有无线驱动（双重保险）
+if [ -f scripts/config ]; then
+    ./scripts/config --disable CONFIG_PACKAGE_kmod-mt7915e
+    ./scripts/config --disable CONFIG_PACKAGE_kmod-mt7915-firmware
+    ./scripts/config --disable CONFIG_PACKAGE_kmod-mt76
+    ./scripts/config --disable CONFIG_MTK_WIFI
+    ./scripts/config --disable CONFIG_MTK_AP
+fi
+sed -i '/CONFIG_PACKAGE_kmod-mt7915e/d' .config
+sed -i '/CONFIG_PACKAGE_kmod-mt7915-firmware/d' .config
+sed -i '/CONFIG_PACKAGE_kmod-mt76/d' .config
+echo "# CONFIG_PACKAGE_kmod-mt7915e is not set" >> .config
+echo "# CONFIG_PACKAGE_kmod-mt7915-firmware is not set" >> .config
+echo "# CONFIG_PACKAGE_kmod-mt76 is not set" >> .config
+
+# 生成基础配置
 make defconfig || exit 1
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
 
-make oldconfig || exit 1
+# 再次确保救砖设备存在
 sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000/d' .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
 
+# 运行 oldconfig
+echo "=== 运行 oldconfig ==="
+make oldconfig || exit 1
+
+# oldconfig 后再次强制写入
+sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000/d' .config
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
+
+# 最终验证
+echo "=== 验证设备启用状态 ==="
 if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" .config; then
-    echo "❌ 救砖设备未启用"
+    echo "❌ 救砖设备未启用！"
     exit 1
 fi
 echo "✅ 救砖设备已启用"
 
+# 保存构建目录
 echo $PWD > $WORKSPACE/build-dir.txt
