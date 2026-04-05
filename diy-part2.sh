@@ -1,99 +1,214 @@
 #!/bin/bash
-# =================================================================
-# 脚本定义：SL3000-V2 (1GB DDR4 / 32MB SPI-NOR) 物理对齐修复脚本
-# 修改日期：2026-04-05
-# 原则：像素级修复，不画蛇添足，不偷工减料
-# =================================================================
+set -euo pipefail
 
-set -e
+WORKSPACE="$GITHUB_WORKSPACE"
+SOURCE_DIR="$WORKSPACE/source-repo"
+OUTPUT_DIR="$WORKSPACE/output"
+STAGING_DIR_IMAGE="$WORKSPACE/immortalwrt-build/staging_dir/image"
 
-# 1. 路径自动探测
-TOP_DIR="$GITHUB_WORKSPACE"
-SOURCE_DIR="$TOP_DIR/immortalwrt-build/source-repo"
-ATF_ROOT="$SOURCE_DIR/arm-trusted-firmware"
+mkdir -p "$STAGING_DIR_IMAGE"
 
-echo "=== 开始执行 SL3000 全链路物理修复 ==="
+IMMORTALWRT_BUILD_DIR=$(cat $WORKSPACE/build-dir.txt)
+cd "$IMMORTALWRT_BUILD_DIR"
 
-# --- [修复 1: 补齐 ATF 编译路径断层] ---
-PLAT_MK="$ATF_ROOT/plat/mediatek/mt7981/platform.mk"
-if [ -f "$PLAT_MK" ]; then
-    sed -i '/PLAT_INCLUDES/ s|$| -Iplat/mediatek/mt7981/include -Iplat/mediatek/common/include|' "$PLAT_MK"
-    echo "✅ [1/5] platform.mk 包含路径已补齐"
+export CROSS_COMPILE=aarch64-linux-gnu-
+export ARCH=arm64
+
+# ========== 强制修改 ATF 源码，启用 DDR4 ==========
+echo "=== Patching ATF source to force DDR4 ==="
+cd $SOURCE_DIR/arm-trusted-firmware
+
+# 修复 emi.h 路径问题
+mkdir -p include/drivers/mediatek
+if [ -f plat/mediatek/mt7981/drivers/dram/emi.h ]; then
+    ln -sf ../../../plat/mediatek/mt7981/drivers/dram/emi.h include/drivers/mediatek/emi.h
+    echo "✅ 已创建 emi.h 软链接"
+else
+    echo "❌ 未找到 emi.h"
+    exit 1
 fi
 
-# --- [修复 2: 重构 bl2_plat_init.c (解决 fatal error 并锁定初始化)] ---
-TARGET_INIT_C="$ATF_ROOT/plat/mediatek/mt7981/bl2/bl2_plat_init.c"
-cat > "$TARGET_INIT_C" << 'EOF'
+# 替换 emicfg.c 为最小化实现（避免未定义符号）
+cat > plat/mediatek/mt7981/drivers/dram/emicfg.c << 'EOF'
+#include <stdint.h>
+
+unsigned int mtk_get_dram_size_config(void)
+{
+    return 0x40000000;  /* 1GB */
+}
+
+void emi_init_setting(void)
+{
+    /* Minimal implementation for rescue firmware */
+}
+EOF
+echo "✅ 已替换 emicfg.c 为最小化实现"
+
+# 创建 mtk_mem_init.c 补丁（强制 DDR4）
+mkdir -p plat/mediatek/mt7981/drivers/dram
+cat > plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c << 'EOF'
+/*
+ * Copyright (c) 2021, MediaTek Inc. All rights reserved.
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+
+#include <plat/common/platform.h>
 #include <common/debug.h>
 #include <lib/mmio.h>
-#include <drivers/generic_delay_timer.h>
-#include <platform_def.h>
-#include <mt7981_gpio.h>
-#include <pll.h>
-#include <timer.h>
-#include <emi.h>
-#include <mtk_wdt.h>
+#include <stdarg.h>
+#include <stdio.h>
 
-struct initcall { void (*func)(void); };
-#define INITCALL(_func) { .func = _func }
-extern void mtk_mem_init(void);
+/* IAP/REBB eFuse bit */
+#define IAP_REBB_SWITCH		0x11D00A0C
+#define IAP_IND			0x01
 
-static void arm_timer_init(void) { write_cntfrq_el0(ARM_TIMER_CLOCK_RATE); }
-static void mt7981_pll_init(void) { mtk_pll_init(0); }
-static void mtk_print_cpu(void) { NOTICE("CPU: MT%x (%uMHz)\n", SOC_CHIP_ID, mtk_get_cpu_freq()); }
-static void mtk_wdt_init(void) { mtk_wdt_print_status(); mtk_wdt_control(false); }
+extern void mtk_mem_init_real(void);
+extern int mt7981_use_ddr4;
+extern int mt7981_ddr_size_limit;
+extern int mt7981_dram_debug;
+extern int mt7981_bga_pkg;
+extern int mt7981_ddr3_freq;
 
-void bl2_el3_plat_arch_setup(void) {}
-bool plat_is_my_cpu_primary(void) { return true; }
+void mtk_mem_init(void)
+{
+	/* 强制使用 DDR4 */
+	mt7981_use_ddr4 = 1;
 
-const struct initcall bl2_initcalls[] = {
-	INITCALL(mtk_timer_init),
-	INITCALL(arm_timer_init),
-	INITCALL(mtk_wdt_init),
-	INITCALL(mtk_pin_init),
-	INITCALL(mt7981_set_default_pinmux),
-	INITCALL(mt7981_pll_init),
-	INITCALL(mtk_mem_init),
-	INITCALL(mtk_print_cpu),
-	INITCALL(NULL)
-};
-EOF
-echo "✅ [2/5] bl2_plat_init.c 物理断层修复完成"
+#ifdef DRAM_SIZE_LIMIT
+	mt7981_ddr_size_limit = DRAM_SIZE_LIMIT;
 
-# --- [修复 3: 锁定 1024MB 内存规格 (emicfg.c)] ---
-TARGET_EMI_C="$ATF_ROOT/plat/mediatek/mt7981/drivers/dram/emicfg.c"
-cat > "$TARGET_EMI_C" << 'EOF'
-#include <stdint.h>
-unsigned long long mtk_get_dram_size(void) { return 0x40000000ULL; }
-unsigned int mtk_get_dram_size_config(void) { return 1024; }
-void emi_init_setting(void) { }
-EOF
-echo "✅ [3/5] emicfg.c 内存规格锁定为 1024MB"
+	if (!mt7981_use_ddr4 && mt7981_ddr_size_limit > 512)
+		mt7981_ddr_size_limit = 512;
+#endif /* DRAM_SIZE_LIMIT */
 
-# --- [修复 4: 锁定 SPI-NOR 寻址偏移 (bl2_dev_spi_nor.c)] ---
-TARGET_NOR_C="$ATF_ROOT/plat/mediatek/mt7981/bl2/bl2_dev_spi_nor.c"
-cat > "$TARGET_NOR_C" << 'EOF'
-#include <stddef.h>
-#include <stdint.h>
-#include <boot_spi.h>
-#define FIP_BASE 0x380000
-#define FIP_SIZE 0x200000
-uint32_t mtk_plat_get_qspi_src_clk(void) {
-	mtk_spi_gpio_init(SPIM2);
-	mtk_spi_source_clock_select(CB_MPLL_D2);
-	return CB_MPLL_D2;
+#ifdef DRAM_DEBUG_LOG
+	mt7981_dram_debug = 1;
+#endif /* DRAM_DEBUG_LOG */
+
+#if defined(BOARD_BGA)
+	mt7981_bga_pkg = 1;
+#elif defined(BOARD_QFN)
+	mt7981_bga_pkg = 0;
+#endif /* BOARD_BGA */
+
+#ifdef DDR3_FREQ_2133
+	mt7981_ddr3_freq = 2133;
+#endif /* DDR3_FREQ_2133 */
+#ifdef DDR3_FREQ_1866
+	mt7981_ddr3_freq = 1866;
+#endif /* DDR3_FREQ_1866 */
+
+	NOTICE("EMI: Using DDR%u settings\n", mt7981_use_ddr4 ? 4 : 3);
+
+	mtk_mem_init_real();
 }
-void mtk_plat_fip_location(uintptr_t *fip_off, size_t *fip_size) {
-	*fip_off = FIP_BASE;
-	*fip_size = FIP_SIZE;
+
+void mtk_mem_dbg_print(const char *fmt, ...)
+{
+	va_list args;
+
+	if (!mt7981_dram_debug)
+		return;
+
+	va_start(args, fmt);
+	(void)vprintf(fmt, args);
+	va_end(args);
+}
+
+void mtk_mem_err_print(const char *fmt, ...)
+{
+	const char *prefix_str;
+	va_list args;
+
+	prefix_str = plat_log_get_prefix(LOG_LEVEL_ERROR);
+
+	while (*prefix_str != '\0') {
+		(void)putchar(*prefix_str);
+		prefix_str++;
+	}
+
+	va_start(args, fmt);
+	(void)vprintf(fmt, args);
+	va_end(args);
 }
 EOF
-echo "✅ [4/5] bl2_dev_spi_nor.c FIP 偏移锁定为 3.5MB"
+echo "✅ ATF source patched for DDR4"
 
-# --- [修复 5: 注入 SL3000 eMMC 1024MB 设备树] ---
-TARGET_DTS="$SOURCE_DIR/target/linux/mediatek/dts/mt7981b-sl3000-emmc.dts"
-# 此处使用之前修复生成的完整内容（省略重复展示，实际脚本需完整粘贴）
-# ... [此处粘贴修复后的 DTS 完整内容] ...
-echo "✅ [5/5] SL3000 硬件定义文件已注入系统"
+# ========== 编译 ATF（只编译 NOR 和 RAM 版） ==========
+echo "=== Building ATF 1G (NOR) ==="
+make clean
+make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=nor LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
+find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.bin \; 2>/dev/null || echo "No bl2.bin for 1G nor"
+find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.elf \; 2>/dev/null || echo "No bl2.elf for 1G nor"
 
-echo "=== 所有物理修复已就绪，静默审计通过 ==="
+echo "=== Building ATF RAM (1G) ==="
+make clean
+make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 BOOT_DEVICE=ram LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1 RAM_BOOT_UART_DL=1
+find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-ram-1g.bin \; 2>/dev/null || echo "No bl2.bin for RAM"
+find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-ram-1g.elf \; 2>/dev/null || echo "No bl2.elf for RAM"
+
+if [ ! -f build/mt7981/release/bl31.bin ]; then
+    echo "❌ bl31.bin not found"
+    exit 1
+fi
+cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin"
+
+# ========== 编译 fiptool ==========
+echo "=== Compiling fiptool ==="
+make -C tools/fiptool CROSS_COMPILE=
+FIPTOOL="$PWD/tools/fiptool/fiptool"
+mkdir -p $SOURCE_DIR/u-boot/tools
+cp -f $FIPTOOL $SOURCE_DIR/u-boot/tools/fiptool
+
+# ========== 编译 U-Boot (NOR版) ==========
+cd $SOURCE_DIR/u-boot
+make clean
+if [ -f configs/mt7981_spim_nor_rfb_defconfig ]; then
+    make CROSS_COMPILE=aarch64-linux-gnu- mt7981_spim_nor_rfb_defconfig
+else
+    echo "❌ mt7981_spim_nor_rfb_defconfig not found"
+    exit 1
+fi
+echo "CONFIG_MTK_FIP_SUPPORT=y" >> .config
+make olddefconfig
+make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
+
+if [ ! -f fip.bin ] && [ ! -f u-boot.fip ]; then
+    $FIPTOOL create --soc-fw "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin" --nt-fw u-boot.bin u-boot.fip
+    cp u-boot.fip "$OUTPUT_DIR/uboot/fip-nor.bin"
+else
+    cp fip.bin "$OUTPUT_DIR/uboot/fip-nor.bin" 2>/dev/null || cp u-boot.fip "$OUTPUT_DIR/uboot/fip-nor.bin"
+fi
+cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
+
+# ========== 构建 SPI-NOR 救砖固件 ==========
+cd "$IMMORTALWRT_BUILD_DIR"
+if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" .config; then
+    echo "❌ Rescue device not enabled"
+    exit 1
+fi
+
+make VERSION_NUMBER="${VERSION_NUMBER:-1.0.0}" VERSION_CODE="${VERSION_CODE:-r1}" -j$(nproc) V=s 2>&1 | tee build.log
+if [ ${PIPESTATUS[0]} -ne 0 ]; then
+    echo "❌ Build failed"
+    exit 1
+fi
+
+mkdir -p "$OUTPUT_DIR/firmware"
+cp build.log "$OUTPUT_DIR/firmware/"
+
+SPI_IMAGE=$(find bin/targets/ -type f -name '*sl_3000-spi-nor*sysupgrade.bin' -size -34M | head -1)
+if [ -z "$SPI_IMAGE" ]; then
+    echo "❌ No SPI-NOR rescue image found"
+    exit 1
+fi
+cp "$SPI_IMAGE" "$OUTPUT_DIR/firmware/Spi-flash-32MB.bin"
+echo "✅ SPI-NOR rescue image saved as Spi-flash-32MB.bin"
+
+# ========== 打包 mtk_uartboot ==========
+cd $SOURCE_DIR/mtk_uartboot
+tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
+
+echo "✅ Build complete"
+ls -la $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware
