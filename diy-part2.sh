@@ -18,18 +18,48 @@ export ARCH=arm64
 echo "=== Patching ATF source to force DDR4 ==="
 cd $SOURCE_DIR/arm-trusted-firmware
 
-# 修复 emi.h 路径问题（将实际文件链接到 include 目录）
+# 修复缺失的头文件路径
 mkdir -p include/drivers/mediatek
+
+# 1. 处理 emi.h（软链接）
 if [ -f plat/mediatek/mt7981/drivers/dram/emi.h ]; then
     ln -sf ../../../plat/mediatek/mt7981/drivers/dram/emi.h include/drivers/mediatek/emi.h
     echo "✅ 已创建 emi.h 软链接"
 else
-    echo "❌ 未找到 plat/mediatek/mt7981/drivers/dram/emi.h"
+    echo "❌ 未找到 emi.h"
     exit 1
 fi
 
-mkdir -p plat/mediatek/mt7981/drivers/dram
+# 2. 处理 emicfg.h（如果不存在则创建占位，并修改 emicfg.c 的 include）
+if [ -f plat/mediatek/mt7981/drivers/dram/emicfg.h ]; then
+    cp plat/mediatek/mt7981/drivers/dram/emicfg.h include/drivers/mediatek/
+    echo "✅ 已复制 emicfg.h 到 include 路径"
+else
+    echo "⚠️ emicfg.h 不存在，创建占位文件"
+    cat > include/drivers/mediatek/emicfg.h << 'EOF'
+#ifndef EMICFG_H
+#define EMICFG_H
 
+#include <stdint.h>
+
+/* Placeholder for emicfg.h */
+void emicfg_init(void);
+
+#endif /* EMICFG_H */
+EOF
+fi
+
+# 修改 emicfg.c 中的 include 语句
+if [ -f plat/mediatek/mt7981/drivers/dram/emicfg.c ]; then
+    sed -i 's/#include "emicfg.h"/#include <drivers\/mediatek\/emicfg.h>/' plat/mediatek/mt7981/drivers/dram/emicfg.c
+    echo "✅ 已修复 emicfg.c 中的头文件引用"
+else
+    echo "❌ 未找到 emicfg.c"
+    exit 1
+fi
+
+# 3. 创建 mtk_mem_init.c 补丁（强制 DDR4）
+mkdir -p plat/mediatek/mt7981/drivers/dram
 cat > plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c << 'EOF'
 /*
  * Copyright (c) 2021, MediaTek Inc. All rights reserved.
