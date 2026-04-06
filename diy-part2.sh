@@ -64,13 +64,13 @@ else
 fi
 cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
 
-# ========== 编译 ImmortalWrt 固件（同时生成 eMMC 和救砖） ==========
+# ========== 编译 ImmortalWrt 固件 ==========
 cd "$IMMORTALWRT_BUILD_DIR"
 echo "=== Building ImmortalWrt Firmware ==="
 
 make VERSION_NUMBER="${VERSION_NUMBER:-1.0.0}" VERSION_CODE="${VERSION_CODE:-r1}" -j$(nproc) V=s 2>&1 | tee build.log
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
-    echo "❌ Firmware build failed! Last 100 lines:"
+    echo "❌ Build failed"
     tail -100 build.log
     exit 1
 fi
@@ -78,35 +78,16 @@ fi
 mkdir -p "$OUTPUT_DIR/firmware"
 cp build.log "$OUTPUT_DIR/firmware/"
 
-# 列出所有 sysupgrade 文件（调试）
-echo "=== All sysupgrade.bin files ==="
-find bin/targets/ -type f -name '*sysupgrade.bin' -exec ls -lh {} \;
+# 复制所有 sysupgrade 文件（根据实际设备，救砖构建只会生成一个小的）
+find bin/targets/ -type f -name '*sysupgrade.bin' -exec cp -v {} "$OUTPUT_DIR/firmware/" \;
 
-# 复制 eMMC sysupgrade 固件（如果存在）
-EMMC_SYSUPGRADE=$(find bin/targets/ -type f -name '*mt7981_sl3000_emmc*sysupgrade.bin' | head -1)
-if [ -n "$EMMC_SYSUPGRADE" ]; then
-    cp -v "$EMMC_SYSUPGRADE" "$OUTPUT_DIR/firmware/"
-    echo "✅ eMMC sysupgrade firmware copied"
-else
-    echo "⚠️ No eMMC sysupgrade firmware found"
-fi
-
-# 复制 SPI-NOR 救砖镜像并重命名
-SPI_IMAGE=$(find bin/targets/ -type f -name '*sl_3000-spi-nor*sysupgrade.bin' -size -34M | head -1)
-if [ -z "$SPI_IMAGE" ]; then
-    # 尝试模糊匹配
-    SPI_IMAGE=$(find bin/targets/ -type f -name '*spi-nor*.bin' -size -34M | head -1)
-fi
-if [ -z "$SPI_IMAGE" ]; then
-    # 最后尝试：取最小的 sysupgrade.bin（通常救砖镜像最小）
-    SPI_IMAGE=$(find bin/targets/ -type f -name '*sysupgrade.bin' -exec ls -lS {} \; | tail -1 | awk '{print $NF}')
-fi
-
-if [ -n "$SPI_IMAGE" ]; then
-    cp -v "$SPI_IMAGE" "$OUTPUT_DIR/firmware/Spi-flash-32MB.bin"
-    echo "✅ SPI-NOR rescue image saved as Spi-flash-32MB.bin"
-else
-    echo "⚠️ No SPI-NOR rescue image found"
+# 如果是救砖构建，额外重命名
+if grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" .config; then
+    SMALL_IMAGE=$(find "$OUTPUT_DIR/firmware/" -name '*.bin' -size -30M | head -1)
+    if [ -n "$SMALL_IMAGE" ]; then
+        mv -v "$SMALL_IMAGE" "$OUTPUT_DIR/firmware/Spi-flash-32MB.bin"
+        echo "✅ Renamed rescue image to Spi-flash-32MB.bin"
+    fi
 fi
 
 # ========== 打包 mtk_uartboot ==========
