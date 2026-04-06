@@ -39,7 +39,8 @@ CONFIG_CMD_PCI=y
 CONFIG_CMD_SF_TEST=y
 CONFIG_CMD_PING=y
 CONFIG_MTDIDS_DEFAULT="nor0=nor0"
-CONFIG_MTDPARTS_DEFAULT="nor0:256k(bl2),64k(u-boot-env),704k(factory),512k(fip),-(firmware)"
+# 修正：bl2 分区大小改为 1MB (与 DTS 中 BL2 分区 0x100000 对齐)
+CONFIG_MTDPARTS_DEFAULT="nor0:1M(bl2),64k(u-boot-env),704k(factory),512k(fip),-(firmware)"
 CONFIG_ENV_OVERWRITE=y
 CONFIG_ENV_IS_IN_MTD=y
 CONFIG_ENV_MTD_NAME="u-boot-env"
