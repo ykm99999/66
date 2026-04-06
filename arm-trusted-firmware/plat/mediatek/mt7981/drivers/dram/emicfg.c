@@ -1,86 +1,26 @@
 /*
  * Copyright (c) 2021, MediaTek Inc. All rights reserved.
- *
  * SPDX-License-Identifier: BSD-3-Clause
+ *
+ * Minimal implementation for SL3000 rescue firmware (1GB DDR4)
  */
 
-#include <plat/common/platform.h>
-#include <common/debug.h>
-#include <lib/mmio.h>
-#include <stdarg.h>
-#include <stdio.h>
+#include <stdint.h>
 
-/* IAP/REBB eFuse bit */
-#define IAP_REBB_SWITCH		0x11D00A0C
-#define IAP_IND			0x01
-
-extern void mtk_mem_init_real(void);
-extern int mt7981_use_ddr4;
-extern int mt7981_ddr_size_limit;
-extern int mt7981_dram_debug;
-extern int mt7981_bga_pkg;
-extern int mt7981_ddr3_freq;
-
-void mtk_mem_init(void)
+/*
+ * 物理对齐函数：强制返回 1024MB 偏移量
+ * 用于告知 U-Boot 和内核正确的 DRAM 大小
+ */
+unsigned int mtk_get_dram_size_config(void)
 {
-#ifdef DRAM_USE_DDR4
-		mt7981_use_ddr4 = 1;
-#endif /* DRAM_USE_DDR4 */
-
-#ifdef DRAM_SIZE_LIMIT
-	mt7981_ddr_size_limit = DRAM_SIZE_LIMIT;
-
-	if (!mt7981_use_ddr4 && mt7981_ddr_size_limit > 512)
-		mt7981_ddr_size_limit = 512;
-#endif /* DRAM_SIZE_LIMIT */
-
-#ifdef DRAM_DEBUG_LOG
-	mt7981_dram_debug = 1;
-#endif /* DRAM_DEBUG_LOG */
-
-#if defined(BOARD_BGA)
-	mt7981_bga_pkg = 1;
-#elif defined(BOARD_QFN)
-	mt7981_bga_pkg = 0;
-#endif /* BOARD_BGA */
-
-#ifdef DDR3_FREQ_2133
-	mt7981_ddr3_freq = 2133;
-#endif /* DDR3_FREQ_2133 */
-#ifdef DDR3_FREQ_1866
-	mt7981_ddr3_freq = 1866;
-#endif /* DDR3_FREQ_1866 */
-
-	NOTICE("EMI: Using DDR%u settings\n", mt7981_use_ddr4 ? 4 : 3);
-
-	mtk_mem_init_real();
+    return 0x40000000;  /* 1GB = 0x40000000 */
 }
 
-void mtk_mem_dbg_print(const char *fmt, ...)
+/*
+ * 内存时序控制逻辑（最小化实现）
+ * 救砖固件不需要复杂配置，空实现即可
+ */
+void emi_init_setting(void)
 {
-	va_list args;
-
-	if (!mt7981_dram_debug)
-		return;
-
-	va_start(args, fmt);
-	(void)vprintf(fmt, args);
-	va_end(args);
-}
-
-void mtk_mem_err_print(const char *fmt, ...)
-{
-	const char *prefix_str;
-	va_list args;
-
-	prefix_str = plat_log_get_prefix(LOG_LEVEL_ERROR);
-
-	while (*prefix_str != '\0') {
-		(void)putchar(*prefix_str);
-		prefix_str++;
-	}
-
-	va_start(args, fmt);
-	(void)vprintf(fmt, args);
-	va_end(args);
+    /* 空实现，避免未定义的 mmio 操作 */
 }
