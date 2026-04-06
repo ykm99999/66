@@ -24,3 +24,11 @@ void emi_init_setting(void)
 {
     /* 空实现，避免未定义的 mmio 操作 */
 }
+
+/*
+ * 必须提供 mtk_mem_init 函数，因为 bl2_plat_init.c 中的 initcall 数组会调用它
+ */
+void mtk_mem_init(void)
+{
+    /* 空实现，满足链接要求 */
+}
