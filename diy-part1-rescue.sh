@@ -30,16 +30,15 @@ rm -rf immortalwrt-build
 cp -r $SOURCE_DIR/immortalwrt immortalwrt-build
 cd immortalwrt-build
 
-# 修改 feeds 配置（禁用 telephony，不添加 passwall 以节省时间）
+# 修改 feeds 配置（禁用 telephony，不添加 passwall）
 sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
-# 不添加 passwall feeds（救砖不需要）
 
 # 更新 feeds
 ./scripts/feeds update -a || exit 1
 ./scripts/feeds install -a || exit 1
 make package/symlinks || exit 1
 
-# 删除问题包
+# 删除问题包（不影响救砖）
 PROBLEM_PKGS="
 aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
 pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
@@ -64,7 +63,7 @@ done
 ./scripts/feeds update -i || exit 1
 make package/symlinks || exit 1
 
-# 删除 mt76 无线驱动（救砖不需要，避免编译错误）
+# 删除 mt76 无线驱动（救砖不需要）
 if [ -d package/kernel/mt76 ]; then
     rm -rf package/kernel/mt76
     echo "✅ 已删除 mt76"
