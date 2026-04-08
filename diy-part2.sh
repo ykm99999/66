@@ -14,15 +14,17 @@ cd "$IMMORTALWRT_BUILD_DIR"
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# ========== 新路径定义（指向 hanwckf 源码子目录） ==========
-ATF_DIR="$SOURCE_DIR/bl-mt798x/atf-20250711"
+# ========== 路径定义 ==========
+# ATF 使用原有源码（已能编译）
+ATF_DIR="$SOURCE_DIR/arm-trusted-firmware"
+# U-Boot 使用 hanwckf 源码
 UBOOT_DIR="$SOURCE_DIR/bl-mt798x/uboot-mtk-20250711"
 
-# ========== 编译 ATF (hanwckf，仅 NOR 版) ==========
-echo "=== Building ATF from hanwckf source (NOR) ==="
+# ========== 编译 ATF（原有源码，NOR 版） ==========
+echo "=== Building ATF (NOR) from original source ==="
 cd $ATF_DIR
 make clean
-make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 BOOT_DEVICE=nor LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
+make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=nor LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
 find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.bin \; 2>/dev/null || echo "No bl2.bin for 1G nor"
 find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.elf \; 2>/dev/null || echo "No bl2.elf for 1G nor"
 
