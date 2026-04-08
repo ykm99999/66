@@ -78,17 +78,33 @@ fi
 mkdir -p "$OUTPUT_DIR/firmware"
 cp build.log "$OUTPUT_DIR/firmware/"
 
-# 复制所有 sysupgrade 文件（根据实际设备，救砖构建只会生成一个小的）
-find bin/targets/ -type f -name '*sysupgrade.bin' -exec cp -v {} "$OUTPUT_DIR/firmware/" \;
-
-# 如果是救砖构建，额外重命名
-if grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" .config; then
-    SMALL_IMAGE=$(find "$OUTPUT_DIR/firmware/" -name '*.bin' -size -30M | head -1)
-    if [ -n "$SMALL_IMAGE" ]; then
-        mv -v "$SMALL_IMAGE" "$OUTPUT_DIR/firmware/Spi-flash-32MB.bin"
-        echo "✅ Renamed rescue image to Spi-flash-32MB.bin"
-    fi
+# 复制救砖镜像（重命名为 Spi-flash-32MB.bin）
+SPI_IMAGE=$(find bin/targets/ -type f -name '*sl_3000-spi-nor*sysupgrade.bin' -size -34M | head -1)
+if [ -z "$SPI_IMAGE" ]; then
+    echo "❌ No SPI-NOR rescue image found"
+    exit 1
 fi
+cp -v "$SPI_IMAGE" "$OUTPUT_DIR/firmware/Spi-flash-32MB.bin"
+echo "✅ SPI-NOR rescue image saved as Spi-flash-32MB.bin"
+
+# ========== 生成完整的 32MB SPI‑NOR 镜像（包含 BL2、FIP、firmware） ==========
+echo "=== Creating full 32MB SPI‑NOR image ==="
+FULL_IMAGE="$OUTPUT_DIR/firmware/SL3000-full-spi-nor-32mb.bin"
+
+# 创建 32MB 全 0xFF 文件
+dd if=/dev/zero bs=1M count=32 | tr '\000' '\377' > "$FULL_IMAGE"
+
+# 写入 BL2（偏移 0）
+dd if="$OUTPUT_DIR/atf/bl2-1g-nor.bin" of="$FULL_IMAGE" conv=notrunc
+
+# 写入 FIP（偏移 0x380000）
+dd if="$OUTPUT_DIR/uboot/fip-nor.bin" of="$FULL_IMAGE" seek=$((0x380000)) bs=1 conv=notrunc
+
+# 写入 firmware（偏移 0x580000）
+dd if="$OUTPUT_DIR/firmware/Spi-flash-32MB.bin" of="$FULL_IMAGE" seek=$((0x580000)) bs=1 conv=notrunc
+
+echo "✅ Full 32MB SPI‑NOR image created: $FULL_IMAGE"
+ls -lh "$FULL_IMAGE"
 
 # ========== 打包 mtk_uartboot ==========
 cd $SOURCE_DIR/mtk_uartboot
