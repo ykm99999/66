@@ -1,4 +1,4 @@
-name: SL3000 Separate Build (Rescue + eMMC)
+name: SL3000 Rescue Build (Only SPI‑NOR)
 
 on:
   workflow_dispatch:
@@ -17,7 +17,7 @@ jobs:
           ref: main
           path: main-repo
 
-      - name: Checkout source branch
+      - name: Checkout source branch (contains hanwckf bl-mt798x)
         uses: actions/checkout@v4
         with:
           repository: ykm99999/66
@@ -45,11 +45,11 @@ jobs:
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
           df -h
 
-      - name: Run diy-part1-rescue.sh
+      - name: Run diy-part1.sh
         run: |
-          chmod +x main-repo/diy-part1-rescue.sh
+          chmod +x main-repo/diy-part1.sh
           cd main-repo
-          ./diy-part1-rescue.sh
+          ./diy-part1.sh
 
       - name: Run diy-part2.sh
         run: |
@@ -62,110 +62,30 @@ jobs:
           echo "=== Rescue build output ==="
           ls -la output/atf/ output/uboot/ output/firmware/ || true
 
-      - name: Create Rescue Release
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release_tag.outputs.tag_name }}
           name: "SL3000 Rescue Firmware ${{ steps.release_tag.outputs.tag_name }}"
           body: |
             ## 救砖全家桶（SPI‑NOR 32MB）
-            - 镜像大小: ~10.65 MB
-            - 包含 ATF, U-Boot, mtk_uartboot
+            - 包含完整镜像 `SL3000-full-spi-nor-32mb.bin`（可直接烧录到 0x0）
+            - 单独文件：`bl2-1g-nor.bin`、`fip-nor.bin`、`Spi-flash-32MB.bin`
+            - 工具包：`mtk_uartboot.tar.gz`
           files: |
             output/atf/*.bin
             output/atf/*.elf
             output/uboot/*.bin
             output/firmware/Spi-flash-32MB.bin
+            output/firmware/SL3000-full-spi-nor-32mb.bin
             output/mtk_uartboot.tar.gz
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload rescue artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: sl3000-rescue-${{ steps.release_tag.outputs.tag_name }}
-          path: output/
-
-  build-emmc:
-    runs-on: ubuntu-22.04
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-    steps:
-      - name: Checkout main branch
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          path: main-repo
-
-      - name: Checkout source branch
-        uses: actions/checkout@v4
-        with:
-          repository: ykm99999/66
-          ref: sl3000-full-sync
-          path: source-repo
-
-      - name: Generate release tag
-        id: release_tag
-        run: |
-          TAG_NAME="v$(date -u +'%Y%m%d-%H%M%S')-emmc"
-          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
-          echo "Release tag: $TAG_NAME"
-
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y build-essential clang flex bison gawk \
-            gettext git libncurses-dev libssl-dev \
-            python3-distutils python3-setuptools rsync unzip zlib1g-dev file wget \
-            gcc-aarch64-linux-gnu device-tree-compiler
-
-      - name: Optimize disk space
-        run: |
-          sudo apt clean
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
-          df -h
-
-      - name: Run diy-part1-emmc.sh
-        run: |
-          chmod +x main-repo/diy-part1-emmc.sh
-          cd main-repo
-          ./diy-part1-emmc.sh
-
-      - name: Run diy-part2.sh
-        run: |
-          chmod +x main-repo/diy-part2.sh
-          cd main-repo
-          ./diy-part2.sh
-
-      - name: List firmware files
-        run: |
-          echo "=== eMMC build output ==="
-          ls -la output/atf/ output/uboot/ output/firmware/ || true
-
-      - name: Create eMMC Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.release_tag.outputs.tag_name }}
-          name: "SL3000 eMMC Firmware ${{ steps.release_tag.outputs.tag_name }}"
-          body: |
-            ## eMMC 升级固件（完整版）
-            - 包含科学上网、Docker、LuCI 等
-            - 大小: ~118 MB
-          files: |
-            output/atf/*.bin
-            output/atf/*.elf
-            output/uboot/*.bin
-            output/firmware/*.bin
-            output/mtk_uartboot.tar.gz
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload eMMC artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: sl3000-emmc-${{ steps.release_tag.outputs.tag_name }}
           path: output/
