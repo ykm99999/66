@@ -14,20 +14,17 @@ cd "$IMMORTALWRT_BUILD_DIR"
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# ========== 编译 ATF（NOR 和 RAM 版） ==========
-cd $SOURCE_DIR/arm-trusted-firmware
+# ========== 新路径定义（指向 hanwckf 源码子目录） ==========
+ATF_DIR="$SOURCE_DIR/bl-mt798x/atf-20250711"
+UBOOT_DIR="$SOURCE_DIR/bl-mt798x/uboot-mtk-20250711"
 
-echo "=== Building ATF 1G (NOR) ==="
+# ========== 编译 ATF (hanwckf，仅 NOR 版) ==========
+echo "=== Building ATF from hanwckf source (NOR) ==="
+cd $ATF_DIR
 make clean
-make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=nor LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
+make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 BOOT_DEVICE=nor LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
 find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.bin \; 2>/dev/null || echo "No bl2.bin for 1G nor"
 find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.elf \; 2>/dev/null || echo "No bl2.elf for 1G nor"
-
-echo "=== Building ATF RAM (1G) ==="
-make clean
-make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 BOOT_DEVICE=ram LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1 RAM_BOOT_UART_DL=1
-find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-ram-1g.bin \; 2>/dev/null || echo "No bl2.bin for RAM"
-find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-ram-1g.elf \; 2>/dev/null || echo "No bl2.elf for RAM"
 
 if [ ! -f build/mt7981/release/bl31.bin ]; then
     echo "❌ bl31.bin not found"
@@ -39,19 +36,24 @@ cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin
 echo "=== Compiling fiptool ==="
 make -C tools/fiptool CROSS_COMPILE=
 FIPTOOL="$PWD/tools/fiptool/fiptool"
-mkdir -p $SOURCE_DIR/u-boot/tools
-cp -f $FIPTOOL $SOURCE_DIR/u-boot/tools/fiptool
+mkdir -p $UBOOT_DIR/tools
+cp -f $FIPTOOL $UBOOT_DIR/tools/fiptool
 
-# ========== 编译 U-Boot (NOR版) ==========
-cd $SOURCE_DIR/u-boot
-echo "=== Building U-Boot (NOR) ==="
+# ========== 编译 U-Boot (hanwckf，NOR 版) ==========
+cd $UBOOT_DIR
+echo "=== Building U-Boot from hanwckf source (NOR) ==="
 make clean
-if [ -f configs/mt7981_spim_nor_rfb_defconfig ]; then
+
+# 自动选择 SPI-NOR 的 defconfig
+if [ -f configs/mt7981b_nor_defconfig ]; then
+    make CROSS_COMPILE=aarch64-linux-gnu- mt7981b_nor_defconfig
+elif [ -f configs/mt7981_spim_nor_rfb_defconfig ]; then
     make CROSS_COMPILE=aarch64-linux-gnu- mt7981_spim_nor_rfb_defconfig
 else
-    echo "❌ mt7981_spim_nor_rfb_defconfig not found"
+    echo "❌ No suitable defconfig found for SPI-NOR!"
     exit 1
 fi
+
 echo "CONFIG_MTK_FIP_SUPPORT=y" >> .config
 make olddefconfig
 make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
@@ -64,13 +66,18 @@ else
 fi
 cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
 
-# ========== 编译 ImmortalWrt 固件 ==========
+# ========== 构建 ImmortalWrt 救砖固件 ==========
 cd "$IMMORTALWRT_BUILD_DIR"
-echo "=== Building ImmortalWrt Firmware ==="
+echo "=== Building ImmortalWrt Rescue Firmware ==="
+
+if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" .config; then
+    echo "❌ Rescue device not enabled in .config"
+    exit 1
+fi
 
 make VERSION_NUMBER="${VERSION_NUMBER:-1.0.0}" VERSION_CODE="${VERSION_CODE:-r1}" -j$(nproc) V=s 2>&1 | tee build.log
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
-    echo "❌ Build failed"
+    echo "❌ Firmware build failed! Last 100 lines:"
     tail -100 build.log
     exit 1
 fi
@@ -78,7 +85,7 @@ fi
 mkdir -p "$OUTPUT_DIR/firmware"
 cp build.log "$OUTPUT_DIR/firmware/"
 
-# 复制救砖镜像（重命名为 Spi-flash-32MB.bin）
+# 复制 SPI‑NOR 救砖镜像
 SPI_IMAGE=$(find bin/targets/ -type f -name '*sl_3000-spi-nor*sysupgrade.bin' -size -34M | head -1)
 if [ -z "$SPI_IMAGE" ]; then
     echo "❌ No SPI-NOR rescue image found"
@@ -91,16 +98,9 @@ echo "✅ SPI-NOR rescue image saved as Spi-flash-32MB.bin"
 echo "=== Creating full 32MB SPI‑NOR image ==="
 FULL_IMAGE="$OUTPUT_DIR/firmware/SL3000-full-spi-nor-32mb.bin"
 
-# 创建 32MB 全 0xFF 文件
 dd if=/dev/zero bs=1M count=32 | tr '\000' '\377' > "$FULL_IMAGE"
-
-# 写入 BL2（偏移 0）
 dd if="$OUTPUT_DIR/atf/bl2-1g-nor.bin" of="$FULL_IMAGE" conv=notrunc
-
-# 写入 FIP（偏移 0x380000）
 dd if="$OUTPUT_DIR/uboot/fip-nor.bin" of="$FULL_IMAGE" seek=$((0x380000)) bs=1 conv=notrunc
-
-# 写入 firmware（偏移 0x580000）
 dd if="$OUTPUT_DIR/firmware/Spi-flash-32MB.bin" of="$FULL_IMAGE" seek=$((0x580000)) bs=1 conv=notrunc
 
 echo "✅ Full 32MB SPI‑NOR image created: $FULL_IMAGE"
