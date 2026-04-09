@@ -9,42 +9,22 @@ jobs:
   build-rescue:
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout main branch (scripts & configs)
+      - name: Checkout own repository (contains all source code)
         uses: actions/checkout@v4
         with:
-          ref: main
           path: main-repo
 
-      # 从聚合分支获取 ImmortalWrt 和 mtk_uartboot
-      - name: Checkout ImmortalWrt and mtk_uartboot from aggregate branch
-        uses: actions/checkout@v4
-        with:
-          repository: ykm99999/66
-          ref: sl3000-full-sync
-          path: source-repo/aggregate
-      - name: Move ImmortalWrt and mtk_uartboot to correct paths
+      - name: Prepare source-repo (symlink to directories inside main-repo)
         run: |
-          mv source-repo/aggregate/immortalwrt source-repo/
-          mv source-repo/aggregate/mtk_uartboot source-repo/ 2>/dev/null || true
-          rm -rf source-repo/aggregate
+          mkdir -p source-repo
+          # 将主仓库中的源码目录软链接到 source-repo 下（脚本期望的位置）
+          ln -sf $PWD/main-repo/arm-trusted-firmware source-repo/
+          ln -sf $PWD/main-repo/u-boot source-repo/
+          ln -sf $PWD/main-repo/immortalwrt source-repo/
+          ln -sf $PWD/main-repo/mtk_uartboot source-repo/
+          # 如果有其他需要的目录，也添加
+          ls -la source-repo/
 
-      # 官方 ATF
-      - name: Checkout ATF (official)
-        uses: actions/checkout@v4
-        with:
-          repository: mtk-openwrt/arm-trusted-firmware
-          ref: mtksoc-20260123
-          path: source-repo/arm-trusted-firmware
-
-      # 官方 U-Boot
-      - name: Checkout U-Boot (official)
-        uses: actions/checkout@v4
-        with:
-          repository: mtk-openwrt/u-boot
-          ref: mtksoc-20250711
-          path: source-repo/u-boot
-
-      # 安装依赖（完整保留原工作流中的依赖）
       - name: Install dependencies
         run: |
           sudo apt update
@@ -53,7 +33,6 @@ jobs:
             python3-distutils python3-setuptools rsync unzip zlib1g-dev file wget \
             gcc-aarch64-linux-gnu device-tree-compiler
 
-      # 运行脚本
       - name: Run diy-part1.sh
         run: |
           chmod +x main-repo/diy-part1.sh
@@ -88,7 +67,6 @@ jobs:
             - 完整镜像 `SL3000-full-spi-nor-32mb.bin`（可直接烧录到 SPI-NOR）
             - 单独文件：`bl2-1g-nor.bin`、`fip-nor.bin`、`Spi-flash-32MB.bin`
             - 工具包：`mtk_uartboot.tar.gz`
-            - 基于官方 ATF (mtksoc-20260123) 和 U-Boot (mtksoc-20250711) 构建
           files: |
             output/atf/*.bin
             output/atf/*.elf
