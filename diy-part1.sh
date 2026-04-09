@@ -89,7 +89,13 @@ echo "✅ 设备定义文件已复制"
 # 复制救砖配置
 cp -v $CONFIG_DIR/sl3000-rescue.config .config || exit 1
 
-# 强制设置平台，只启用救砖设备（使用追加方式，避免重复）
+# 强制设置平台，只启用救砖设备
+# 先删除已有的冲突配置
+sed -i '/CONFIG_TARGET_mediatek/d' .config
+sed -i '/CONFIG_TARGET_mediatek_filogic/d' .config
+sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_/d' .config
+
+# 添加正确配置
 cat >> .config << 'EOF'
 CONFIG_TARGET_mediatek=y
 CONFIG_TARGET_mediatek_filogic=y
@@ -98,7 +104,15 @@ EOF
 
 # 生成配置
 make defconfig || exit 1
-# 确保目标设备未被意外覆盖
+
+# 再次确保设备被选中（防止 defconfig 丢弃）
+if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_spi_rescue=y" .config; then
+    echo "⚠️  Device not enabled, forcing..."
+    echo "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_spi_rescue=y" >> .config
+    make oldconfig
+fi
+
+# 最终验证
 if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_spi_rescue=y" .config; then
     echo "❌ 救砖设备未启用！"
     exit 1
