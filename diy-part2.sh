@@ -19,8 +19,8 @@ export ARCH=arm64
 ATF_DIR="$SOURCE_DIR/arm-trusted-firmware"
 UBOOT_DIR="$SOURCE_DIR/u-boot"
 
-# ========== 编译 ATF（官方源，NOR 版） ==========
-echo "=== Building ATF (official, NOR) ==="
+# ========== 编译 ATF ==========
+echo "=== Building ATF (NOR) ==="
 cd $ATF_DIR
 make clean
 make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 BOOT_DEVICE=nor LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4
@@ -30,11 +30,6 @@ if [ ! -f build/mt7981/release/bl2.bin ]; then
     exit 1
 fi
 cp -v build/mt7981/release/bl2.bin "$OUTPUT_DIR/atf/bl2-1g-nor.bin"
-
-if [ ! -f build/mt7981/release/bl31.bin ]; then
-    echo "❌ bl31.bin not found"
-    exit 1
-fi
 cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin"
 
 # ========== 编译 fiptool ==========
@@ -49,22 +44,39 @@ mkdir -p $UBOOT_DIR/tools
 cp -f $FIPTOOL $UBOOT_DIR/tools/fiptool
 echo "✅ fiptool compiled"
 
-# ========== 准备 U-Boot：复制自定义设备树 ==========
+# ========== 准备 U-Boot：复制设备树并修正 defconfig ==========
 cd $UBOOT_DIR
 echo "=== Copying custom device tree to U-Boot ==="
-cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts arch/arm/dts/
+# 确保目标目录存在
+mkdir -p arch/arm/dts
+# 复制 DTS 文件（如果源文件不存在则报错）
+if [ ! -f "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" ]; then
+    echo "❌ DTS file not found: $CONFIG_DIR/mt7981b-sl3000-emmc.dts"
+    exit 1
+fi
+cp -v "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" arch/arm/dts/
 
-# ========== 编译 U-Boot ==========
-echo "=== Building U-Boot (custom defconfig) ==="
-make clean
-
-if [ -f configs/mt7981_nor_emmc_rfb_defconfig ]; then
-    make CROSS_COMPILE=aarch64-linux-gnu- mt7981_nor_emmc_rfb_defconfig
-else
-    echo "❌ mt7981_nor_emmc_rfb_defconfig not found"
+# 检查 defconfig 并修改设备树名称
+DEFCONFIG="configs/mt7981_nor_emmc_rfb_defconfig"
+if [ ! -f "$DEFCONFIG" ]; then
+    echo "❌ Defconfig not found: $DEFCONFIG"
     exit 1
 fi
 
+# 备份原 defconfig
+cp "$DEFCONFIG" "$DEFCONFIG.bak"
+# 将设备树名称改为 mt7981b-sl3000-emmc
+sed -i 's/CONFIG_DEFAULT_DEVICE_TREE=".*"/CONFIG_DEFAULT_DEVICE_TREE="mt7981b-sl3000-emmc"/' "$DEFCONFIG"
+sed -i 's/CONFIG_DEFAULT_FDT_FILE=".*"/CONFIG_DEFAULT_FDT_FILE="mt7981b-sl3000-emmc"/' "$DEFCONFIG"
+# 确保分区表与 DTS 一致（可选，已在上次修复）
+# 显示修改后的内容供调试
+grep "CONFIG_DEFAULT_DEVICE_TREE" "$DEFCONFIG"
+grep "CONFIG_DEFAULT_FDT_FILE" "$DEFCONFIG"
+
+# ========== 编译 U-Boot ==========
+echo "=== Building U-Boot ==="
+make clean
+make CROSS_COMPILE=aarch64-linux-gnu- mt7981_nor_emmc_rfb_defconfig
 echo "CONFIG_MTK_FIP_SUPPORT=y" >> .config
 make olddefconfig
 make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
@@ -125,22 +137,11 @@ prepare_partition() {
     fi
 }
 
-if [ ! -f "$OUTPUT_DIR/atf/bl2-1g-nor.bin" ]; then
-    echo "❌ bl2-1g-nor.bin missing"
-    exit 1
-fi
 cp "$OUTPUT_DIR/atf/bl2-1g-nor.bin" "$OUTPUT_DIR/atf/BL2.bin"
-
 prepare_partition "u-boot-env" 65536
 prepare_partition "Config" 458752
 prepare_partition "Factory" 2097152
-
-if [ ! -f "$OUTPUT_DIR/uboot/fip-nor.bin" ]; then
-    echo "❌ fip-nor.bin missing"
-    exit 1
-fi
 cp "$OUTPUT_DIR/uboot/fip-nor.bin" "$OUTPUT_DIR/atf/FIP.bin"
-
 cp "$OUTPUT_DIR/firmware/Spi-flash-32MB.bin" "$OUTPUT_DIR/atf/firmware.bin"
 prepare_partition "Product" 131072
 prepare_partition "Custom" 1441792
