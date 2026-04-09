@@ -30,7 +30,6 @@ if [ ! -f build/mt7981/release/bl2.bin ]; then
 fi
 cp -v build/mt7981/release/bl2.bin "$OUTPUT_DIR/atf/bl2-1g-nor.bin"
 # bl2.elf 不是必须的，忽略
-# cp -v build/mt7981/release/bl2.elf "$OUTPUT_DIR/atf/bl2-1g-nor.elf" || true
 
 if [ ! -f build/mt7981/release/bl31.bin ]; then
     echo "❌ bl31.bin not found"
@@ -38,12 +37,17 @@ if [ ! -f build/mt7981/release/bl31.bin ]; then
 fi
 cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin"
 
-# ========== 编译 fiptool ==========
+# ========== 编译 fiptool（修复路径问题） ==========
 echo "=== Compiling fiptool ==="
-make -C tools/fiptool CROSS_COMPILE=
+make fiptool CROSS_COMPILE=
 FIPTOOL="$PWD/tools/fiptool/fiptool"
+if [ ! -f "$FIPTOOL" ]; then
+    echo "❌ fiptool not generated"
+    exit 1
+fi
 mkdir -p $UBOOT_DIR/tools
 cp -f $FIPTOOL $UBOOT_DIR/tools/fiptool
+echo "✅ fiptool compiled"
 
 # ========== 编译 U-Boot（使用修改后的 mt7981_nor_emmc_rfb_defconfig） ==========
 cd $UBOOT_DIR
