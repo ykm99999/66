@@ -18,8 +18,8 @@ export ARCH=arm64
 ATF_DIR="$SOURCE_DIR/arm-trusted-firmware"
 UBOOT_DIR="$SOURCE_DIR/bl-mt798x/uboot-mtk-20250711"
 
-# ========== 编译 ATF（原有源码，NOR 版） ==========
-echo "=== Building ATF (NOR) from original source ==="
+# ========== 编译 ATF（NOR 版） ==========
+echo "=== Building ATF (NOR) ==="
 cd $ATF_DIR
 make clean
 make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=nor LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
@@ -75,7 +75,7 @@ echo "✅ U-Boot compiled"
 cd "$IMMORTALWRT_BUILD_DIR"
 echo "=== Building ImmortalWrt Rescue Firmware ==="
 
-if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" .config; then
+if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_spi_rescue=y" .config; then
     echo "❌ Rescue device not enabled in .config"
     exit 1
 fi
@@ -90,14 +90,15 @@ fi
 mkdir -p "$OUTPUT_DIR/firmware"
 cp build.log "$OUTPUT_DIR/firmware/"
 
-# 复制 SPI‑NOR 救砖镜像（精确匹配）
-SPI_IMAGE=$(find bin/targets/ -type f -name '*-sl_3000-spi-nor-sysupgrade.bin' | head -1)
-if [ -z "$SPI_IMAGE" ]; then
-    echo "❌ No SPI-NOR rescue image found"
+# 复制 SPI‑NOR 救砖镜像（设备名匹配 mk 中的定义）
+# 注意：生成的镜像名称可能为 openwrt-...-mt7981_sl3000_spi_rescue-initramfs.bin 或 rescue.bin
+RESCUE_IMAGE=$(find bin/targets/ -type f \( -name '*mt7981_sl3000_spi_rescue*initramfs*.bin' -o -name 'rescue.bin' \) | head -1)
+if [ -z "$RESCUE_IMAGE" ]; then
+    echo "❌ No rescue image found"
     exit 1
 fi
-cp -v "$SPI_IMAGE" "$OUTPUT_DIR/firmware/Spi-flash-32MB.bin"
-echo "✅ SPI-NOR rescue image saved as Spi-flash-32MB.bin"
+cp -v "$RESCUE_IMAGE" "$OUTPUT_DIR/firmware/Spi-flash-32MB.bin"
+echo "✅ Rescue image saved as Spi-flash-32MB.bin"
 
 # ========== 准备完整 SPI‑NOR 镜像所需的其他分区文件 ==========
 # 分区表（偏移量，单位字节）：
@@ -110,8 +111,6 @@ echo "✅ SPI-NOR rescue image saved as Spi-flash-32MB.bin"
 # 0x1e80000-0x1ea0000: Product   (128KB)
 # 0x1ea0000-0x2000000: Custom    (1.375MB)
 
-# 定义缺失分区文件的默认处理方式（如果未提供备份）
-# 用户可以将原厂备份放在 $SOURCE_DIR/original_backup/ 目录下
 BACKUP_DIR="$SOURCE_DIR/original_backup"
 mkdir -p "$BACKUP_DIR"
 
@@ -156,7 +155,7 @@ if [ ! -f "$OUTPUT_DIR/uboot/fip-nor.bin" ]; then
 fi
 cp "$OUTPUT_DIR/uboot/fip-nor.bin" "$OUTPUT_DIR/atf/FIP.bin"
 
-# firmware (使用刚编译的 sysupgrade.bin)
+# firmware (使用刚编译的救赎镜像)
 cp "$OUTPUT_DIR/firmware/Spi-flash-32MB.bin" "$OUTPUT_DIR/atf/firmware.bin"
 
 # Product (128KB = 131072 字节)
