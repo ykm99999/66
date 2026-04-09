@@ -76,7 +76,7 @@ mkdir -p $DTS_PATH_NEW
 cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts $DTS_PATH_NEW/ || exit 1
 echo "✅ 设备树已复制到 $DTS_PATH_NEW"
 
-# ========== 关键修复：将设备定义直接追加到 filogic.mk ==========
+# 将设备定义追加到 filogic.mk（确保设备被识别）
 FILOGIC_MK="target/linux/mediatek/image/filogic.mk"
 cat >> $FILOGIC_MK << 'EOF'
 
@@ -106,10 +106,11 @@ echo "✅ 设备定义已追加到 $FILOGIC_MK"
 # 复制救砖配置
 cp -v $CONFIG_DIR/sl3000-rescue.config .config || exit 1
 
-# 清除所有 TARGET 相关选项，避免冲突
-sed -i '/CONFIG_TARGET_/d' .config
+# 确保平台和设备已正确设置（删除冲突行，重新写入）
+sed -i '/CONFIG_TARGET_mediatek/d' .config
+sed -i '/CONFIG_TARGET_mediatek_filogic/d' .config
+sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_/d' .config
 
-# 写入我们的配置（平台 + 设备）
 cat >> .config << 'EOF'
 CONFIG_TARGET_mediatek=y
 CONFIG_TARGET_mediatek_filogic=y
@@ -117,20 +118,19 @@ CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_spi_rescue=y
 CONFIG_TARGET_ROOTFS_INITRAMFS=y
 EOF
 
-# 运行 defconfig 生成完整配置
+# 生成配置
 make defconfig || exit 1
 
 # 再次确保设备被选中（防止 defconfig 丢弃）
 if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_spi_rescue=y" .config; then
-    echo "⚠️  Device not enabled, forcing again..."
-    # 强制追加并运行 oldconfig
+    echo "⚠️  Device not enabled, forcing..."
     echo "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_spi_rescue=y" >> .config
     make oldconfig
 fi
 
 # 最终验证
 if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_spi_rescue=y" .config; then
-    echo "❌ 救砖设备未启用！请检查设备定义是否正确加载。"
+    echo "❌ 救砖设备未启用！"
     exit 1
 fi
 echo "✅ 救砖设备已启用"
