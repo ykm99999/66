@@ -81,15 +81,10 @@ mkdir -p $DTS_PATH_NEW
 cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts $DTS_PATH_NEW/ || exit 1
 echo "✅ 设备树已复制到 $DTS_PATH_NEW"
 
-# 处理设备定义文件：复制 mt7981_sl3000.mk 并修正其中的 DTS 名称
+# 处理设备定义文件：复制 mt7981_sl3000.mk 并确保内容正确
 mkdir -p $FILOGIC_MK_DIR
-cp -v $CONFIG_DIR/mt7981_sl3000.mk $FILOGIC_MK_DIR/mt7981_sl3000.mk || exit 1
-# 修正 DEVICE_DTS 为正确的文件名（无后缀）
-sed -i 's/DEVICE_DTS := mt7981b-sl3000-spi-nor/DEVICE_DTS := mt7981b-sl3000-emmc/g' $FILOGIC_MK_DIR/mt7981_sl3000.mk
-# 确保 KERNEL_LOADADDR 使用 0x40800000（可根据需要修改）
-sed -i 's/KERNEL_LOADADDR := 0x44000000/KERNEL_LOADADDR := 0x40800000/g' $FILOGIC_MK_DIR/mt7981_sl3000.mk
-# 如果需要修改其他参数（如 IMAGE_SIZE），可在此添加
-echo "✅ 设备定义文件已复制并修正"
+cp -v $CONFIG_DIR/mt7981_sl3000.mk $FILOGIC_MK_DIR/ || exit 1
+echo "✅ 设备定义文件已复制"
 
 # 复制救砖配置
 cp -v $CONFIG_DIR/sl3000-rescue.config .config || exit 1
