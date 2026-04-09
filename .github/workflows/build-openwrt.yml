@@ -17,12 +17,10 @@ jobs:
       - name: Prepare source-repo (symlink to directories inside main-repo)
         run: |
           mkdir -p source-repo
-          # 将主仓库中的源码目录软链接到 source-repo 下（脚本期望的位置）
           ln -sf $PWD/main-repo/arm-trusted-firmware source-repo/
           ln -sf $PWD/main-repo/u-boot source-repo/
           ln -sf $PWD/main-repo/immortalwrt source-repo/
           ln -sf $PWD/main-repo/mtk_uartboot source-repo/
-          # 如果有其他需要的目录，也添加
           ls -la source-repo/
 
       - name: Install dependencies
