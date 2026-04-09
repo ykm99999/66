@@ -1,0 +1,44 @@
+name: Sync ATF and U-Boot to sl3000 branch
+
+on:
+  workflow_dispatch:   # 手动触发
+  schedule:
+    - cron: '0 0 * * 0'  # 每周日0点自动同步（可选）
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout target repository (sl3000 branch)
+        uses: actions/checkout@v4
+        with:
+          repository: ykm99999/66
+          ref: sl3000
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: target-repo
+
+      - name: Configure git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Clone upstream ATF (mtksoc-20260123)
+        run: |
+          git clone --depth 1 --branch mtksoc-20260123 https://github.com/mtk-openwrt/arm-trusted-firmware.git upstream-atf
+          rm -rf target-repo/arm-trusted-firmware
+          mkdir -p target-repo/arm-trusted-firmware
+          cp -r upstream-atf/* target-repo/arm-trusted-firmware/
+
+      - name: Clone upstream U-Boot (mtksoc-20250711)
+        run: |
+          git clone --depth 1 --branch mtksoc-20250711 https://github.com/mtk-openwrt/u-boot.git upstream-uboot
+          rm -rf target-repo/u-boot
+          mkdir -p target-repo/u-boot
+          cp -r upstream-uboot/* target-repo/u-boot/
+
+      - name: Commit and push changes
+        run: |
+          cd target-repo
+          git add .
+          git diff --quiet && git diff --staged --quiet || git commit -m "Sync upstream ATF (mtksoc-20260123) and U-Boot (mtksoc-20250711)"
+          git push origin sl3000 --force-with-lease
