@@ -2,8 +2,6 @@ name: Sync SL3000 Full Source (Firmware + Bootloader + Tools)
 
 on:
   workflow_dispatch:        # 手动触发
-  # schedule:
-  #   - cron: '0 20 * * 0'  # 如需定时同步可取消注释
 
 env:
   GH_USER: ${{ github.repository_owner }}
@@ -17,9 +15,10 @@ jobs:
   sync-full-source:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout current repo
+      - name: Checkout current repo (main branch)
         uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
       - name: Setup Git Identity
@@ -27,63 +26,40 @@ jobs:
           git config --global user.email "actions@github.com"
           git config --global user.name "GitHub Actions"
 
-      - name: Create or switch to branch
+      - name: Ensure we are on main branch
         run: |
-          BRANCH_NAME="sl3000-full-sync"
-          git checkout -b $BRANCH_NAME || git checkout $BRANCH_NAME
-          git pull origin $BRANCH_NAME || echo "New branch"
+          git checkout main || git checkout -b main
+          git pull origin main || echo "No remote main branch"
 
       # ---------- ImmortalWrt (官方主线) ----------
       - name: Sync ImmortalWrt (official)
         run: |
           rm -rf immortalwrt
-          # 【唯一修改】将 clone 命令改为拉取 openwrt-24.10 分支
           git clone --recursive --depth=1 -b openwrt-24.10 https://github.com/immortalwrt/immortalwrt.git immortalwrt-temp
           rm -rf immortalwrt-temp/.git
           mv immortalwrt-temp immortalwrt
           git add immortalwrt
           git commit -m "Sync: ImmortalWrt official (branch openwrt-24.10) ($(date +'%Y-%m-%d'))" || echo "No changes"
 
-      # ---------- ImmortalWrt (Hanwckf 优化版) ----------
-      - name: Sync ImmortalWrt (hanwckf mt798x)
-        run: |
-          rm -rf immortalwrt-mt798x
-          # 该仓库没有 mt7981 分支，直接拉取默认分支（main）
-          git clone --recursive --depth=1 https://github.com/hanwckf/immortalwrt-mt798x.git immortalwrt-mt798x-temp
-          rm -rf immortalwrt-mt798x-temp/.git
-          mv immortalwrt-mt798x-temp immortalwrt-mt798x
-          git add immortalwrt-mt798x
-          git commit -m "Sync: ImmortalWrt hanwckf mt798x ($(date +'%Y-%m-%d'))" || echo "No changes"
-
       # ---------- ATF (Arm Trusted Firmware) ----------
       - name: Sync ATF
         run: |
           rm -rf arm-trusted-firmware
-          git clone --recursive --depth=1 -b mtksoc-20230719 https://github.com/mtk-openwrt/arm-trusted-firmware.git atf-temp
+          git clone --recursive --depth=1 -b mtksoc-20260123 https://github.com/mtk-openwrt/arm-trusted-firmware.git atf-temp
           rm -rf atf-temp/.git
           mv atf-temp arm-trusted-firmware
           git add arm-trusted-firmware
-          git commit -m "Sync: ATF (branch mtksoc-20230719) $(date +'%Y-%m-%d')" || echo "No changes"
+          git commit -m "Sync: ATF (branch mtksoc-20260123) $(date +'%Y-%m-%d')" || echo "No changes"
 
       # ---------- U-Boot (MediaTek 官方) ----------
       - name: Sync U-Boot (official)
         run: |
           rm -rf u-boot
-          git clone --recursive --depth=1 -b mtksoc-20250212 https://github.com/mtk-openwrt/u-boot.git u-boot-temp
+          git clone --recursive --depth=1 -b mtksoc-20250711 https://github.com/mtk-openwrt/u-boot.git u-boot-temp
           rm -rf u-boot-temp/.git
           mv u-boot-temp u-boot
           git add u-boot
-          git commit -m "Sync: U-Boot (branch mtksoc-20250212) $(date +'%Y-%m-%d')" || echo "No changes"
-
-      # ---------- U-Boot (Hanwckf 不死版) ----------
-      - name: Sync U-Boot (hanwckf bl-mt798x)
-        run: |
-          rm -rf bl-mt798x
-          git clone --recursive --depth=1 https://github.com/hanwckf/bl-mt798x.git bl-mt798x-temp
-          rm -rf bl-mt798x-temp/.git
-          mv bl-mt798x-temp bl-mt798x
-          git add bl-mt798x
-          git commit -m "Sync: hanwckf bl-mt798x ($(date +'%Y-%m-%d'))" || echo "No changes"
+          git commit -m "Sync: U-Boot (branch mtksoc-20250711) $(date +'%Y-%m-%d')" || echo "No changes"
 
       # ---------- mtk_uartboot (救砖工具) ----------
       - name: Sync mtk_uartboot
@@ -134,19 +110,19 @@ jobs:
           echo "make mt7981_sl3000_emmc_defconfig  # 需要自行创建此配置" >> device/sl3000/README.md
           echo '```' >> device/sl3000/README.md
 
-          # 写入 config.seed
+          # 写入正确的 config.seed（与设备定义匹配）
           echo "CONFIG_TARGET_mediatek=y" > device/sl3000/config.seed
           echo "CONFIG_TARGET_mediatek_filogic=y" >> device/sl3000/config.seed
-          echo "CONFIG_TARGET_mediatek_filogic_Device_sl3000=y" >> device/sl3000/config.seed
-          echo "CONFIG_MTK_NAND_EMC=y" >> device/sl3000/config.seed
-          echo "CONFIG_PACKAGE_kmod-mt7915e=y" >> device/sl3000/config.seed
+          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_spi_rescue=y" >> device/sl3000/config.seed
+          echo "CONFIG_TARGET_ROOTFS_INITRAMFS=y" >> device/sl3000/config.seed
+          echo "CONFIG_PACKAGE_kmod-mt7981-eth=y" >> device/sl3000/config.seed
+          echo "CONFIG_PACKAGE_kmod-mt7531=y" >> device/sl3000/config.seed
           echo "CONFIG_DRAM_SIZE=1024" >> device/sl3000/config.seed
 
           git add device/sl3000
           git commit -m "docs: add SL3000 full source config and rescue guide" || echo "Config exists"
 
-      # ---------- 推送至你的仓库 ----------
-      - name: Push to your repository
+      # ---------- 推送至 main 分支 ----------
+      - name: Push to main branch
         run: |
-          BRANCH_NAME="sl3000-full-sync"
-          git push origin $BRANCH_NAME --force
+          git push origin main --force-with-lease
