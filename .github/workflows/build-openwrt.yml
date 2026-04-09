@@ -44,6 +44,7 @@ jobs:
           ref: mtksoc-20250711
           path: source-repo/u-boot
 
+      # 安装依赖（完整保留原工作流中的依赖）
       - name: Install dependencies
         run: |
           sudo apt update
@@ -52,25 +53,7 @@ jobs:
             python3-distutils python3-setuptools rsync unzip zlib1g-dev file wget \
             gcc-aarch64-linux-gnu device-tree-compiler
 
-      - name: Optimize disk space
-        run: |
-          sudo apt clean
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
-          df -h
-
-      - name: Cache OpenWrt downloads
-        uses: actions/cache@v3
-        with:
-          path: source-repo/immortalwrt/dl
-          key: ${{ runner.os }}-dl-${{ hashFiles('source-repo/immortalwrt/feeds.conf.default') }}
-          restore-keys: ${{ runner.os }}-dl-
-
-      - name: Cache OpenWrt build_dir
-        uses: actions/cache@v3
-        with:
-          path: source-repo/immortalwrt/build_dir
-          key: ${{ runner.os }}-build-${{ hashFiles('source-repo/immortalwrt/.config') }}
-
+      # 运行脚本
       - name: Run diy-part1.sh
         run: |
           chmod +x main-repo/diy-part1.sh
