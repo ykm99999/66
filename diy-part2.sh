@@ -15,7 +15,6 @@ cd "$IMMORTALWRT_BUILD_DIR"
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# ========== 路径定义 ==========
 ATF_DIR="$SOURCE_DIR/arm-trusted-firmware"
 UBOOT_DIR="$SOURCE_DIR/u-boot"
 
@@ -44,7 +43,7 @@ mkdir -p $UBOOT_DIR/tools
 cp -f $FIPTOOL $UBOOT_DIR/tools/fiptool
 echo "✅ fiptool compiled"
 
-# ========== 准备 U-Boot：复制并修改设备树 ==========
+# ========== 准备 U-Boot ==========
 cd $UBOOT_DIR
 echo "=== Copying and adapting device tree for U-Boot ==="
 mkdir -p arch/arm/dts
@@ -54,16 +53,10 @@ if [ ! -f "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" ]; then
 fi
 cp -v "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" arch/arm/dts/
 
-# 删除U-Boot不支持的USB节点（因为U-Boot的mt7981.dtsi没有usb_phy和xhci）
-echo "Removing USB nodes (usb_phy, xhci) from device tree for U-Boot..."
+echo "Removing USB nodes for U-Boot compatibility..."
 sed -i '/&usb_phy/,/};/d' arch/arm/dts/mt7981b-sl3000-emmc.dts
 sed -i '/&xhci/,/};/d' arch/arm/dts/mt7981b-sl3000-emmc.dts
 
-# 可选：删除其他可能缺失的节点（如regulators），如果后续还有类似错误再添加
-# sed -i '/®_1p8v/,/};/d' arch/arm/dts/mt7981b-sl3000-emmc.dts
-# sed -i '/®_3p3v/,/};/d' arch/arm/dts/mt7981b-sl3000-emmc.dts
-
-# ========== 修改 defconfig ==========
 DEFCONFIG="configs/mt7981_nor_emmc_rfb_defconfig"
 if [ ! -f "$DEFCONFIG" ]; then
     echo "❌ Defconfig not found: $DEFCONFIG"
@@ -72,16 +65,15 @@ fi
 cp "$DEFCONFIG" "$DEFCONFIG.bak"
 sed -i 's/CONFIG_DEFAULT_DEVICE_TREE=".*"/CONFIG_DEFAULT_DEVICE_TREE="mt7981b-sl3000-emmc"/' "$DEFCONFIG"
 sed -i 's/CONFIG_DEFAULT_FDT_FILE=".*"/CONFIG_DEFAULT_FDT_FILE="mt7981b-sl3000-emmc"/' "$DEFCONFIG"
-grep "CONFIG_DEFAULT_DEVICE_TREE" "$DEFCONFIG"
-grep "CONFIG_DEFAULT_FDT_FILE" "$DEFCONFIG"
 
-# ========== 编译 U-Boot ==========
+# ========== 编译 U-Boot（显式传递 BL31） ==========
 echo "=== Building U-Boot ==="
 make clean
 make CROSS_COMPILE=aarch64-linux-gnu- mt7981_nor_emmc_rfb_defconfig
 echo "CONFIG_MTK_FIP_SUPPORT=y" >> .config
 make olddefconfig
-make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
+# 关键修复：传递 BL31 路径，确保生成 u-boot.fip
+make CROSS_COMPILE=aarch64-linux-gnu- BL31="$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin" -j$(nproc)
 
 if [ ! -f u-boot.fip ]; then
     echo "❌ u-boot.fip not generated"
