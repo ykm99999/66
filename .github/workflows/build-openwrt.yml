@@ -8,28 +8,41 @@ on:
 jobs:
   build-rescue:
     runs-on: ubuntu-22.04
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      - name: Checkout main branch
+      - name: Checkout main branch (scripts & configs)
         uses: actions/checkout@v4
         with:
           ref: main
           path: main-repo
 
-      - name: Checkout source branch (contains hanwckf bl-mt798x)
+      # 从聚合分支获取 ImmortalWrt 和 mtk_uartboot
+      - name: Checkout ImmortalWrt and mtk_uartboot from aggregate branch
         uses: actions/checkout@v4
         with:
           repository: ykm99999/66
           ref: sl3000-full-sync
-          path: source-repo
-
-      - name: Generate release tag
-        id: release_tag
+          path: source-repo/aggregate
+      - name: Move ImmortalWrt and mtk_uartboot to correct paths
         run: |
-          TAG_NAME="v$(date -u +'%Y%m%d-%H%M%S')-rescue"
-          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
-          echo "Release tag: $TAG_NAME"
+          mv source-repo/aggregate/immortalwrt source-repo/
+          mv source-repo/aggregate/mtk_uartboot source-repo/ 2>/dev/null || true
+          rm -rf source-repo/aggregate
+
+      # 官方 ATF
+      - name: Checkout ATF (official)
+        uses: actions/checkout@v4
+        with:
+          repository: mtk-openwrt/arm-trusted-firmware
+          ref: mtksoc-20260123
+          path: source-repo/arm-trusted-firmware
+
+      # 官方 U-Boot
+      - name: Checkout U-Boot (official)
+        uses: actions/checkout@v4
+        with:
+          repository: mtk-openwrt/u-boot
+          ref: mtksoc-20250711
+          path: source-repo/u-boot
 
       - name: Install dependencies
         run: |
@@ -44,6 +57,19 @@ jobs:
           sudo apt clean
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
           df -h
+
+      - name: Cache OpenWrt downloads
+        uses: actions/cache@v3
+        with:
+          path: source-repo/immortalwrt/dl
+          key: ${{ runner.os }}-dl-${{ hashFiles('source-repo/immortalwrt/feeds.conf.default') }}
+          restore-keys: ${{ runner.os }}-dl-
+
+      - name: Cache OpenWrt build_dir
+        uses: actions/cache@v3
+        with:
+          path: source-repo/immortalwrt/build_dir
+          key: ${{ runner.os }}-build-${{ hashFiles('source-repo/immortalwrt/.config') }}
 
       - name: Run diy-part1.sh
         run: |
@@ -62,6 +88,13 @@ jobs:
           echo "=== Rescue build output ==="
           ls -la output/atf/ output/uboot/ output/firmware/ || true
 
+      - name: Generate release tag
+        id: release_tag
+        run: |
+          TAG_NAME="v$(date -u +'%Y%m%d-%H%M%S')-rescue"
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "Release tag: $TAG_NAME"
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -69,9 +102,10 @@ jobs:
           name: "SL3000 Rescue Firmware ${{ steps.release_tag.outputs.tag_name }}"
           body: |
             ## 救砖全家桶（SPI‑NOR 32MB）
-            - 包含完整镜像 `SL3000-full-spi-nor-32mb.bin`（可直接烧录到 0x0）
+            - 完整镜像 `SL3000-full-spi-nor-32mb.bin`（可直接烧录到 SPI-NOR）
             - 单独文件：`bl2-1g-nor.bin`、`fip-nor.bin`、`Spi-flash-32MB.bin`
             - 工具包：`mtk_uartboot.tar.gz`
+            - 基于官方 ATF (mtksoc-20260123) 和 U-Boot (mtksoc-20250711) 构建
           files: |
             output/atf/*.bin
             output/atf/*.elf
