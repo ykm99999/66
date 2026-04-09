@@ -8,16 +8,14 @@ STAGING_DIR_IMAGE="$WORKSPACE/immortalwrt-build/staging_dir/image"
 
 mkdir -p "$STAGING_DIR_IMAGE"
 
-IMMORTALWRT_BUILD_DIR=$(cat $WORKSPACE/build-dir.txt)
+IMMORTALWRT_BUILD_DIR=$(cat "$WORKSPACE/build-dir.txt")
 cd "$IMMORTALWRT_BUILD_DIR"
 
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
 # ========== 路径定义 ==========
-# ATF 使用原有源码（已能编译）
 ATF_DIR="$SOURCE_DIR/arm-trusted-firmware"
-# U-Boot 使用 hanwckf 源码
 UBOOT_DIR="$SOURCE_DIR/bl-mt798x/uboot-mtk-20250711"
 
 # ========== 编译 ATF（原有源码，NOR 版） ==========
@@ -25,8 +23,13 @@ echo "=== Building ATF (NOR) from original source ==="
 cd $ATF_DIR
 make clean
 make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=nor LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
-find build/mt7981/release -name "bl2*.bin" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.bin \; 2>/dev/null || echo "No bl2.bin for 1G nor"
-find build/mt7981/release -name "bl2*.elf" -exec cp {} $OUTPUT_DIR/atf/bl2-1g-nor.elf \; 2>/dev/null || echo "No bl2.elf for 1G nor"
+
+if [ ! -f build/mt7981/release/bl2.bin ]; then
+    echo "❌ bl2.bin not found"
+    exit 1
+fi
+cp -v build/mt7981/release/bl2.bin "$OUTPUT_DIR/atf/bl2-1g-nor.bin"
+cp -v build/mt7981/release/bl2.elf "$OUTPUT_DIR/atf/bl2-1g-nor.elf"
 
 if [ ! -f build/mt7981/release/bl31.bin ]; then
     echo "❌ bl31.bin not found"
@@ -60,13 +63,13 @@ echo "CONFIG_MTK_FIP_SUPPORT=y" >> .config
 make olddefconfig
 make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
 
-if [ ! -f fip.bin ] && [ ! -f u-boot.fip ]; then
-    $FIPTOOL create --soc-fw "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin" --nt-fw u-boot.bin u-boot.fip
-    cp u-boot.fip "$OUTPUT_DIR/uboot/fip-nor.bin"
-else
-    cp fip.bin "$OUTPUT_DIR/uboot/fip-nor.bin" 2>/dev/null || cp u-boot.fip "$OUTPUT_DIR/uboot/fip-nor.bin"
+if [ ! -f u-boot.fip ]; then
+    echo "❌ u-boot.fip not generated"
+    exit 1
 fi
+cp u-boot.fip "$OUTPUT_DIR/uboot/fip-nor.bin"
 cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
+echo "✅ U-Boot compiled"
 
 # ========== 构建 ImmortalWrt 救砖固件 ==========
 cd "$IMMORTALWRT_BUILD_DIR"
@@ -87,8 +90,8 @@ fi
 mkdir -p "$OUTPUT_DIR/firmware"
 cp build.log "$OUTPUT_DIR/firmware/"
 
-# 复制 SPI‑NOR 救砖镜像
-SPI_IMAGE=$(find bin/targets/ -type f -name '*sl_3000-spi-nor*sysupgrade.bin' -size -34M | head -1)
+# 复制 SPI‑NOR 救砖镜像（精确匹配）
+SPI_IMAGE=$(find bin/targets/ -type f -name '*-sl_3000-spi-nor-sysupgrade.bin' | head -1)
 if [ -z "$SPI_IMAGE" ]; then
     echo "❌ No SPI-NOR rescue image found"
     exit 1
@@ -96,21 +99,106 @@ fi
 cp -v "$SPI_IMAGE" "$OUTPUT_DIR/firmware/Spi-flash-32MB.bin"
 echo "✅ SPI-NOR rescue image saved as Spi-flash-32MB.bin"
 
-# ========== 生成完整的 32MB SPI‑NOR 镜像（包含 BL2、FIP、firmware） ==========
+# ========== 准备完整 SPI‑NOR 镜像所需的其他分区文件 ==========
+# 分区表（偏移量，单位字节）：
+# 0x000000-0x100000 : BL2        (1MB)
+# 0x100000-0x110000 : u-boot-env (64KB)
+# 0x110000-0x180000 : Config     (448KB)
+# 0x180000-0x380000 : Factory    (2MB)
+# 0x380000-0x580000 : FIP        (2MB)
+# 0x580000-0x1e80000: firmware   (25MB)
+# 0x1e80000-0x1ea0000: Product   (128KB)
+# 0x1ea0000-0x2000000: Custom    (1.375MB)
+
+# 定义缺失分区文件的默认处理方式（如果未提供备份）
+# 用户可以将原厂备份放在 $SOURCE_DIR/original_backup/ 目录下
+BACKUP_DIR="$SOURCE_DIR/original_backup"
+mkdir -p "$BACKUP_DIR"
+
+# 辅助函数：检查或创建分区文件
+prepare_partition() {
+    local name=$1
+    local size=$2
+    local output_file="$OUTPUT_DIR/atf/${name}.bin"
+    local backup_file="$BACKUP_DIR/${name}.bin"
+
+    if [ -f "$backup_file" ]; then
+        echo "Using backup: $backup_file"
+        cp "$backup_file" "$output_file"
+    elif [ -f "$output_file" ]; then
+        echo "Using existing: $output_file"
+    else
+        echo "⚠️  Warning: $name.bin not found, creating empty (0xFF) file of size $size bytes"
+        dd if=/dev/zero bs=$size count=1 2>/dev/null | tr '\000' '\377' > "$output_file"
+    fi
+}
+
+# BL2 已从 ATF 编译得到
+if [ ! -f "$OUTPUT_DIR/atf/bl2-1g-nor.bin" ]; then
+    echo "❌ bl2-1g-nor.bin missing"
+    exit 1
+fi
+cp "$OUTPUT_DIR/atf/bl2-1g-nor.bin" "$OUTPUT_DIR/atf/BL2.bin"
+
+# u-boot-env (64KB = 65536 字节)
+prepare_partition "u-boot-env" 65536
+
+# Config (448KB = 458752 字节)
+prepare_partition "Config" 458752
+
+# Factory (2MB = 2097152 字节) — 重要：包含无线校准数据
+prepare_partition "Factory" 2097152
+
+# FIP 已从 U-Boot 编译得到
+if [ ! -f "$OUTPUT_DIR/uboot/fip-nor.bin" ]; then
+    echo "❌ fip-nor.bin missing"
+    exit 1
+fi
+cp "$OUTPUT_DIR/uboot/fip-nor.bin" "$OUTPUT_DIR/atf/FIP.bin"
+
+# firmware (使用刚编译的 sysupgrade.bin)
+cp "$OUTPUT_DIR/firmware/Spi-flash-32MB.bin" "$OUTPUT_DIR/atf/firmware.bin"
+
+# Product (128KB = 131072 字节)
+prepare_partition "Product" 131072
+
+# Custom (1.375MB = 1441792 字节)
+prepare_partition "Custom" 1441792
+
+# ========== 生成完整的 32MB SPI‑NOR 镜像 ==========
 echo "=== Creating full 32MB SPI‑NOR image ==="
 FULL_IMAGE="$OUTPUT_DIR/firmware/SL3000-full-spi-nor-32mb.bin"
 
-dd if=/dev/zero bs=1M count=32 | tr '\000' '\377' > "$FULL_IMAGE"
-dd if="$OUTPUT_DIR/atf/bl2-1g-nor.bin" of="$FULL_IMAGE" conv=notrunc
-dd if="$OUTPUT_DIR/uboot/fip-nor.bin" of="$FULL_IMAGE" seek=$((0x380000)) bs=1 conv=notrunc
-dd if="$OUTPUT_DIR/firmware/Spi-flash-32MB.bin" of="$FULL_IMAGE" seek=$((0x580000)) bs=1 conv=notrunc
+# 创建全 0xFF 的 32MB 文件
+dd if=/dev/zero bs=1M count=32 2>/dev/null | tr '\000' '\377' > "$FULL_IMAGE"
+
+# 按分区顺序写入（注意 bs=1 确保 seek 单位为字节）
+dd if="$OUTPUT_DIR/atf/BL2.bin" of="$FULL_IMAGE" bs=1 conv=notrunc
+dd if="$OUTPUT_DIR/atf/u-boot-env.bin" of="$FULL_IMAGE" bs=1 seek=$((0x100000)) conv=notrunc
+dd if="$OUTPUT_DIR/atf/Config.bin" of="$FULL_IMAGE" bs=1 seek=$((0x110000)) conv=notrunc
+dd if="$OUTPUT_DIR/atf/Factory.bin" of="$FULL_IMAGE" bs=1 seek=$((0x180000)) conv=notrunc
+dd if="$OUTPUT_DIR/atf/FIP.bin" of="$FULL_IMAGE" bs=1 seek=$((0x380000)) conv=notrunc
+dd if="$OUTPUT_DIR/atf/firmware.bin" of="$FULL_IMAGE" bs=1 seek=$((0x580000)) conv=notrunc
+dd if="$OUTPUT_DIR/atf/Product.bin" of="$FULL_IMAGE" bs=1 seek=$((0x1e80000)) conv=notrunc
+dd if="$OUTPUT_DIR/atf/Custom.bin" of="$FULL_IMAGE" bs=1 seek=$((0x1ea0000)) conv=notrunc
 
 echo "✅ Full 32MB SPI‑NOR image created: $FULL_IMAGE"
 ls -lh "$FULL_IMAGE"
 
+# 检查 Factory 分区是否为占位（全 0xFF）并给出警告
+if cmp -s "$OUTPUT_DIR/atf/Factory.bin" <(dd if=/dev/zero bs=2097152 count=1 2>/dev/null | tr '\000' '\377'); then
+    echo "⚠️  WARNING: Factory partition is empty (0xFF). WiFi calibration data missing!"
+    echo "   Please replace $OUTPUT_DIR/atf/Factory.bin with a valid backup and re-run this script."
+fi
+
 # ========== 打包 mtk_uartboot ==========
-cd $SOURCE_DIR/mtk_uartboot
-tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
+if [ -d "$SOURCE_DIR/mtk_uartboot" ]; then
+    cd "$SOURCE_DIR/mtk_uartboot"
+    tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
+    echo "✅ mtk_uartboot.tar.gz created"
+else
+    echo "⚠️  mtk_uartboot directory not found, skipping"
+fi
 
 echo "✅ Build complete"
 ls -la $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware
