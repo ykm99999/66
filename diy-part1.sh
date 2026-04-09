@@ -81,7 +81,7 @@ mkdir -p $DTS_PATH_NEW
 cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts $DTS_PATH_NEW/ || exit 1
 echo "✅ 设备树已复制到 $DTS_PATH_NEW"
 
-# 处理设备定义文件：复制 mt7981_sl3000.mk 并确保内容正确
+# 处理设备定义文件：复制 mt7981_sl3000.mk
 mkdir -p $FILOGIC_MK_DIR
 cp -v $CONFIG_DIR/mt7981_sl3000.mk $FILOGIC_MK_DIR/ || exit 1
 echo "✅ 设备定义文件已复制"
