@@ -5,8 +5,8 @@
 #include <dt-bindings/leds/common.h>
 
 / {
-	model = "SL-3000 (1GB DDR4 / eMMC)";
-	compatible = "sl,sl3000", "mediatek,mt7981";
+	model = "Siluo SL3000 (1GB DDR4, 32MB SPI-NOR Rescue)";
+	compatible = "siluo,sl3000-spi-nor", "mediatek,mt7981";
 
 	aliases {
 		serial0 = &uart0;
@@ -19,16 +19,16 @@
 
 	chosen {
 		stdout-path = "serial0:115200n8";
-		bootargs = "console=ttyS0,115200n1 loglevel=8 earlycon=uart8250,mmio32,0x11002000 rootwait";
+		bootargs = "console=ttyS0,115200n1 earlycon=uart8250,mmio32,0x11002000";
 	};
 
-	/* 1GB DDR4 内存 */
+	/* 1GB DDR4 */
 	memory@40000000 {
 		device_type = "memory";
 		reg = <0x0 0x40000000 0x0 0x40000000>;
 	};
 
-	/* 稳压器，用于 eMMC */
+	/* 稳压器 */
 	reg_1p8v: regulator-1p8v {
 		compatible = "regulator-fixed";
 		regulator-name = "fixed-1.8V";
@@ -49,15 +49,18 @@
 
 	leds {
 		compatible = "gpio-leds";
+
 		status_red_led: status-red {
 			label = "red:status";
 			gpios = <&pio 10 GPIO_ACTIVE_LOW>;
 		};
+
 		status_green_led: status-green {
 			label = "green:status";
 			gpios = <&pio 11 GPIO_ACTIVE_LOW>;
 			linux,default-trigger = "heartbeat";
 		};
+
 		status_blue_led: status-blue {
 			label = "blue:status";
 			gpios = <&pio 12 GPIO_ACTIVE_LOW>;
@@ -66,6 +69,7 @@
 
 	keys {
 		compatible = "gpio-keys";
+
 		reset {
 			label = "reset";
 			linux,code = <KEY_RESTART>;
@@ -75,7 +79,7 @@
 	};
 };
 
-/* SPI-NOR 闪存分区布局（与 U-Boot 实际分区对齐） */
+/* SPI-NOR 完整分区表（与 U-Boot 对齐，含 Product/Custom） */
 &spi0 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&spi0_flash_pins>;
@@ -93,34 +97,55 @@
 
 			partition@0 {
 				label = "BL2";
-				reg = <0x0 0x100000>;
+				reg = <0x000000 0x100000>;
 				read-only;
 			};
+
 			partition@100000 {
+				label = "u-boot-env";
+				reg = <0x100000 0x10000>;
+			};
+
+			partition@110000 {
 				label = "Config";
-				reg = <0x100000 0x80000>;
+				reg = <0x110000 0x70000>;
 				read-only;
 			};
+
 			partition@180000 {
 				label = "Factory";
 				reg = <0x180000 0x200000>;
 				read-only;
 			};
+
 			partition@380000 {
 				label = "FIP";
 				reg = <0x380000 0x200000>;
 				read-only;
 			};
-			/* firmware 分区起始 0x580000，大小 25MB (与 IMAGE_SIZE 匹配) */
+
+			/* firmware 分区 25MB，与 initramfs 镜像大小匹配 */
 			partition@580000 {
 				label = "firmware";
 				reg = <0x580000 0x1900000>;
+			};
+
+			/* 原厂额外分区，救砖时保留 */
+			partition@1e80000 {
+				label = "Product";
+				reg = <0x1e80000 0x20000>;
+				read-only;
+			};
+
+			partition@1ea0000 {
+				label = "Custom";
+				reg = <0x1ea0000 0x160000>;
 			};
 		};
 	};
 };
 
-/* eMMC 配置 */
+/* eMMC 启用，并补全 UHS 引脚配置 */
 &mmc0 {
 	status = "okay";
 	pinctrl-names = "default", "state_uhs";
@@ -188,13 +213,9 @@
 	};
 };
 
-/* USB 完全禁用（您的设备无 USB 口） */
-&usb_phy {
-	status = "disabled";
-};
-&xhci {
-	status = "disabled";
-};
+/* 禁用 USB（设备无 USB 口） */
+&usb_phy { status = "disabled"; };
+&xhci { status = "disabled"; };
 
 &pio {
 	spi0_flash_pins: spi0-pins {
@@ -205,6 +226,11 @@
 		conf-pu {
 			pins = "SPI0_CS", "SPI0_HOLD", "SPI0_WP";
 			bias-pull-up;
+			drive-strength = <MTK_DRIVE_8mA>;
+		};
+		conf-pd {
+			pins = "SPI0_CLK", "SPI0_MOSI", "SPI0_MISO";
+			drive-strength = <MTK_DRIVE_8mA>;
 		};
 	};
 
@@ -224,8 +250,27 @@
 			function = "flash";
 			groups = "emmc_45";
 		};
+		conf-cmd-dat {
+			pins = "EMMC_DAT0", "EMMC_DAT1", "EMMC_DAT2", "EMMC_DAT3",
+			       "EMMC_DAT4", "EMMC_DAT5", "EMMC_DAT6", "EMMC_DAT7", "EMMC_CMD";
+			input-enable;
+			bias-pull-up;
+			drive-strength = <MTK_DRIVE_8mA>;
+		};
+		conf-clk {
+			pins = "EMMC_CK";
+			drive-strength = <MTK_DRIVE_8mA>;
+			bias-pull-down;
+		};
+		conf-rst {
+			pins = "EMMC_RSTB";
+			bias-pull-up;
+		};
 	};
 };
 
 &uart0 { status = "okay"; };
 &watchdog { status = "okay"; };
+
+&reg_3p3v { status = "okay"; };
+&reg_1p8v { status = "okay"; };
