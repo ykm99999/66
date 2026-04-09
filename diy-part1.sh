@@ -7,9 +7,8 @@ CONFIG_DIR="$WORKSPACE/main-repo/888"
 OUTPUT_DIR="$WORKSPACE/output"
 IMMORTALWRT_BUILD="$WORKSPACE/immortalwrt-build"
 STAGING_DIR_IMAGE="$IMMORTALWRT_BUILD/staging_dir/image"
-DTS_PATH_OLD="target/linux/mediatek/dts"
 DTS_PATH_NEW="target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek"
-FILOGIC_MK="target/linux/mediatek/image/filogic.mk"
+FILOGIC_MK_DIR="target/linux/mediatek/image"
 
 mkdir -p $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware $STAGING_DIR_IMAGE
 
@@ -24,6 +23,10 @@ if [ ! -f "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" ]; then
 fi
 if [ ! -f "$CONFIG_DIR/sl3000-rescue.config" ]; then
     echo "❌ 缺少 $CONFIG_DIR/sl3000-rescue.config"
+    exit 1
+fi
+if [ ! -f "$CONFIG_DIR/mt7981_sl3000.mk" ]; then
+    echo "❌ 缺少 $CONFIG_DIR/mt7981_sl3000.mk"
     exit 1
 fi
 echo "✅ 配置文件齐全"
@@ -42,7 +45,7 @@ sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 ./scripts/feeds install -a || exit 1
 make package/symlinks || exit 1
 
-# 删除可能导致编译错误的包（只删除必要且影响大的，避免过度删除）
+# 删除可能导致编译错误的包（只删除必要且影响大的）
 PROBLEM_PKGS="
 aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
 pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
@@ -78,25 +81,15 @@ mkdir -p $DTS_PATH_NEW
 cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts $DTS_PATH_NEW/ || exit 1
 echo "✅ 设备树已复制到 $DTS_PATH_NEW"
 
-# 注入救砖设备定义（只包含救砖设备）
-cat >> $FILOGIC_MK << 'EOF'
-
-define Device/sl_3000-spi-nor
-  DEVICE_VENDOR := SL
-  DEVICE_MODEL := 3000 SPI-NOR (32MB)
-  DEVICE_DTS := mt7981b-sl3000-emmc
-  DEVICE_DTS_DIR := $(DTS_DIR)
-  SUPPORTED_DEVICES := sl,3000-spi-nor
-  DEVICE_PACKAGES := \
-    block-mount \
-    uboot-envtools
-  IMAGES := sysupgrade.bin
-  IMAGE_SIZE := 25600k
-  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
-endef
-TARGET_DEVICES += sl_3000-spi-nor
-EOF
-echo "✅ 救砖设备定义已注入"
+# 处理设备定义文件：复制 mt7981_sl3000.mk 并修正其中的 DTS 名称
+mkdir -p $FILOGIC_MK_DIR
+cp -v $CONFIG_DIR/mt7981_sl3000.mk $FILOGIC_MK_DIR/mt7981_sl3000.mk || exit 1
+# 修正 DEVICE_DTS 为正确的文件名（无后缀）
+sed -i 's/DEVICE_DTS := mt7981b-sl3000-spi-nor/DEVICE_DTS := mt7981b-sl3000-emmc/g' $FILOGIC_MK_DIR/mt7981_sl3000.mk
+# 确保 KERNEL_LOADADDR 使用 0x40800000（可根据需要修改）
+sed -i 's/KERNEL_LOADADDR := 0x44000000/KERNEL_LOADADDR := 0x40800000/g' $FILOGIC_MK_DIR/mt7981_sl3000.mk
+# 如果需要修改其他参数（如 IMAGE_SIZE），可在此添加
+echo "✅ 设备定义文件已复制并修正"
 
 # 复制救砖配置
 cp -v $CONFIG_DIR/sl3000-rescue.config .config || exit 1
@@ -105,13 +98,13 @@ cp -v $CONFIG_DIR/sl3000-rescue.config .config || exit 1
 cat >> .config << 'EOF'
 CONFIG_TARGET_mediatek=y
 CONFIG_TARGET_mediatek_filogic=y
-CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y
+CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_spi_rescue=y
 EOF
 
 # 生成配置
 make defconfig || exit 1
 # 确保目标设备未被意外覆盖
-if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" .config; then
+if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_spi_rescue=y" .config; then
     echo "❌ 救砖设备未启用！"
     exit 1
 fi
