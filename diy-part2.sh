@@ -29,7 +29,8 @@ if [ ! -f build/mt7981/release/bl2.bin ]; then
     exit 1
 fi
 cp -v build/mt7981/release/bl2.bin "$OUTPUT_DIR/atf/bl2-1g-nor.bin"
-cp -v build/mt7981/release/bl2.elf "$OUTPUT_DIR/atf/bl2-1g-nor.elf"
+# bl2.elf 不是必须的，忽略
+# cp -v build/mt7981/release/bl2.elf "$OUTPUT_DIR/atf/bl2-1g-nor.elf" || true
 
 if [ ! -f build/mt7981/release/bl31.bin ]; then
     echo "❌ bl31.bin not found"
