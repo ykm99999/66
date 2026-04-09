@@ -34,7 +34,7 @@ rm -rf immortalwrt-build
 cp -r $SOURCE_DIR/immortalwrt immortalwrt-build
 cd immortalwrt-build
 
-# 修改 feeds 配置：禁用 telephony feed，不添加 passwall
+# 修改 feeds 配置：禁用 telephony feed
 sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 
 # 更新 feeds
@@ -42,7 +42,7 @@ sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 ./scripts/feeds install -a || exit 1
 make package/symlinks || exit 1
 
-# 删除可能导致编译错误的包（不影响救砖）
+# 删除可能导致编译错误的包（只删除必要且影响大的，避免过度删除）
 PROBLEM_PKGS="
 aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
 pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
@@ -73,10 +73,10 @@ if [ -d package/kernel/mt76 ]; then
     echo "✅ 已删除 mt76"
 fi
 
-# 注册设备树
-mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
-cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts $DTS_PATH_OLD/ || exit 1
+# 注册设备树（只复制到正确的新路径）
+mkdir -p $DTS_PATH_NEW
 cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts $DTS_PATH_NEW/ || exit 1
+echo "✅ 设备树已复制到 $DTS_PATH_NEW"
 
 # 注入救砖设备定义（只包含救砖设备）
 cat >> $FILOGIC_MK << 'EOF'
@@ -101,24 +101,16 @@ echo "✅ 救砖设备定义已注入"
 # 复制救砖配置
 cp -v $CONFIG_DIR/sl3000-rescue.config .config || exit 1
 
-# 强制设置平台，只启用救砖设备
-sed -i '/CONFIG_TARGET_mediatek/d' .config
-sed -i '/CONFIG_TARGET_mediatek_filogic/d' .config
-echo "CONFIG_TARGET_mediatek=y" >> .config
-echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000/d' .config
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
+# 强制设置平台，只启用救砖设备（使用追加方式，避免重复）
+cat >> .config << 'EOF'
+CONFIG_TARGET_mediatek=y
+CONFIG_TARGET_mediatek_filogic=y
+CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y
+EOF
 
 # 生成配置
 make defconfig || exit 1
-sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000/d' .config
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
-
-make oldconfig || exit 1
-sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000/d' .config
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" >> .config
-
-# 最终验证
+# 确保目标设备未被意外覆盖
 if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-spi-nor=y" .config; then
     echo "❌ 救砖设备未启用！"
     exit 1
