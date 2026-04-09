@@ -44,32 +44,34 @@ mkdir -p $UBOOT_DIR/tools
 cp -f $FIPTOOL $UBOOT_DIR/tools/fiptool
 echo "✅ fiptool compiled"
 
-# ========== 准备 U-Boot：复制设备树并修正 defconfig ==========
+# ========== 准备 U-Boot：复制并修改设备树 ==========
 cd $UBOOT_DIR
-echo "=== Copying custom device tree to U-Boot ==="
-# 确保目标目录存在
+echo "=== Copying and adapting device tree for U-Boot ==="
 mkdir -p arch/arm/dts
-# 复制 DTS 文件（如果源文件不存在则报错）
 if [ ! -f "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" ]; then
     echo "❌ DTS file not found: $CONFIG_DIR/mt7981b-sl3000-emmc.dts"
     exit 1
 fi
 cp -v "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" arch/arm/dts/
 
-# 检查 defconfig 并修改设备树名称
+# 删除U-Boot不支持的USB节点（因为U-Boot的mt7981.dtsi没有usb_phy和xhci）
+echo "Removing USB nodes (usb_phy, xhci) from device tree for U-Boot..."
+sed -i '/&usb_phy/,/};/d' arch/arm/dts/mt7981b-sl3000-emmc.dts
+sed -i '/&xhci/,/};/d' arch/arm/dts/mt7981b-sl3000-emmc.dts
+
+# 可选：删除其他可能缺失的节点（如regulators），如果后续还有类似错误再添加
+# sed -i '/®_1p8v/,/};/d' arch/arm/dts/mt7981b-sl3000-emmc.dts
+# sed -i '/®_3p3v/,/};/d' arch/arm/dts/mt7981b-sl3000-emmc.dts
+
+# ========== 修改 defconfig ==========
 DEFCONFIG="configs/mt7981_nor_emmc_rfb_defconfig"
 if [ ! -f "$DEFCONFIG" ]; then
     echo "❌ Defconfig not found: $DEFCONFIG"
     exit 1
 fi
-
-# 备份原 defconfig
 cp "$DEFCONFIG" "$DEFCONFIG.bak"
-# 将设备树名称改为 mt7981b-sl3000-emmc
 sed -i 's/CONFIG_DEFAULT_DEVICE_TREE=".*"/CONFIG_DEFAULT_DEVICE_TREE="mt7981b-sl3000-emmc"/' "$DEFCONFIG"
 sed -i 's/CONFIG_DEFAULT_FDT_FILE=".*"/CONFIG_DEFAULT_FDT_FILE="mt7981b-sl3000-emmc"/' "$DEFCONFIG"
-# 确保分区表与 DTS 一致（可选，已在上次修复）
-# 显示修改后的内容供调试
 grep "CONFIG_DEFAULT_DEVICE_TREE" "$DEFCONFIG"
 grep "CONFIG_DEFAULT_FDT_FILE" "$DEFCONFIG"
 
@@ -92,7 +94,6 @@ echo "✅ U-Boot compiled"
 # ========== 构建 ImmortalWrt 救砖固件 ==========
 cd "$IMMORTALWRT_BUILD_DIR"
 echo "=== Building ImmortalWrt Rescue Firmware ==="
-
 if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_spi_rescue=y" .config; then
     echo "❌ Rescue device not enabled in .config"
     exit 1
@@ -125,7 +126,6 @@ prepare_partition() {
     local size=$2
     local output_file="$OUTPUT_DIR/atf/${name}.bin"
     local backup_file="$BACKUP_DIR/${name}.bin"
-
     if [ -f "$backup_file" ]; then
         echo "Using backup: $backup_file"
         cp "$backup_file" "$output_file"
@@ -149,7 +149,6 @@ prepare_partition "Custom" 1441792
 # ========== 生成完整的 32MB SPI‑NOR 镜像 ==========
 echo "=== Creating full 32MB SPI‑NOR image ==="
 FULL_IMAGE="$OUTPUT_DIR/firmware/SL3000-full-spi-nor-32mb.bin"
-
 dd if=/dev/zero bs=1M count=32 2>/dev/null | tr '\000' '\377' > "$FULL_IMAGE"
 dd if="$OUTPUT_DIR/atf/BL2.bin" of="$FULL_IMAGE" bs=1 conv=notrunc
 dd if="$OUTPUT_DIR/atf/u-boot-env.bin" of="$FULL_IMAGE" bs=1 seek=$((0x100000)) conv=notrunc
@@ -159,7 +158,6 @@ dd if="$OUTPUT_DIR/atf/FIP.bin" of="$FULL_IMAGE" bs=1 seek=$((0x380000)) conv=no
 dd if="$OUTPUT_DIR/atf/firmware.bin" of="$FULL_IMAGE" bs=1 seek=$((0x580000)) conv=notrunc
 dd if="$OUTPUT_DIR/atf/Product.bin" of="$FULL_IMAGE" bs=1 seek=$((0x1e80000)) conv=notrunc
 dd if="$OUTPUT_DIR/atf/Custom.bin" of="$FULL_IMAGE" bs=1 seek=$((0x1ea0000)) conv=notrunc
-
 echo "✅ Full 32MB SPI‑NOR image created: $FULL_IMAGE"
 ls -lh "$FULL_IMAGE"
 
