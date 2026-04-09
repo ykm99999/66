@@ -1,42 +1,45 @@
 name: Sync ATF and U-Boot to sl3000 branch
 
 on:
-  workflow_dispatch:   # 手动触发
+  workflow_dispatch:
   schedule:
-    - cron: '0 0 * * 0'  # 每周日0点自动同步（可选）
+    - cron: '0 0 * * 0'
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout target repository (sl3000 branch)
+      - name: Checkout target repository (try sl3000, create if not exists)
         uses: actions/checkout@v4
         with:
           repository: ykm99999/66
           ref: sl3000
           token: ${{ secrets.GITHUB_TOKEN }}
           path: target-repo
-
+      - name: Create sl3000 branch if missing
+        run: |
+          cd target-repo
+          if ! git show-ref --verify --quiet refs/heads/sl3000; then
+            git checkout -b sl3000
+            git push origin sl3000
+          fi
       - name: Configure git
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Clone upstream ATF (mtksoc-20260123)
+      - name: Clone upstream ATF
         run: |
           git clone --depth 1 --branch mtksoc-20260123 https://github.com/mtk-openwrt/arm-trusted-firmware.git upstream-atf
           rm -rf target-repo/arm-trusted-firmware
           mkdir -p target-repo/arm-trusted-firmware
           cp -r upstream-atf/* target-repo/arm-trusted-firmware/
-
-      - name: Clone upstream U-Boot (mtksoc-20250711)
+      - name: Clone upstream U-Boot
         run: |
           git clone --depth 1 --branch mtksoc-20250711 https://github.com/mtk-openwrt/u-boot.git upstream-uboot
           rm -rf target-repo/u-boot
           mkdir -p target-repo/u-boot
           cp -r upstream-uboot/* target-repo/u-boot/
-
-      - name: Commit and push changes
+      - name: Commit and push
         run: |
           cd target-repo
           git add .
