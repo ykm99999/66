@@ -16,13 +16,14 @@ export ARCH=arm64
 
 # ========== 路径定义 ==========
 ATF_DIR="$SOURCE_DIR/arm-trusted-firmware"
-UBOOT_DIR="$SOURCE_DIR/bl-mt798x/uboot-mtk-20250711"
+UBOOT_DIR="$SOURCE_DIR/u-boot"
 
-# ========== 编译 ATF（NOR 版） ==========
-echo "=== Building ATF (NOR) ==="
+# ========== 编译 ATF（官方源，NOR 版） ==========
+echo "=== Building ATF (official, NOR) ==="
 cd $ATF_DIR
 make clean
-make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=nor LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
+# 官方 mtk-openwrt ATF 编译参数示例（可根据实际情况调整）
+make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 BOOT_DEVICE=nor LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4
 
 if [ ! -f build/mt7981/release/bl2.bin ]; then
     echo "❌ bl2.bin not found"
@@ -44,13 +45,15 @@ FIPTOOL="$PWD/tools/fiptool/fiptool"
 mkdir -p $UBOOT_DIR/tools
 cp -f $FIPTOOL $UBOOT_DIR/tools/fiptool
 
-# ========== 编译 U-Boot (hanwckf，NOR 版) ==========
+# ========== 编译 U-Boot（官方源，NOR 版） ==========
 cd $UBOOT_DIR
-echo "=== Building U-Boot from hanwckf source (NOR) ==="
+echo "=== Building U-Boot (official, NOR) ==="
 make clean
 
-# 自动选择 SPI-NOR 的 defconfig
-if [ -f configs/mt7981b_nor_defconfig ]; then
+# 自动选择 SPI-NOR 的 defconfig（官方源中常见的有 mt7981_nor_defconfig 或 mt7981b_nor_defconfig）
+if [ -f configs/mt7981_nor_defconfig ]; then
+    make CROSS_COMPILE=aarch64-linux-gnu- mt7981_nor_defconfig
+elif [ -f configs/mt7981b_nor_defconfig ]; then
     make CROSS_COMPILE=aarch64-linux-gnu- mt7981b_nor_defconfig
 elif [ -f configs/mt7981_spim_nor_rfb_defconfig ]; then
     make CROSS_COMPILE=aarch64-linux-gnu- mt7981_spim_nor_rfb_defconfig
@@ -91,7 +94,6 @@ mkdir -p "$OUTPUT_DIR/firmware"
 cp build.log "$OUTPUT_DIR/firmware/"
 
 # 复制 SPI‑NOR 救砖镜像（设备名匹配 mk 中的定义）
-# 注意：生成的镜像名称可能为 openwrt-...-mt7981_sl3000_spi_rescue-initramfs.bin 或 rescue.bin
 RESCUE_IMAGE=$(find bin/targets/ -type f \( -name '*mt7981_sl3000_spi_rescue*initramfs*.bin' -o -name 'rescue.bin' \) | head -1)
 if [ -z "$RESCUE_IMAGE" ]; then
     echo "❌ No rescue image found"
@@ -101,16 +103,6 @@ cp -v "$RESCUE_IMAGE" "$OUTPUT_DIR/firmware/Spi-flash-32MB.bin"
 echo "✅ Rescue image saved as Spi-flash-32MB.bin"
 
 # ========== 准备完整 SPI‑NOR 镜像所需的其他分区文件 ==========
-# 分区表（偏移量，单位字节）：
-# 0x000000-0x100000 : BL2        (1MB)
-# 0x100000-0x110000 : u-boot-env (64KB)
-# 0x110000-0x180000 : Config     (448KB)
-# 0x180000-0x380000 : Factory    (2MB)
-# 0x380000-0x580000 : FIP        (2MB)
-# 0x580000-0x1e80000: firmware   (25MB)
-# 0x1e80000-0x1ea0000: Product   (128KB)
-# 0x1ea0000-0x2000000: Custom    (1.375MB)
-
 BACKUP_DIR="$SOURCE_DIR/original_backup"
 mkdir -p "$BACKUP_DIR"
 
@@ -145,7 +137,7 @@ prepare_partition "u-boot-env" 65536
 # Config (448KB = 458752 字节)
 prepare_partition "Config" 458752
 
-# Factory (2MB = 2097152 字节) — 重要：包含无线校准数据
+# Factory (2MB = 2097152 字节)
 prepare_partition "Factory" 2097152
 
 # FIP 已从 U-Boot 编译得到
