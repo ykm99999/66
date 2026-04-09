@@ -22,7 +22,6 @@ UBOOT_DIR="$SOURCE_DIR/u-boot"
 echo "=== Building ATF (official, NOR) ==="
 cd $ATF_DIR
 make clean
-# 官方 mtk-openwrt ATF 编译参数示例（可根据实际情况调整）
 make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 BOOT_DEVICE=nor LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4
 
 if [ ! -f build/mt7981/release/bl2.bin ]; then
@@ -45,20 +44,16 @@ FIPTOOL="$PWD/tools/fiptool/fiptool"
 mkdir -p $UBOOT_DIR/tools
 cp -f $FIPTOOL $UBOOT_DIR/tools/fiptool
 
-# ========== 编译 U-Boot（官方源，NOR 版） ==========
+# ========== 编译 U-Boot（使用修改后的 mt7981_nor_emmc_rfb_defconfig） ==========
 cd $UBOOT_DIR
-echo "=== Building U-Boot (official, NOR) ==="
+echo "=== Building U-Boot (custom defconfig) ==="
 make clean
 
-# 自动选择 SPI-NOR 的 defconfig（官方源中常见的有 mt7981_nor_defconfig 或 mt7981b_nor_defconfig）
-if [ -f configs/mt7981_nor_defconfig ]; then
-    make CROSS_COMPILE=aarch64-linux-gnu- mt7981_nor_defconfig
-elif [ -f configs/mt7981b_nor_defconfig ]; then
-    make CROSS_COMPILE=aarch64-linux-gnu- mt7981b_nor_defconfig
-elif [ -f configs/mt7981_spim_nor_rfb_defconfig ]; then
-    make CROSS_COMPILE=aarch64-linux-gnu- mt7981_spim_nor_rfb_defconfig
+# 优先使用你修改过的 defconfig
+if [ -f configs/mt7981_nor_emmc_rfb_defconfig ]; then
+    make CROSS_COMPILE=aarch64-linux-gnu- mt7981_nor_emmc_rfb_defconfig
 else
-    echo "❌ No suitable defconfig found for SPI-NOR!"
+    echo "❌ mt7981_nor_emmc_rfb_defconfig not found"
     exit 1
 fi
 
@@ -93,7 +88,7 @@ fi
 mkdir -p "$OUTPUT_DIR/firmware"
 cp build.log "$OUTPUT_DIR/firmware/"
 
-# 复制 SPI‑NOR 救砖镜像（设备名匹配 mk 中的定义）
+# 复制 SPI‑NOR 救砖镜像（设备名匹配）
 RESCUE_IMAGE=$(find bin/targets/ -type f \( -name '*mt7981_sl3000_spi_rescue*initramfs*.bin' -o -name 'rescue.bin' \) | head -1)
 if [ -z "$RESCUE_IMAGE" ]; then
     echo "❌ No rescue image found"
@@ -137,7 +132,7 @@ prepare_partition "u-boot-env" 65536
 # Config (448KB = 458752 字节)
 prepare_partition "Config" 458752
 
-# Factory (2MB = 2097152 字节)
+# Factory (2MB = 2097152 字节) — 重要：包含无线校准数据
 prepare_partition "Factory" 2097152
 
 # FIP 已从 U-Boot 编译得到
