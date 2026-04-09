@@ -3,6 +3,7 @@ set -euo pipefail
 
 WORKSPACE="$GITHUB_WORKSPACE"
 SOURCE_DIR="$WORKSPACE/source-repo"
+CONFIG_DIR="$WORKSPACE/main-repo/888"
 OUTPUT_DIR="$WORKSPACE/output"
 STAGING_DIR_IMAGE="$WORKSPACE/immortalwrt-build/staging_dir/image"
 
@@ -29,7 +30,6 @@ if [ ! -f build/mt7981/release/bl2.bin ]; then
     exit 1
 fi
 cp -v build/mt7981/release/bl2.bin "$OUTPUT_DIR/atf/bl2-1g-nor.bin"
-# bl2.elf 不是必须的，忽略
 
 if [ ! -f build/mt7981/release/bl31.bin ]; then
     echo "❌ bl31.bin not found"
@@ -37,7 +37,7 @@ if [ ! -f build/mt7981/release/bl31.bin ]; then
 fi
 cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin"
 
-# ========== 编译 fiptool（修复路径问题） ==========
+# ========== 编译 fiptool ==========
 echo "=== Compiling fiptool ==="
 make fiptool CROSS_COMPILE=
 FIPTOOL="$PWD/tools/fiptool/fiptool"
@@ -49,12 +49,15 @@ mkdir -p $UBOOT_DIR/tools
 cp -f $FIPTOOL $UBOOT_DIR/tools/fiptool
 echo "✅ fiptool compiled"
 
-# ========== 编译 U-Boot（使用修改后的 mt7981_nor_emmc_rfb_defconfig） ==========
+# ========== 准备 U-Boot：复制自定义设备树 ==========
 cd $UBOOT_DIR
+echo "=== Copying custom device tree to U-Boot ==="
+cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts arch/arm/dts/
+
+# ========== 编译 U-Boot ==========
 echo "=== Building U-Boot (custom defconfig) ==="
 make clean
 
-# 优先使用你修改过的 defconfig
 if [ -f configs/mt7981_nor_emmc_rfb_defconfig ]; then
     make CROSS_COMPILE=aarch64-linux-gnu- mt7981_nor_emmc_rfb_defconfig
 else
@@ -93,7 +96,6 @@ fi
 mkdir -p "$OUTPUT_DIR/firmware"
 cp build.log "$OUTPUT_DIR/firmware/"
 
-# 复制 SPI‑NOR 救砖镜像（设备名匹配）
 RESCUE_IMAGE=$(find bin/targets/ -type f \( -name '*mt7981_sl3000_spi_rescue*initramfs*.bin' -o -name 'rescue.bin' \) | head -1)
 if [ -z "$RESCUE_IMAGE" ]; then
     echo "❌ No rescue image found"
@@ -106,7 +108,6 @@ echo "✅ Rescue image saved as Spi-flash-32MB.bin"
 BACKUP_DIR="$SOURCE_DIR/original_backup"
 mkdir -p "$BACKUP_DIR"
 
-# 辅助函数：检查或创建分区文件
 prepare_partition() {
     local name=$1
     local size=$2
@@ -124,46 +125,31 @@ prepare_partition() {
     fi
 }
 
-# BL2 已从 ATF 编译得到
 if [ ! -f "$OUTPUT_DIR/atf/bl2-1g-nor.bin" ]; then
     echo "❌ bl2-1g-nor.bin missing"
     exit 1
 fi
 cp "$OUTPUT_DIR/atf/bl2-1g-nor.bin" "$OUTPUT_DIR/atf/BL2.bin"
 
-# u-boot-env (64KB = 65536 字节)
 prepare_partition "u-boot-env" 65536
-
-# Config (448KB = 458752 字节)
 prepare_partition "Config" 458752
-
-# Factory (2MB = 2097152 字节) — 重要：包含无线校准数据
 prepare_partition "Factory" 2097152
 
-# FIP 已从 U-Boot 编译得到
 if [ ! -f "$OUTPUT_DIR/uboot/fip-nor.bin" ]; then
     echo "❌ fip-nor.bin missing"
     exit 1
 fi
 cp "$OUTPUT_DIR/uboot/fip-nor.bin" "$OUTPUT_DIR/atf/FIP.bin"
 
-# firmware (使用刚编译的救赎镜像)
 cp "$OUTPUT_DIR/firmware/Spi-flash-32MB.bin" "$OUTPUT_DIR/atf/firmware.bin"
-
-# Product (128KB = 131072 字节)
 prepare_partition "Product" 131072
-
-# Custom (1.375MB = 1441792 字节)
 prepare_partition "Custom" 1441792
 
 # ========== 生成完整的 32MB SPI‑NOR 镜像 ==========
 echo "=== Creating full 32MB SPI‑NOR image ==="
 FULL_IMAGE="$OUTPUT_DIR/firmware/SL3000-full-spi-nor-32mb.bin"
 
-# 创建全 0xFF 的 32MB 文件
 dd if=/dev/zero bs=1M count=32 2>/dev/null | tr '\000' '\377' > "$FULL_IMAGE"
-
-# 按分区顺序写入（注意 bs=1 确保 seek 单位为字节）
 dd if="$OUTPUT_DIR/atf/BL2.bin" of="$FULL_IMAGE" bs=1 conv=notrunc
 dd if="$OUTPUT_DIR/atf/u-boot-env.bin" of="$FULL_IMAGE" bs=1 seek=$((0x100000)) conv=notrunc
 dd if="$OUTPUT_DIR/atf/Config.bin" of="$FULL_IMAGE" bs=1 seek=$((0x110000)) conv=notrunc
@@ -176,10 +162,8 @@ dd if="$OUTPUT_DIR/atf/Custom.bin" of="$FULL_IMAGE" bs=1 seek=$((0x1ea0000)) con
 echo "✅ Full 32MB SPI‑NOR image created: $FULL_IMAGE"
 ls -lh "$FULL_IMAGE"
 
-# 检查 Factory 分区是否为占位（全 0xFF）并给出警告
 if cmp -s "$OUTPUT_DIR/atf/Factory.bin" <(dd if=/dev/zero bs=2097152 count=1 2>/dev/null | tr '\000' '\377'); then
     echo "⚠️  WARNING: Factory partition is empty (0xFF). WiFi calibration data missing!"
-    echo "   Please replace $OUTPUT_DIR/atf/Factory.bin with a valid backup and re-run this script."
 fi
 
 # ========== 打包 mtk_uartboot ==========
