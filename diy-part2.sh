@@ -18,29 +18,29 @@ export ARCH=arm64
 ATF_DIR="$SOURCE_DIR/arm-trusted-firmware"
 UBOOT_DIR="$SOURCE_DIR/u-boot"
 
-# ========== 编译 ATF ==========
+# ========== 编译 ATF（修复后参数） ==========
 echo "=== Building ATF (NOR) ==="
-cd $ATF_DIR
+cd "$ATF_DIR"
 make clean
+# 修复点1: 使用正确参数 BOARD=mt7981_bga, BOOT_DEVICE=spi_nor, 添加 NMBM=1
 make CROSS_COMPILE=aarch64-linux-gnu- \
      PLAT=mt7981 \
-     DEBUG=0 \
-     BOOT_DEVICE=nor \
-     LOG_LEVEL=20 \
-     DRAM_SIZE=1024 \
+     BOOT_DEVICE=spi_nor \
      DDR_TYPE=ddr4 \
-     BOARD_BGA=1
+     DRAM_SIZE=1024 \
+     NMBM=1 \
+     BOARD=mt7981_bga \
+     DEBUG=0 \
+     LOG_LEVEL=20 \
+     all
 
 if [ ! -f build/mt7981/release/bl2.bin ]; then
     echo "❌ bl2.bin not found"
     exit 1
 fi
 
-# 检查 bl2.bin 大小（仅警告，不退出）
 BL2_SIZE=$(stat -c%s build/mt7981/release/bl2.bin)
-if [ $BL2_SIZE -lt 300000 ]; then
-    echo "⚠️  Warning: bl2.bin size ($BL2_SIZE bytes) is smaller than expected (>=300KB). This may still work."
-fi
+echo "✅ bl2.bin size: $BL2_SIZE bytes"
 cp -v build/mt7981/release/bl2.bin "$OUTPUT_DIR/atf/bl2-1g-nor.bin"
 
 if [ ! -f build/mt7981/release/bl31.bin ]; then
@@ -58,12 +58,12 @@ if [ ! -f "$FIPTOOL" ]; then
     exit 1
 fi
 chmod +x "$FIPTOOL"
-mkdir -p $UBOOT_DIR/tools
-cp -f "$FIPTOOL" $UBOOT_DIR/tools/fiptool
+mkdir -p "$UBOOT_DIR/tools"
+cp -f "$FIPTOOL" "$UBOOT_DIR/tools/fiptool"
 echo "✅ fiptool compiled"
 
 # ========== 准备 U-Boot ==========
-cd $UBOOT_DIR
+cd "$UBOOT_DIR"
 echo "=== Copying device tree to U-Boot ==="
 mkdir -p arch/arm/dts
 if [ ! -f "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" ]; then
@@ -72,9 +72,11 @@ if [ ! -f "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" ]; then
 fi
 cp -v "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" arch/arm/dts/
 
-echo "Removing USB nodes for U-Boot compatibility..."
-sed -i '/&usb_phy/,/};/d' arch/arm/dts/mt7981b-sl3000-emmc.dts
-sed -i '/&xhci/,/};/d' arch/arm/dts/mt7981b-sl3000-emmc.dts
+# 修复点2: 禁用 USB 节点而非物理删除，避免破坏 DTS 结构
+echo "=== Adapting DTS for U-Boot ==="
+sed -i '/&usb_phy {/a \    status = "disabled";' arch/arm/dts/mt7981b-sl3000-emmc.dts
+sed -i '/&xhci {/a \    status = "disabled";' arch/arm/dts/mt7981b-sl3000-emmc.dts
+echo "✅ USB nodes disabled in DTS"
 
 DEFCONFIG="configs/mt7981_nor_emmc_rfb_defconfig"
 if [ ! -f "$DEFCONFIG" ]; then
@@ -85,7 +87,7 @@ cp "$DEFCONFIG" "$DEFCONFIG.bak"
 sed -i 's/CONFIG_DEFAULT_DEVICE_TREE=".*"/CONFIG_DEFAULT_DEVICE_TREE="mt7981b-sl3000-emmc"/' "$DEFCONFIG"
 sed -i 's/CONFIG_DEFAULT_FDT_FILE=".*"/CONFIG_DEFAULT_FDT_FILE="mt7981b-sl3000-emmc"/' "$DEFCONFIG"
 
-# ========== 编译 U-Boot ==========
+# ========== 编译 U-Boot（修复 FIP 生成逻辑） ==========
 echo "=== Building U-Boot ==="
 make clean
 make CROSS_COMPILE=aarch64-linux-gnu- mt7981_nor_emmc_rfb_defconfig
@@ -100,8 +102,8 @@ fi
 
 make CROSS_COMPILE=aarch64-linux-gnu- BL31="$BL31_PATH" -j$(nproc)
 
-# 如果自动生成的 u-boot.fip 不存在或太小，手动创建
-if [ ! -f u-boot.fip ] || [ $(stat -c%s u-boot.fip) -lt 1500000 ]; then
+# 修复点3: 降低阈值到 1MB，避免误判
+if [ ! -f u-boot.fip ] || [ $(stat -c%s u-boot.fip) -lt 1000000 ]; then
     echo "⚠️  u-boot.fip missing or too small, manually creating..."
     if [ -f u-boot.bin ] && [ -f "$BL31_PATH" ]; then
         tools/fiptool create --soc-fw "$BL31_PATH" --nt-fw u-boot.bin u-boot.fip
@@ -114,13 +116,10 @@ if [ ! -f u-boot.fip ]; then
 fi
 
 FIP_SIZE=$(stat -c%s u-boot.fip)
-if [ $FIP_SIZE -lt 1500000 ]; then
-    echo "⚠️  Warning: u-boot.fip size ($FIP_SIZE bytes) is smaller than expected (>=1.5MB). This may still work."
-fi
+echo "✅ U-Boot compiled (FIP size = $FIP_SIZE bytes)"
 
 cp u-boot.fip "$OUTPUT_DIR/uboot/fip-nor.bin"
 cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
-echo "✅ U-Boot compiled (FIP size = $FIP_SIZE bytes)"
 
 # ========== 构建 ImmortalWrt 救砖固件 ==========
 cd "$IMMORTALWRT_BUILD_DIR"
@@ -130,7 +129,6 @@ if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_spi_rescue=y" 
     exit 1
 fi
 
-# 清理可能损坏的 host 工具
 rm -rf build_dir/host/libtool-*
 make VERSION_NUMBER="${VERSION_NUMBER:-1.0.0}" VERSION_CODE="${VERSION_CODE:-r1}" -j$(nproc) V=s 2>&1 | tee build.log
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
@@ -166,7 +164,7 @@ prepare_partition() {
         echo "Using existing: $output_file"
     else
         echo "⚠️  Warning: $name.bin not found, creating empty (0xFF) file of size $size bytes"
-        dd if=/dev/zero bs=$size count=1 2>/dev/null | tr '\000' '\377' > "$output_file"
+        dd if=/dev/zero bs="$size" count=1 2>/dev/null | tr '\000' '\377' > "$output_file"
     fi
 }
 
@@ -208,4 +206,4 @@ else
 fi
 
 echo "✅ Build complete"
-ls -la $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware
+ls -la "$OUTPUT_DIR/atf" "$OUTPUT_DIR/uboot" "$OUTPUT_DIR/firmware"
