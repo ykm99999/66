@@ -19,16 +19,14 @@
 
 	chosen {
 		stdout-path = "serial0:115200n8";
-		bootargs = "console=ttyS0,115200n1 earlycon=uart8250,mmio32,0x11002000";
+		bootargs = "console=ttyS0,115200n8 earlycon=uart8250,mmio32,0x11002000";
 	};
 
-	/* 1GB DDR4 */
 	memory@40000000 {
 		device_type = "memory";
 		reg = <0x0 0x40000000 0x0 0x40000000>;
 	};
 
-	/* 稳压器 */
 	reg_1p8v: regulator-1p8v {
 		compatible = "regulator-fixed";
 		regulator-name = "fixed-1.8V";
@@ -79,7 +77,6 @@
 	};
 };
 
-/* SPI-NOR 完整分区表（与 U-Boot 对齐，含 Product/Custom） */
 &spi0 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&spi0_flash_pins>;
@@ -124,13 +121,11 @@
 				read-only;
 			};
 
-			/* firmware 分区 25MB，与 initramfs 镜像大小匹配 */
 			partition@580000 {
 				label = "firmware";
 				reg = <0x580000 0x1900000>;
 			};
 
-			/* 原厂额外分区，救砖时保留 */
 			partition@1e80000 {
 				label = "Product";
 				reg = <0x1e80000 0x20000>;
@@ -145,7 +140,6 @@
 	};
 };
 
-/* eMMC 启用，并补全 UHS 引脚配置 */
 &mmc0 {
 	status = "okay";
 	pinctrl-names = "default", "state_uhs";
@@ -163,7 +157,6 @@
 	no-sdio;
 };
 
-/* 网络：MT7531 交换机 + 2.5G 上联 */
 &eth {
 	status = "okay";
 
@@ -213,7 +206,6 @@
 	};
 };
 
-/* 禁用 USB（设备无 USB 口） */
 &usb_phy { status = "disabled"; };
 &xhci { status = "disabled"; };
 
@@ -271,6 +263,3 @@
 
 &uart0 { status = "okay"; };
 &watchdog { status = "okay"; };
-
-&reg_3p3v { status = "okay"; };
-&reg_1p8v { status = "okay"; };
