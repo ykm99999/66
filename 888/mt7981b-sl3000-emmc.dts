@@ -206,9 +206,6 @@
 	};
 };
 
-&usb_phy { status = "disabled"; };
-&xhci { status = "disabled"; };
-
 &pio {
 	spi0_flash_pins: spi0-pins {
 		mux {
