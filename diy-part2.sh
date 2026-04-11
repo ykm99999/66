@@ -18,14 +18,13 @@ export ARCH=arm64
 ATF_DIR="$SOURCE_DIR/arm-trusted-firmware"
 UBOOT_DIR="$SOURCE_DIR/u-boot"
 
-# ========== 编译 ATF（修复后参数） ==========
+# ========== 编译 ATF（修复：BOOT_DEVICE=nor） ==========
 echo "=== Building ATF (NOR) ==="
 cd "$ATF_DIR"
 make clean
-# 修复点1: 使用正确参数 BOARD=mt7981_bga, BOOT_DEVICE=spi_nor, 添加 NMBM=1
 make CROSS_COMPILE=aarch64-linux-gnu- \
      PLAT=mt7981 \
-     BOOT_DEVICE=spi_nor \
+     BOOT_DEVICE=nor \
      DDR_TYPE=ddr4 \
      DRAM_SIZE=1024 \
      NMBM=1 \
@@ -72,7 +71,7 @@ if [ ! -f "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" ]; then
 fi
 cp -v "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" arch/arm/dts/
 
-# 修复点2: 禁用 USB 节点而非物理删除，避免破坏 DTS 结构
+# 禁用 USB 节点而非物理删除，避免破坏 DTS 结构
 echo "=== Adapting DTS for U-Boot ==="
 sed -i '/&usb_phy {/a \    status = "disabled";' arch/arm/dts/mt7981b-sl3000-emmc.dts
 sed -i '/&xhci {/a \    status = "disabled";' arch/arm/dts/mt7981b-sl3000-emmc.dts
@@ -87,7 +86,7 @@ cp "$DEFCONFIG" "$DEFCONFIG.bak"
 sed -i 's/CONFIG_DEFAULT_DEVICE_TREE=".*"/CONFIG_DEFAULT_DEVICE_TREE="mt7981b-sl3000-emmc"/' "$DEFCONFIG"
 sed -i 's/CONFIG_DEFAULT_FDT_FILE=".*"/CONFIG_DEFAULT_FDT_FILE="mt7981b-sl3000-emmc"/' "$DEFCONFIG"
 
-# ========== 编译 U-Boot（修复 FIP 生成逻辑） ==========
+# ========== 编译 U-Boot ==========
 echo "=== Building U-Boot ==="
 make clean
 make CROSS_COMPILE=aarch64-linux-gnu- mt7981_nor_emmc_rfb_defconfig
@@ -102,7 +101,6 @@ fi
 
 make CROSS_COMPILE=aarch64-linux-gnu- BL31="$BL31_PATH" -j$(nproc)
 
-# 修复点3: 降低阈值到 1MB，避免误判
 if [ ! -f u-boot.fip ] || [ $(stat -c%s u-boot.fip) -lt 1000000 ]; then
     echo "⚠️  u-boot.fip missing or too small, manually creating..."
     if [ -f u-boot.bin ] && [ -f "$BL31_PATH" ]; then
