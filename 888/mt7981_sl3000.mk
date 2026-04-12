@@ -3,7 +3,7 @@
 include ./common/common.mk
 
 # -------------------------------------------------------------------
-# 司络 SL3000 - SPI NOR 救援模式 (无 eMMC 启动，纯 SPI 启动)
+# 司络 SL3000 - SPI NOR 救援模式
 # -------------------------------------------------------------------
 define Device/mt7981_sl3000_spi_rescue
   DEVICE_VENDOR := Siluo
@@ -20,25 +20,29 @@ define Device/mt7981_sl3000_spi_rescue
   KERNEL := kernel-bin | gzip
   KERNEL_INITRAMFS := kernel-bin | gzip
 
-  # 确保只构建救援相关组件，不生成完整 rootfs
   IMAGES := gpt.bin spi-full-32mb.bin
   IMAGE/gpt.bin := gen_spi_gpt
   IMAGE/spi-full-32mb.bin := gen_spi_full_image
 
-  # 定义 SPI NOR 分区布局 (与 GPT 表一致)
-  # 注意：这里的分区定义仅用于 OpenWrt 内部记录，实际写入 Flash 由 GPT 决定
-  # 偏移地址参考 MT7981 常见 SPI 布局
+  # ---------- 关键修复：指定正确的 U-Boot 配置 ----------
+  # 适用于 OpenWrt 23.05+ / 24.10，官方 uboot-mediatek 包中 MT7981 的配置名
+  UBOOT_CONFIG := mt7981_rfb
+
+  # 如果 U-Boot 需要知道设备树名称，可以传递以下参数
+  # UBOOT_MAKE_FLAGS += DEVICE_TREE=mt7981b-sl3000-emmc
+
+  # ---------- 分区布局（与 DTS 及 GPT 生成规则严格对齐）----------
   BLOCKSIZE := 128k
   BL2_OFFSET := 0x00000000
-  BL2_SIZE := 0x00040000      # 256KB (实际通常更小)
+  BL2_SIZE := 0x00040000          # 256KB
   FIP_OFFSET := 0x00040000
-  FIP_SIZE := 0x001C0000      # 1.75MB (包含 ATF BL31 + U-Boot)
+  FIP_SIZE := 0x001C0000          # 1.75MB (BL31 + U-Boot)
   UBOOTENV_OFFSET := 0x00200000
-  UBOOTENV_SIZE := 0x00020000 # 128KB
+  UBOOTENV_SIZE := 0x00020000     # 128KB
   KERNEL_OFFSET := 0x00220000
-  KERNEL_SIZE := 0x00C00000   # 12MB (示例)
+  KERNEL_SIZE := 0x00C00000       # 12MB
   ROOTFS_OFFSET := 0x00E20000
-  ROOTFS_SIZE := 0x011E0000   # 剩余空间 (约 18MB)
+  ROOTFS_SIZE := 0x011E0000       # ~18MB (剩余空间)
 
   DEVICE_PACKAGES := \
     uboot-envtools mtd-utils kmod-mtd-rw \
