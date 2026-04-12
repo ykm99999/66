@@ -5,8 +5,8 @@
 #include <dt-bindings/leds/common.h>
 
 / {
-	model = "Siluo SL3000 (1GB DDR4, 32MB SPI-NOR Rescue)";
-	compatible = "siluo,sl3000-spi-nor", "mediatek,mt7981";
+	model = "Siluo SL3000 (1GB DDR4 / 32MB SPI-NOR Rescue)";
+	compatible = "siluo,sl3000-spi-rescue", "mediatek,mt7981";
 
 	aliases {
 		serial0 = &uart0;
@@ -19,12 +19,13 @@
 
 	chosen {
 		stdout-path = "serial0:115200n8";
+		// 使用 GPT 时，内核通过 root=PARTUUID=... 指定根分区，bootargs 可精简
 		bootargs = "console=ttyS0,115200n8 earlycon=uart8250,mmio32,0x11002000";
 	};
 
 	memory@40000000 {
 		device_type = "memory";
-		reg = <0x0 0x40000000 0x0 0x40000000>;
+		reg = <0x0 0x40000000 0x0 0x40000000>; // 1GB
 	};
 
 	reg_1p8v: regulator-1p8v {
@@ -48,18 +49,18 @@
 	leds {
 		compatible = "gpio-leds";
 
-		status_red_led: status-red {
+		status_red_led: led-0 {
 			label = "red:status";
 			gpios = <&pio 10 GPIO_ACTIVE_LOW>;
 		};
 
-		status_green_led: status-green {
+		status_green_led: led-1 {
 			label = "green:status";
 			gpios = <&pio 11 GPIO_ACTIVE_LOW>;
 			linux,default-trigger = "heartbeat";
 		};
 
-		status_blue_led: status-blue {
+		status_blue_led: led-2 {
 			label = "blue:status";
 			gpios = <&pio 12 GPIO_ACTIVE_LOW>;
 		};
@@ -77,6 +78,14 @@
 	};
 };
 
+&uart0 {
+	status = "okay";
+};
+
+&watchdog {
+	status = "okay";
+};
+
 &spi0 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&spi0_flash_pins>;
@@ -92,49 +101,33 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 
+			// 分区布局必须与 GPT 表（及 U-Boot 环境变量偏移）保持一致！
+			// 以下分区与 mt7981_sl3000.mk 中生成的 GPT 分区表完全匹配
 			partition@0 {
-				label = "BL2";
-				reg = <0x000000 0x100000>;
+				label = "bl2";
+				reg = <0x000000 0x40000>;      // 256KB
 				read-only;
 			};
 
-			partition@100000 {
+			partition@40000 {
+				label = "fip";
+				reg = <0x040000 0x1c0000>;    // 1.75MB (包含 BL31 + U-Boot)
+				read-only;
+			};
+
+			partition@200000 {
 				label = "u-boot-env";
-				reg = <0x100000 0x10000>;
+				reg = <0x200000 0x20000>;     // 128KB
 			};
 
-			partition@110000 {
-				label = "Config";
-				reg = <0x110000 0x70000>;
-				read-only;
+			partition@220000 {
+				label = "kernel";
+				reg = <0x220000 0xc00000>;    // 12MB
 			};
 
-			partition@180000 {
-				label = "Factory";
-				reg = <0x180000 0x200000>;
-				read-only;
-			};
-
-			partition@380000 {
-				label = "FIP";
-				reg = <0x380000 0x200000>;
-				read-only;
-			};
-
-			partition@580000 {
-				label = "firmware";
-				reg = <0x580000 0x1900000>;
-			};
-
-			partition@1e80000 {
-				label = "Product";
-				reg = <0x1e80000 0x20000>;
-				read-only;
-			};
-
-			partition@1ea0000 {
-				label = "Custom";
-				reg = <0x1ea0000 0x160000>;
+			partition@e20000 {
+				label = "rootfs";
+				reg = <0xe20000 0x11e0000>;   // ~18MB (剩余空间)
 			};
 		};
 	};
@@ -164,6 +157,7 @@
 		compatible = "mediatek,eth-mac";
 		reg = <0>;
 		phy-mode = "2500base-x";
+
 		fixed-link {
 			speed = <2500>;
 			full-duplex;
@@ -185,16 +179,32 @@
 				#address-cells = <1>;
 				#size-cells = <0>;
 
-				port@0 { reg = <0>; label = "lan1"; };
-				port@1 { reg = <1>; label = "lan2"; };
-				port@2 { reg = <2>; label = "lan3"; };
-				port@3 { reg = <3>; label = "wan"; };
+				port@0 {
+					reg = <0>;
+					label = "lan1";
+				};
+
+				port@1 {
+					reg = <1>;
+					label = "lan2";
+				};
+
+				port@2 {
+					reg = <2>;
+					label = "lan3";
+				};
+
+				port@3 {
+					reg = <3>;
+					label = "wan";
+				};
 
 				port@6 {
 					reg = <6>;
 					label = "cpu";
 					ethernet = <&gmac0>;
 					phy-mode = "2500base-x";
+
 					fixed-link {
 						speed = <2500>;
 						full-duplex;
@@ -241,7 +251,8 @@
 		};
 		conf-cmd-dat {
 			pins = "EMMC_DAT0", "EMMC_DAT1", "EMMC_DAT2", "EMMC_DAT3",
-			       "EMMC_DAT4", "EMMC_DAT5", "EMMC_DAT6", "EMMC_DAT7", "EMMC_CMD";
+			       "EMMC_DAT4", "EMMC_DAT5", "EMMC_DAT6", "EMMC_DAT7",
+			       "EMMC_CMD";
 			input-enable;
 			bias-pull-up;
 			drive-strength = <MTK_DRIVE_8mA>;
@@ -257,6 +268,3 @@
 		};
 	};
 };
-
-&uart0 { status = "okay"; };
-&watchdog { status = "okay"; };
