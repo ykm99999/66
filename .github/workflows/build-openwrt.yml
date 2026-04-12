@@ -1,84 +1,111 @@
-name: SL3000 Rescue Build (Only SPI‑NOR)
+name: Build SL3000 Rescue SPI Image
 
 on:
-  workflow_dispatch:
   push:
-    tags: [ 'v*' ]
+    branches: [ "main", "master" ]
+    paths:
+      - '888/**'
+      - '.github/workflows/build-sl3000-rescue.yml'
+  workflow_dispatch:          # 允许手动触发
+
+env:
+  OPENWRT_VERSION: "v23.05.4"       # 稳定版本，可根据需要调整
+  BUILD_THREADS: "4"                # 编译并行线程数
+  SPI_FLASH_SIZE_MB: "32"           # SPI NOR 容量
 
 jobs:
   build-rescue:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+
     steps:
-      - name: Checkout own repository (contains all source code)
+      # ------------------------------------------------------------
+      # 1. 检出代码（包含 888/ 目录下的三件套）
+      # ------------------------------------------------------------
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          path: main-repo
 
-      - name: Prepare source-repo (symlink to directories inside main-repo)
+      # ------------------------------------------------------------
+      # 2. 安装编译依赖（包括 gdisk 用于 sgdisk）
+      # ------------------------------------------------------------
+      - name: Install build dependencies
         run: |
-          mkdir -p source-repo
-          ln -sf $PWD/main-repo/arm-trusted-firmware source-repo/
-          ln -sf $PWD/main-repo/u-boot source-repo/
-          ln -sf $PWD/main-repo/immortalwrt source-repo/
-          ln -sf $PWD/main-repo/mtk_uartboot source-repo/
-          ls -la source-repo/
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk \
+          gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev \
+          python3 python3-distutils python3-setuptools rsync swig unzip zlib1g-dev \
+          file wget cpio unzip gdisk
 
-      - name: Install dependencies
+      # ------------------------------------------------------------
+      # 3. 准备 OpenWrt 源码并整合配置文件
+      # ------------------------------------------------------------
+      - name: Prepare OpenWrt source and inject configs
         run: |
-          sudo apt update
-          sudo apt install -y build-essential clang flex bison gawk \
-            gettext git libncurses-dev libssl-dev \
-            python3-distutils python3-setuptools rsync unzip zlib1g-dev file wget \
-            gcc-aarch64-linux-gnu device-tree-compiler
+          echo "Cloning OpenWrt $OPENWRT_VERSION ..."
+          git clone --depth=1 --branch $OPENWRT_VERSION https://github.com/openwrt/openwrt.git openwrt
+          cd openwrt
 
-      - name: Run diy-part1.sh
+          # 复制三件套到正确位置
+          echo "Copying SL3000 configuration files..."
+          cp ../888/sl3000-rescue.config .config
+          cp ../888/mt7981b-sl3000-emmc.dts target/linux/mediatek/dts/
+          cp ../888/mt7981_sl3000.mk target/linux/mediatek/image/
+
+          # 更新 feeds 并安装所有包定义
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      # ------------------------------------------------------------
+      # 4. 开始编译（工具链 + 目标固件组件）
+      # ------------------------------------------------------------
+      - name: Build toolchain and rescue components
         run: |
-          chmod +x main-repo/diy-part1.sh
-          cd main-repo
-          ./diy-part1.sh
+          cd openwrt
+          make defconfig
+          make -j $BUILD_THREADS download
+          make -j $BUILD_THREADS tools/install
+          make -j $BUILD_THREADS toolchain/install
+          # 编译内核及目标模块
+          make -j $BUILD_THREADS target/linux/compile
+          # 编译必要的启动固件包（ATF、U-Boot）
+          make -j $BUILD_THREADS package/boot/arm-trusted-firmware-mediatek/compile
+          make -j $BUILD_THREADS package/boot/uboot-mediatek/compile
+          # 此时 Makefile 中的 gen_spi_gpt 和 gen_spi_full_image 规则会自动执行
+          # 最终在 bin/targets/mediatek/filogic/ 下生成所需文件
 
-      - name: Run diy-part2.sh
+      # ------------------------------------------------------------
+      # 5. 收集并整理构建产物
+      # ------------------------------------------------------------
+      - name: Collect artifacts
         run: |
-          chmod +x main-repo/diy-part2.sh
-          cd main-repo
-          ./diy-part2.sh
+          mkdir -p rescue-output
+          cd openwrt
 
-      - name: List firmware files
-        run: |
-          echo "=== Rescue build output ==="
-          ls -la output/atf/ output/uboot/ output/firmware/ || true
+          # 查找并复制所有相关输出
+          # GPT 分区表
+          find bin/targets/mediatek/filogic/ -name "gpt.bin" -exec cp {} ../rescue-output/ \;
+          # 完整 SPI 镜像
+          find bin/targets/mediatek/filogic/ -name "spi-full-32mb.bin" -exec cp {} ../rescue-output/ \;
+          # BL2 引导文件
+          find bin/targets/mediatek/filogic/ -name "bl2.img" -exec cp {} ../rescue-output/ \;
+          find bin/targets/mediatek/filogic/ -name "bl2.bin" -exec cp {} ../rescue-output/ \;
+          # FIP 镜像（ATF BL31 + U-Boot）
+          find bin/targets/mediatek/filogic/ -name "fip.bin" -exec cp {} ../rescue-output/ \;
+          # 设备树 Blob
+          find build_dir/target-aarch64_cortex-a53_musl/linux-mediatek_filogic/ -name "*.dtb" -exec cp {} ../rescue-output/ \;
+          # Initramfs 内核（救援用）
+          find bin/targets/mediatek/filogic/ -name "*initramfs-kernel.bin" -exec cp {} ../rescue-output/ \;
 
-      - name: Generate release tag
-        id: release_tag
-        run: |
-          TAG_NAME="v$(date -u +'%Y%m%d-%H%M%S')-rescue"
-          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
-          echo "Release tag: $TAG_NAME"
+          # 生成文件列表便于核对
+          ls -lah ../rescue-output/ > ../rescue-output/filelist.txt
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.release_tag.outputs.tag_name }}
-          name: "SL3000 Rescue Firmware ${{ steps.release_tag.outputs.tag_name }}"
-          body: |
-            ## 救砖全家桶（SPI‑NOR 32MB）
-            - 完整镜像 `SL3000-full-spi-nor-32mb.bin`（可直接烧录到 SPI-NOR）
-            - 单独文件：`bl2-1g-nor.bin`、`fip-nor.bin`、`Spi-flash-32MB.bin`
-            - 工具包：`mtk_uartboot.tar.gz`
-          files: |
-            output/atf/*.bin
-            output/atf/*.elf
-            output/uboot/*.bin
-            output/firmware/Spi-flash-32MB.bin
-            output/firmware/SL3000-full-spi-nor-32mb.bin
-            output/mtk_uartboot.tar.gz
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload artifacts
+      # ------------------------------------------------------------
+      # 6. 上传产物到 GitHub Actions Artifact
+      # ------------------------------------------------------------
+      - name: Upload rescue artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sl3000-rescue-${{ steps.release_tag.outputs.tag_name }}
-          path: output/
+          name: sl3000-rescue-spi-full
+          path: rescue-output/
+          retention-days: 30
