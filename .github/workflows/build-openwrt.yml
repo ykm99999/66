@@ -1,74 +1,88 @@
-name: Build SL3000 Rescue SPI Image
+name: Build SL3000 Rescue Image (Manual Trigger)
 
 on:
-  push:
-    branches: [ "main", "master" ]
-    paths:
-      - '888/**'
-      - '.github/workflows/build-sl3000-rescue.yml'
-  workflow_dispatch:
+  workflow_dispatch:          # 仅允许手动触发
+    inputs:
+      clean_build:
+        description: 'Perform a clean build (clear caches)'
+        required: false
+        type: boolean
+        default: false
 
 env:
-  OPENWRT_VERSION: "v24.10.0"       # 关键修改：升级到 v24.10.0
-  BUILD_THREADS: "4"
-  SPI_FLASH_SIZE_MB: "32"
+  DEBIAN_FRONTEND: noninteractive
 
 jobs:
-  build-rescue:
+  build:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
 
     steps:
-      - name: Checkout repository
+      # ------------------------------------------------------------
+      # 1. 检出主仓库（包含 888/ 配置目录和两个脚本）
+      # ------------------------------------------------------------
+      - name: Checkout main repository
         uses: actions/checkout@v4
+        with:
+          path: main-repo
 
+      # ------------------------------------------------------------
+      # 2. 创建源码目录（source-repo）供脚本克隆使用
+      # ------------------------------------------------------------
+      - name: Prepare source directory
+        run: mkdir -p source-repo
+
+      # ------------------------------------------------------------
+      # 3. 安装编译依赖
+      # ------------------------------------------------------------
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential clang flex bison g++ gawk \
           gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev \
           python3 python3-setuptools rsync swig unzip zlib1g-dev \
-          file wget cpio gdisk
+          file wget cpio gdisk device-tree-compiler
 
-      - name: Prepare OpenWrt source and inject configs
+      # ------------------------------------------------------------
+      # 4. 设置工具链（aarch64）
+      # ------------------------------------------------------------
+      - name: Setup cross-compilation toolchain
         run: |
-          echo "Cloning OpenWrt $OPENWRT_VERSION ..."
-          git clone --depth=1 --branch $OPENWRT_VERSION https://github.com/openwrt/openwrt.git openwrt
-          cd openwrt
-          cp ../888/sl3000-rescue.config .config
-          cp ../888/mt7981b-sl3000-emmc.dts target/linux/mediatek/dts/
-          cp ../888/mt7981_sl3000.mk target/linux/mediatek/image/
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
 
-      - name: Build toolchain and rescue components
+      # ------------------------------------------------------------
+      # 5. 执行 diy-part1.sh（环境准备与源码克隆）
+      # ------------------------------------------------------------
+      - name: Run diy-part1.sh
         run: |
-          cd openwrt
-          make defconfig
-          make -j $BUILD_THREADS download
-          make -j $BUILD_THREADS tools/install
-          make -j $BUILD_THREADS toolchain/install
-          make -j $BUILD_THREADS target/linux/compile
-          make -j $BUILD_THREADS package/boot/arm-trusted-firmware-mediatek/compile
-          make -j $BUILD_THREADS package/boot/uboot-mediatek/compile
+          chmod +x main-repo/diy-part1.sh
+          cd main-repo
+          ./diy-part1.sh
 
+      # ------------------------------------------------------------
+      # 6. 执行 diy-part2.sh（编译与组装镜像）
+      # ------------------------------------------------------------
+      - name: Run diy-part2.sh
+        run: |
+          chmod +x main-repo/diy-part2.sh
+          cd main-repo
+          ./diy-part2.sh
+
+      # ------------------------------------------------------------
+      # 7. 整理并上传构建产物
+      # ------------------------------------------------------------
       - name: Collect artifacts
         run: |
-          mkdir -p rescue-output
-          cd openwrt
-          find bin/targets/mediatek/filogic/ -name "gpt.bin" -exec cp {} ../rescue-output/ \;
-          find bin/targets/mediatek/filogic/ -name "spi-full-32mb.bin" -exec cp {} ../rescue-output/ \;
-          find bin/targets/mediatek/filogic/ -name "bl2.img" -exec cp {} ../rescue-output/ \;
-          find bin/targets/mediatek/filogic/ -name "bl2.bin" -exec cp {} ../rescue-output/ \;
-          find bin/targets/mediatek/filogic/ -name "fip.bin" -exec cp {} ../rescue-output/ \;
-          find build_dir/target-aarch64_cortex-a53_musl/linux-mediatek_filogic/ -name "*.dtb" -exec cp {} ../rescue-output/ \;
-          find bin/targets/mediatek/filogic/ -name "*initramfs-kernel.bin" -exec cp {} ../rescue-output/ \;
-          ls -lah ../rescue-output/ > ../rescue-output/filelist.txt
+          mkdir -p upload
+          cp -r main-repo/output/* upload/ 2>/dev/null || true
+          # 生成文件列表
+          ls -lah upload/ > upload/filelist.txt
 
       - name: Upload rescue artifacts
         uses: actions/upload-artifact@v4
         with:
           name: sl3000-rescue-spi-full
-          path: rescue-output/
+          path: upload/
           retention-days: 30
