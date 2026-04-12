@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 env:
-  OPENWRT_VERSION: "v23.05.4"
+  OPENWRT_VERSION: "v24.10.0"       # 关键修改：升级到 v24.10.0
   BUILD_THREADS: "4"
   SPI_FLASH_SIZE_MB: "32"
 
