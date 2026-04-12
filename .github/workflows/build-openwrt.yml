@@ -1,88 +1,47 @@
-name: Build SL3000 Rescue Image (Manual Trigger)
+name: Build SL3000 Rescue Image
 
 on:
-  workflow_dispatch:          # 仅允许手动触发
-    inputs:
-      clean_build:
-        description: 'Perform a clean build (clear caches)'
-        required: false
-        type: boolean
-        default: false
-
-env:
-  DEBIAN_FRONTEND: noninteractive
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-
     steps:
-      # ------------------------------------------------------------
-      # 1. 检出主仓库（包含 888/ 配置目录和两个脚本）
-      # ------------------------------------------------------------
-      - name: Checkout main repository
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          path: main-repo
 
-      # ------------------------------------------------------------
-      # 2. 创建源码目录（source-repo）供脚本克隆使用
-      # ------------------------------------------------------------
-      - name: Prepare source directory
-        run: mkdir -p source-repo
-
-      # ------------------------------------------------------------
-      # 3. 安装编译依赖
-      # ------------------------------------------------------------
-      - name: Install build dependencies
+      - name: Install deps
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential clang flex bison g++ gawk \
-          gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev \
-          python3 python3-setuptools rsync swig unzip zlib1g-dev \
-          file wget cpio gdisk device-tree-compiler
+          sudo apt update
+          sudo apt install -y build-essential flex bison gawk git libncurses5-dev libssl-dev \
+          python3 python3-setuptools unzip wget cpio gdisk device-tree-compiler \
+          gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
-      # ------------------------------------------------------------
-      # 4. 设置工具链（aarch64）
-      # ------------------------------------------------------------
-      - name: Setup cross-compilation toolchain
+      - name: Prepare dirs
         run: |
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          mkdir -p source-repo output
           echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
 
-      # ------------------------------------------------------------
-      # 5. 执行 diy-part1.sh（环境准备与源码克隆）
-      # ------------------------------------------------------------
-      - name: Run diy-part1.sh
+      - name: Clone repos
         run: |
-          chmod +x main-repo/diy-part1.sh
-          cd main-repo
+          cd source-repo
+          git clone --depth=1 -b openwrt-24.10 https://github.com/hanwckf/immortalwrt-mt798x.git immortalwrt || true
+          git clone --depth=1 https://github.com/mtk-openwrt/arm-trusted-firmware.git || true
+          git clone --depth=1 https://github.com/mtk-openwrt/u-boot.git || true
+          git clone --depth=1 https://github.com/981213/mtk_uartboot.git || true
+
+      - name: Run part1
+        run: |
+          chmod +x diy-part1.sh
           ./diy-part1.sh
 
-      # ------------------------------------------------------------
-      # 6. 执行 diy-part2.sh（编译与组装镜像）
-      # ------------------------------------------------------------
-      - name: Run diy-part2.sh
+      - name: Run part2
         run: |
-          chmod +x main-repo/diy-part2.sh
-          cd main-repo
+          chmod +x diy-part2.sh
           ./diy-part2.sh
 
-      # ------------------------------------------------------------
-      # 7. 整理并上传构建产物
-      # ------------------------------------------------------------
-      - name: Collect artifacts
-        run: |
-          mkdir -p upload
-          cp -r main-repo/output/* upload/ 2>/dev/null || true
-          # 生成文件列表
-          ls -lah upload/ > upload/filelist.txt
-
-      - name: Upload rescue artifacts
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: sl3000-rescue-spi-full
-          path: upload/
-          retention-days: 30
+          name: sl3000-rescue
+          path: output/
