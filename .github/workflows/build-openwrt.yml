@@ -7,41 +7,28 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install deps
+      - name: Install build dependencies
         run: |
-          sudo apt update
-          sudo apt install -y build-essential flex bison gawk git libncurses5-dev libssl-dev \
-          python3 python3-setuptools unzip wget cpio gdisk device-tree-compiler \
-          gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+          flex bison gawk git libncurses5-dev libssl-dev python3 python3-setuptools \
+          unzip wget cpio gdisk device-tree-compiler
 
-      - name: Prepare dirs
-        run: |
-          mkdir -p source-repo output
-          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
-
-      - name: Clone repos
-        run: |
-          cd source-repo
-          git clone --depth=1 -b openwrt-24.10 https://github.com/hanwckf/immortalwrt-mt798x.git immortalwrt || true
-          git clone --depth=1 https://github.com/mtk-openwrt/arm-trusted-firmware.git || true
-          git clone --depth=1 https://github.com/mtk-openwrt/u-boot.git || true
-          git clone --depth=1 https://github.com/981213/mtk_uartboot.git || true
-
-      - name: Run part1
+      - name: Run diy-part1.sh
         run: |
           chmod +x diy-part1.sh
           ./diy-part1.sh
 
-      - name: Run part2
+      - name: Run diy-part2.sh
         run: |
           chmod +x diy-part2.sh
           ./diy-part2.sh
 
-      - name: Upload
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sl3000-rescue
+          name: sl3000-rescue-images
           path: output/
