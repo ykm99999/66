@@ -9,6 +9,10 @@ IMMORTALWRT_DIR=$(cat "$WORKSPACE/build-dir.txt")
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
+# 确保必要的目录存在
+mkdir -p "$OUTPUT_DIR"/{atf,uboot,firmware}
+mkdir -p "$IMMORTALWRT_DIR/staging_dir/image"
+
 echo "=== 1. 编译 ATF (BL2/BL31) ==="
 cd "$WORKSPACE/arm-trusted-firmware"
 make clean
@@ -26,6 +30,7 @@ cp -v build/mt7981/release/bl31.bin "$IMMORTALWRT_DIR/staging_dir/image/bl31.bin
 
 echo "=== 2. 编译 fiptool ==="
 make fiptool CROSS_COMPILE=
+mkdir -p "$WORKSPACE/u-boot/tools"
 cp -v tools/fiptool/fiptool "$WORKSPACE/u-boot/tools/"
 
 echo "=== 3. 编译 U-Boot ==="
