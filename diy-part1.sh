@@ -30,7 +30,11 @@ rm -rf package/emortal/default-settings \
        package/utils/busybox \
        package/utils/policycoreutils \
        package/network/services/lldpd \
-       package/boot/kexec-tools
+       package/boot/kexec-tools \
+       package/utils/audit \
+       package/system/refpolicy \
+       package/system/selinux-policy \
+       package/base-files
 
 # 复制 DTS 和配置
 mkdir -p target/linux/mediatek/dts
