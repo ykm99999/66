@@ -12,30 +12,19 @@ export ARCH=arm64
 mkdir -p "$OUTPUT_DIR"/{atf,uboot,firmware}
 mkdir -p "$IMMORTALWRT_DIR/staging_dir/image"
 
-# ------------------------------------------------------------
 # 1. 编译 ATF
-# ------------------------------------------------------------
-echo "=== 1. 编译 ATF ==="
 cd "$WORKSPACE/arm-trusted-firmware"
 make clean
-make CROSS_COMPILE=aarch64-linux-gnu- \
-     PLAT=mt7981 BOOT_DEVICE=nor DDR_TYPE=ddr4 DRAM_SIZE=1024 \
-     NMBM=1 BOARD=mt7981_bga DEBUG=0 all
+make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 BOOT_DEVICE=nor DDR_TYPE=ddr4 DRAM_SIZE=1024 NMBM=1 BOARD=mt7981_bga DEBUG=0 all
 cp -v build/mt7981/release/bl2.bin "$OUTPUT_DIR/atf/bl2.bin"
 cp -v build/mt7981/release/bl31.bin "$IMMORTALWRT_DIR/staging_dir/image/bl31.bin"
 
-# ------------------------------------------------------------
 # 2. fiptool
-# ------------------------------------------------------------
-echo "=== 2. fiptool ==="
 make fiptool CROSS_COMPILE=
 mkdir -p "$WORKSPACE/u-boot/tools"
 cp -v tools/fiptool/fiptool "$WORKSPACE/u-boot/tools/"
 
-# ------------------------------------------------------------
 # 3. U-Boot
-# ------------------------------------------------------------
-echo "=== 3. U-Boot ==="
 cd "$WORKSPACE/u-boot"
 mkdir -p arch/arm/dts
 cp -v "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" arch/arm/dts/
@@ -50,44 +39,34 @@ make olddefconfig
 make CROSS_COMPILE=aarch64-linux-gnu- BL31="$IMMORTALWRT_DIR/staging_dir/image/bl31.bin" -j$(nproc)
 
 if [ ! -f u-boot.fip ]; then
-    echo "Creating u-boot.fip manually..."
-    tools/fiptool create --soc-fw "$IMMORTALWRT_DIR/staging_dir/image/bl31.bin" \
-                         --nt-fw u-boot.bin u-boot.fip
+    tools/fiptool create --soc-fw "$IMMORTALWRT_DIR/staging_dir/image/bl31.bin" --nt-fw u-boot.bin u-boot.fip
 fi
 cp -v u-boot.fip "$OUTPUT_DIR/uboot/fip.bin"
 
-# ------------------------------------------------------------
-# 4. 编译内核 (initramfs)
-# ------------------------------------------------------------
-echo "=== 4. 编译救援内核 ==="
+# 4. 编译 initramfs 内核（直接调用内核 Makefile）
 cd "$IMMORTALWRT_DIR"
-rm -rf package/kernel/mt76   # 避免 mt76 干扰
-
-# 只编译内核，不安装包
 make -j$(nproc) toolchain/install
 make -j$(nproc) target/linux/compile
-make -j$(nproc) initramfs
 
-KERNEL=$(find bin/targets -name "*initramfs-kernel.bin" | head -1)
-if [ -z "$KERNEL" ]; then
-    echo "❌ 未找到 initramfs 内核"
+KERNEL_DIR=$(find build_dir -maxdepth 1 -type d -name "target-aarch64_cortex-a53_musl" | head -1)/linux-*
+cd "$KERNEL_DIR"
+
+# 使用 OpenWrt 生成的内核 .config，直接编译 Image.gz
+make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image.gz
+
+if [ ! -f arch/arm64/boot/Image.gz ]; then
+    echo "❌ 未生成 Image.gz"
     exit 1
 fi
-cp -v "$KERNEL" "$OUTPUT_DIR/firmware/kernel.bin"
+cp -v arch/arm64/boot/Image.gz "$OUTPUT_DIR/firmware/kernel.bin"
 
-# ------------------------------------------------------------
-# 5. 组装 32MB SPI NOR 完整镜像
-# ------------------------------------------------------------
-echo "=== 5. 组装 32MB 完整镜像 ==="
+# 5. 组装 32MB 镜像
 FULL_IMG="$OUTPUT_DIR/firmware/SL3000-full-spi-nor-32mb.bin"
 dd if=/dev/zero bs=1M count=32 | tr '\000' '\377' > "$FULL_IMG"
 dd if="$OUTPUT_DIR/atf/bl2.bin" of="$FULL_IMG" conv=notrunc
 dd if="$OUTPUT_DIR/uboot/fip.bin" of="$FULL_IMG" bs=1 seek=$((0x40000)) conv=notrunc
 dd if="$OUTPUT_DIR/firmware/kernel.bin" of="$FULL_IMG" bs=1 seek=$((0x220000)) conv=notrunc
 
-if [ -d "$WORKSPACE/mtk_uartboot" ]; then
-    cp -r "$WORKSPACE/mtk_uartboot" "$OUTPUT_DIR/"
-fi
-
-echo "=== 构建完成 ==="
+echo "✅ 构建成功"
 ls -lh "$OUTPUT_DIR/firmware/"
