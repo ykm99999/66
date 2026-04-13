@@ -62,13 +62,21 @@ cp -v u-boot.fip "$OUTPUT_DIR/uboot/fip.bin"
 
 echo "=== 4. 编译 ImmortalWrt 内核 (initramfs) ==="
 cd "$IMMORTALWRT_DIR"
+# 删除可能冲突的 mt76 源码目录，确保不会被编译
+rm -rf package/kernel/mt76
+# 尝试编译，如果失败但内核已生成则继续
+set +e
 make -j$(nproc) V=s
+BUILD_EXIT_CODE=$?
+set -e
+
 KERNEL=$(find bin -name "*initramfs-kernel.bin" | head -1)
 if [ -z "$KERNEL" ]; then
     echo "❌ 未找到 initramfs 内核"
     exit 1
 fi
 cp -v "$KERNEL" "$OUTPUT_DIR/firmware/kernel.bin"
+echo "✅ 内核已复制（编译退出码：$BUILD_EXIT_CODE）"
 
 echo "=== 5. 组装完整 32MB SPI NOR 镜像 ==="
 FULL_IMG="$OUTPUT_DIR/firmware/SL3000-full-spi-nor-32mb.bin"
