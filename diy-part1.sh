@@ -55,13 +55,28 @@ endef
 TARGET_DEVICES += mt7981_sl3000_spi_rescue
 EOF
 
-echo "=== 强制启用目标设备 ==="
+echo "=== 强制启用目标设备并禁用无线驱动 ==="
 sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_/d' .config
 cat >> .config << 'EOF'
 CONFIG_TARGET_mediatek=y
 CONFIG_TARGET_mediatek_filogic=y
 CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_spi_rescue=y
 CONFIG_TARGET_ROOTFS_INITRAMFS=y
+# 禁用所有 mt76 及 mac80211 包，避免编译错误
+CONFIG_PACKAGE_kmod-mt76=n
+CONFIG_PACKAGE_kmod-mt76-core=n
+CONFIG_PACKAGE_kmod-mt76-usb=n
+CONFIG_PACKAGE_kmod-mt76x0=n
+CONFIG_PACKAGE_kmod-mt76x2=n
+CONFIG_PACKAGE_kmod-mt7603=n
+CONFIG_PACKAGE_kmod-mt7615=n
+CONFIG_PACKAGE_kmod-mt7663=n
+CONFIG_PACKAGE_kmod-mt7915=n
+CONFIG_PACKAGE_kmod-mt7921=n
+CONFIG_PACKAGE_kmod-mt7922=n
+CONFIG_PACKAGE_kmod-mt7996=n
+CONFIG_PACKAGE_kmod-mac80211=n
+CONFIG_PACKAGE_kmod-cfg80211=n
 EOF
 
 make defconfig
