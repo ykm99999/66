@@ -9,18 +9,12 @@ echo "=== 创建工作目录 ==="
 mkdir -p "$OUTPUT_DIR"/{atf,uboot,firmware}
 
 echo "=== 检查源码目录 ==="
-if [ ! -d "$WORKSPACE/immortalwrt" ]; then
-    echo "❌ 缺少 immortalwrt 源码目录"
-    exit 1
-fi
-if [ ! -d "$WORKSPACE/arm-trusted-firmware" ]; then
-    echo "❌ 缺少 arm-trusted-firmware 源码目录"
-    exit 1
-fi
-if [ ! -d "$WORKSPACE/u-boot" ]; then
-    echo "❌ 缺少 u-boot 源码目录"
-    exit 1
-fi
+for d in immortalwrt arm-trusted-firmware u-boot; do
+    if [ ! -d "$WORKSPACE/$d" ]; then
+        echo "❌ 缺少 $d 源码目录"
+        exit 1
+    fi
+done
 echo "✅ 源码目录检查通过"
 
 echo "=== 准备 ImmortalWrt 构建目录 ==="
@@ -49,34 +43,40 @@ define Device/mt7981_sl3000_spi_rescue
   IMAGE/rescue-initramfs-kernel.bin := append-kernel
   DEVICE_PACKAGES := uboot-envtools mtd-utils kmod-mtd-rw block-mount \
                      kmod-mmc kmod-mmc-mtk kmod-fs-ext4 kmod-fs-f2fs \
-                     f2fs-tools e2fsprogs ip-full dropbear \
+                     f2fs-tools e2fsprogs dropbear \
                      kmod-leds-gpio kmod-button-hotplug
 endef
 TARGET_DEVICES += mt7981_sl3000_spi_rescue
 EOF
 
-echo "=== 强制启用目标设备并禁用无线驱动 ==="
+echo "=== 强制启用目标设备并精简配置 ==="
 sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_/d' .config
 cat >> .config << 'EOF'
 CONFIG_TARGET_mediatek=y
 CONFIG_TARGET_mediatek_filogic=y
 CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_spi_rescue=y
 CONFIG_TARGET_ROOTFS_INITRAMFS=y
-# 禁用所有 mt76 及 mac80211 包，避免编译错误
+CONFIG_TARGET_INITRAMFS_COMPRESSION_LZMA=y
+# 禁用所有可能引发依赖问题的包
+CONFIG_PACKAGE_luci=n
+CONFIG_PACKAGE_luci-base=n
+CONFIG_PACKAGE_default-settings=n
+CONFIG_PACKAGE_default-settings-chn=n
+CONFIG_PACKAGE_dnsmasq=n
+CONFIG_PACKAGE_dnsmasq-full=n
+CONFIG_PACKAGE_odhcpd=n
+CONFIG_PACKAGE_odhcp6c=n
+CONFIG_PACKAGE_wpad=n
+CONFIG_PACKAGE_wpad-openssl=n
+CONFIG_PACKAGE_hostapd=n
+CONFIG_PACKAGE_iw=n
 CONFIG_PACKAGE_kmod-mt76=n
-CONFIG_PACKAGE_kmod-mt76-core=n
-CONFIG_PACKAGE_kmod-mt76-usb=n
-CONFIG_PACKAGE_kmod-mt76x0=n
-CONFIG_PACKAGE_kmod-mt76x2=n
-CONFIG_PACKAGE_kmod-mt7603=n
-CONFIG_PACKAGE_kmod-mt7615=n
-CONFIG_PACKAGE_kmod-mt7663=n
-CONFIG_PACKAGE_kmod-mt7915=n
-CONFIG_PACKAGE_kmod-mt7921=n
-CONFIG_PACKAGE_kmod-mt7922=n
-CONFIG_PACKAGE_kmod-mt7996=n
 CONFIG_PACKAGE_kmod-mac80211=n
 CONFIG_PACKAGE_kmod-cfg80211=n
+CONFIG_PACKAGE_ppp=n
+CONFIG_PACKAGE_pppoe=n
+CONFIG_PACKAGE_firewall4=n
+CONFIG_PACKAGE_netifd=n
 EOF
 
 make defconfig
