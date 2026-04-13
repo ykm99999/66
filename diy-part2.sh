@@ -48,10 +48,20 @@ cd "$IMMORTALWRT_DIR"
 make -j$(nproc) toolchain/install
 make -j$(nproc) target/linux/compile
 
-KERNEL_DIR=$(find build_dir -maxdepth 1 -type d -name "target-aarch64_cortex-a53_musl" | head -1)/linux-*
+# 准确定位内核源码目录
+KERNEL_BASE=$(find build_dir -maxdepth 1 -type d -name "target-aarch64_cortex-a53_musl" | head -1)
+if [ -z "$KERNEL_BASE" ]; then
+    echo "❌ 未找到内核基础目录"
+    exit 1
+fi
+KERNEL_DIR=$(find "$KERNEL_BASE" -maxdepth 1 -type d -name "linux-*" | head -1)
+if [ -z "$KERNEL_DIR" ]; then
+    echo "❌ 未找到内核源码目录"
+    exit 1
+fi
 cd "$KERNEL_DIR"
 
-# 使用 OpenWrt 生成的内核 .config，直接编译 Image.gz
+# 使用已有 .config 直接编译 Image.gz
 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image.gz
 
