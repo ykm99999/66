@@ -2,8 +2,10 @@
 set -euo pipefail
 
 WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
+SOURCE_DIR="$WORKSPACE/source-repo"
 CONFIG_DIR="$WORKSPACE/888"
 OUTPUT_DIR="$WORKSPACE/output"
+IMMORTALWRT_BUILD="$WORKSPACE/immortalwrt-build"
 
 mkdir -p "$OUTPUT_DIR"/{atf,uboot,firmware}
 
@@ -13,34 +15,38 @@ for d in immortalwrt arm-trusted-firmware u-boot; do
 done
 
 # 准备构建目录
-rm -rf "$WORKSPACE/immortalwrt-build"
-cp -r "$WORKSPACE/immortalwrt" "$WORKSPACE/immortalwrt-build"
-cd "$WORKSPACE/immortalwrt-build"
+rm -rf "$IMMORTALWRT_BUILD"
+cp -r "$WORKSPACE/immortalwrt" "$IMMORTALWRT_BUILD"
+cd "$IMMORTALWRT_BUILD"
 
-# 删除所有干扰包（包括 pcat-manager）
-rm -rf package/emortal \
-       feeds/luci \
-       feeds/packages/net/samba4 \
-       package/kernel/mt76 \
-       package/utils/busybox \
-       package/utils/policycoreutils \
-       package/network/services/lldpd \
-       package/boot/kexec-tools \
-       package/utils/audit \
-       package/system/refpolicy \
-       package/system/selinux-policy \
-       package/base-files \
-       package/libs/libsemanage \
-       package/utils/pcat-manager
+# 禁用 telephony feed
+sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 
-# 复制设备树与配置
-mkdir -p target/linux/mediatek/dts
-cp -v "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" target/linux/mediatek/dts/
-cp -v "$CONFIG_DIR/sl3000-rescue.config" .config
+# 更新 feeds
+./scripts/feeds update -a || exit 1
+./scripts/feeds install -a || exit 1
 
-# 追加设备定义
-cat >> target/linux/mediatek/image/filogic.mk << 'EOF'
+# 删除问题包（参考您提供的列表）
+PROBLEM_PKGS="aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server gst1-plugins-base gst1-plugins-good gst1-plugins-ugly gst1-plugins-bad gst1-libav dmapd gmediarender gnunet gnunet-fuse gnunet-fs grilo-plugins lcdgrilo libdmapsharing kamailio smartdns pymysql python-orjson python-paramiko python-pyopenssl python-rpds-py python-service-identity python-twisted python-docker python-jsonschema python-jsonschema-specifications python-referencing onionshare-cli onionshare weston wpewebkit libextractor python-bcrypt python-cryptography python-maturin podman ruby-yaml"
+for pkg in $PROBLEM_PKGS; do
+    find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
+done
+rm -rf feeds/video feeds/telephony package/feeds
+./scripts/feeds update -i || exit 1
+./scripts/feeds install -a || exit 1
+make package/symlinks || exit 1
+# 复制 DTS（双路径保险）
+DTS_OLD="target/linux/mediatek/dts"
+DTS_NEW="target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek"
+mkdir -p "$DTS_OLD" "$DTS_NEW"
+cp -v "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" "$DTS_OLD/" || exit 1
+cp -v "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" "$DTS_NEW/" || exit 1
 
+# 追加设备定义到 filogic.mk
+FILOGIC_MK="target/linux/mediatek/image/filogic.mk"
+cat >> "$FILOGIC_MK" << 'EOF'
+
+# SL3000 救砖设备定义
 define Device/mt7981_sl3000_spi_rescue
   DEVICE_VENDOR := Siluo
   DEVICE_MODEL := SL3000
@@ -59,7 +65,8 @@ endef
 TARGET_DEVICES += mt7981_sl3000_spi_rescue
 EOF
 
-# 强制启用设备并精简
+# 复制基础配置并强制启用设备
+cp -v "$CONFIG_DIR/sl3000-rescue.config" .config
 sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_/d' .config
 cat >> .config << 'EOF'
 CONFIG_TARGET_mediatek=y
@@ -67,18 +74,11 @@ CONFIG_TARGET_mediatek_filogic=y
 CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_spi_rescue=y
 CONFIG_TARGET_ROOTFS_INITRAMFS=y
 CONFIG_TARGET_INITRAMFS_COMPRESSION_LZMA=y
-CONFIG_PACKAGE_luci=n
-CONFIG_PACKAGE_default-settings=n
-CONFIG_PACKAGE_kmod-mt76=n
-CONFIG_PACKAGE_kmod-mac80211=n
-CONFIG_PACKAGE_wpad=n
 EOF
 
-make defconfig
+defconfig
+make -j1 V=s oldconfig
+grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_spi_rescue=y" .config || { echo "❌ 设备未启用"; exit 1; }
 
-grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_spi_rescue=y" .config || {
-    echo "❌ 设备未启用"; exit 1
-}
-
-echo "$WORKSPACE/immortalwrt-build" > "$WORKSPACE/build-dir.txt"
-echo "part1 完成"
+echo "$IMMORTALWRT_BUILD" > "$WORKSPACE/build-dir.txt"
+echo "✅ part1 完成"
