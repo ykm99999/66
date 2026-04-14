@@ -41,21 +41,15 @@ make CROSS_COMPILE=aarch64-linux-gnu- BL31="$IMMORTALWRT_DIR/staging_dir/image/b
 [ ! -f u-boot.fip ] && tools/fiptool create --soc-fw "$IMMORTALWRT_DIR/staging_dir/image/bl31.bin" --nt-fw u-boot.bin u-boot.fip
 cp -v u-boot.fip "$OUTPUT_DIR/uboot/fip.bin"
 
-# 4. 编译 initramfs 内核
+# 4. 编译 initramfs 内核（直接使用 OpenWrt 目标）
 cd "$IMMORTALWRT_DIR"
 make -j$(nproc) toolchain/install
 make -j$(nproc) target/linux/compile
+make -j$(nproc) initramfs
 
-KERNEL_DIR=$(find build_dir -maxdepth 3 -type d -path "*/target-aarch64_cortex-a53_musl/linux-*" | head -1)
-[ -n "$KERNEL_DIR" ] || { echo "❌ 未找到内核源码目录"; exit 1; }
-cd "$KERNEL_DIR"
-
-# 确保内核编译环境就绪
-make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
-make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- prepare scripts
-make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image
-gzip -9 -c arch/arm64/boot/Image > arch/arm64/boot/Image.gz
-cp -v arch/arm64/boot/Image.gz "$OUTPUT_DIR/firmware/kernel.bin"
+KERNEL=$(find bin/targets -name "*initramfs-kernel.bin" | head -1)
+[ -n "$KERNEL" ] || { echo "❌ 未找到 initramfs 内核"; exit 1; }
+cp -v "$KERNEL" "$OUTPUT_DIR/firmware/kernel.bin"
 
 # 5. 组装完整 32MB SPI 镜像
 FULL_IMG="$OUTPUT_DIR/firmware/SL3000-full-spi-nor-32mb.bin"
