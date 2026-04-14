@@ -9,18 +9,15 @@ mkdir -p "$OUTPUT_DIR"/{atf,uboot,firmware}
 
 # 检查源码目录
 for d in immortalwrt arm-trusted-firmware u-boot; do
-    if [ ! -d "$WORKSPACE/$d" ]; then
-        echo "❌ 缺少 $d 源码目录"
-        exit 1
-    fi
+    [ -d "$WORKSPACE/$d" ] || { echo "❌ 缺少 $d"; exit 1; }
 done
 
-# 准备 ImmortalWrt 构建目录
+# 准备构建目录
 rm -rf "$WORKSPACE/immortalwrt-build"
 cp -r "$WORKSPACE/immortalwrt" "$WORKSPACE/immortalwrt-build"
 cd "$WORKSPACE/immortalwrt-build"
 
-# 删除所有可能引发依赖问题的包目录
+# 删除所有干扰包（包括 pcat-manager）
 rm -rf package/emortal \
        feeds/luci \
        feeds/packages/net/samba4 \
@@ -33,9 +30,10 @@ rm -rf package/emortal \
        package/system/refpolicy \
        package/system/selinux-policy \
        package/base-files \
-       package/libs/libsemanage
+       package/libs/libsemanage \
+       package/utils/pcat-manager
 
-# 复制 DTS 和配置
+# 复制设备树与配置
 mkdir -p target/linux/mediatek/dts
 cp -v "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" target/linux/mediatek/dts/
 cp -v "$CONFIG_DIR/sl3000-rescue.config" .config
@@ -61,7 +59,7 @@ endef
 TARGET_DEVICES += mt7981_sl3000_spi_rescue
 EOF
 
-# 强制启用目标设备并精简配置
+# 强制启用设备并精简
 sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_/d' .config
 cat >> .config << 'EOF'
 CONFIG_TARGET_mediatek=y
@@ -78,10 +76,9 @@ EOF
 
 make defconfig
 
-if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_spi_rescue=y" .config; then
-    echo "❌ 设备未启用"
-    exit 1
-fi
+grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_spi_rescue=y" .config || {
+    echo "❌ 设备未启用"; exit 1
+}
 
 echo "$WORKSPACE/immortalwrt-build" > "$WORKSPACE/build-dir.txt"
 echo "part1 完成"
