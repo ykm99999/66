@@ -21,9 +21,7 @@ cp -r "$WORKSPACE/immortalwrt" "$WORKSPACE/immortalwrt-build"
 cd "$WORKSPACE/immortalwrt-build"
 
 # 删除所有可能引发依赖问题的包目录
-rm -rf package/emortal/default-settings \
-       package/emortal/autocore \
-       package/emortal/autosamba \
+rm -rf package/emortal \
        feeds/luci \
        feeds/packages/net/samba4 \
        package/kernel/mt76 \
@@ -34,7 +32,8 @@ rm -rf package/emortal/default-settings \
        package/utils/audit \
        package/system/refpolicy \
        package/system/selinux-policy \
-       package/base-files
+       package/base-files \
+       package/libs/libsemanage
 
 # 复制 DTS 和配置
 mkdir -p target/linux/mediatek/dts
