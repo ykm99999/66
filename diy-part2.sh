@@ -43,33 +43,18 @@ if [ ! -f u-boot.fip ]; then
 fi
 cp -v u-boot.fip "$OUTPUT_DIR/uboot/fip.bin"
 
-# 4. 编译 initramfs 内核（直接调用内核 Makefile）
+# 4. 编译内核（利用 OpenWrt 已生成的 Image.gz）
 cd "$IMMORTALWRT_DIR"
 make -j$(nproc) toolchain/install
 make -j$(nproc) target/linux/compile
 
-# 准确定位内核源码目录
-KERNEL_BASE=$(find build_dir -maxdepth 1 -type d -name "target-aarch64_cortex-a53_musl" | head -1)
-if [ -z "$KERNEL_BASE" ]; then
-    echo "❌ 未找到内核基础目录"
+# 直接查找 OpenWrt 编译出的内核镜像
+KERNEL_IMAGE=$(find build_dir -type f -path "*/linux-*/arch/arm64/boot/Image.gz" | head -1)
+if [ -z "$KERNEL_IMAGE" ]; then
+    echo "❌ 未找到内核镜像 Image.gz"
     exit 1
 fi
-KERNEL_DIR=$(find "$KERNEL_BASE" -maxdepth 1 -type d -name "linux-*" | head -1)
-if [ -z "$KERNEL_DIR" ]; then
-    echo "❌ 未找到内核源码目录"
-    exit 1
-fi
-cd "$KERNEL_DIR"
-
-# 使用已有 .config 直接编译 Image.gz
-make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
-make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image.gz
-
-if [ ! -f arch/arm64/boot/Image.gz ]; then
-    echo "❌ 未生成 Image.gz"
-    exit 1
-fi
-cp -v arch/arm64/boot/Image.gz "$OUTPUT_DIR/firmware/kernel.bin"
+cp -v "$KERNEL_IMAGE" "$OUTPUT_DIR/firmware/kernel.bin"
 
 # 5. 组装 32MB 镜像
 FULL_IMG="$OUTPUT_DIR/firmware/SL3000-full-spi-nor-32mb.bin"
