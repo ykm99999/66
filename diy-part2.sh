@@ -40,23 +40,17 @@ make CROSS_COMPILE=aarch64-linux-gnu- BL31="$IMMORTALWRT_DIR/staging_dir/image/b
 
 [ ! -f u-boot.fip ] && tools/fiptool create --soc-fw "$IMMORTALWRT_DIR/staging_dir/image/bl31.bin" --nt-fw u-boot.bin u-boot.fip
 cp -v u-boot.fip "$OUTPUT_DIR/uboot/fip.bin"
-
-# 4. 编译内核（手动进入源码生成 Image.gz）
+# 4. 编译 initramfs 内核
 cd "$IMMORTALWRT_DIR"
 make -j$(nproc) toolchain/install
 make -j$(nproc) target/linux/compile
 
-# 定位内核源码目录
+# 定位内核源码并手动生成 Image.gz
 KERNEL_DIR=$(find build_dir -maxdepth 3 -type d -path "*/target-aarch64_cortex-a53_musl/linux-*" | head -1)
 [ -n "$KERNEL_DIR" ] || { echo "❌ 未找到内核源码目录"; exit 1; }
 cd "$KERNEL_DIR"
-
-# 直接编译 Image（确保使用 OpenWrt 已配置好的 .config）
 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- Image
-# 压缩内核镜像
 gzip -9 -c arch/arm64/boot/Image > arch/arm64/boot/Image.gz
-
-[ -f arch/arm64/boot/Image.gz ] || { echo "❌ Image.gz 生成失败"; exit 1; }
 cp -v arch/arm64/boot/Image.gz "$OUTPUT_DIR/firmware/kernel.bin"
 
 # 5. 组装完整 32MB SPI 镜像
