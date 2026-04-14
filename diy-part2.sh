@@ -12,7 +12,7 @@ export ARCH=arm64
 mkdir -p "$OUTPUT_DIR"/{atf,uboot,firmware}
 mkdir -p "$IMMORTALWRT_DIR/staging_dir/image"
 
-# 1. 编译 ATF
+# 1. ATF
 cd "$WORKSPACE/arm-trusted-firmware"
 make clean
 make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 BOOT_DEVICE=nor DDR_TYPE=ddr4 DRAM_SIZE=1024 NMBM=1 BOARD=mt7981_bga DEBUG=0 all
@@ -38,25 +38,28 @@ echo "CONFIG_ENV_SIZE=0x20000" >> .config
 make olddefconfig
 make CROSS_COMPILE=aarch64-linux-gnu- BL31="$IMMORTALWRT_DIR/staging_dir/image/bl31.bin" -j$(nproc)
 
-if [ ! -f u-boot.fip ]; then
-    tools/fiptool create --soc-fw "$IMMORTALWRT_DIR/staging_dir/image/bl31.bin" --nt-fw u-boot.bin u-boot.fip
-fi
+[ ! -f u-boot.fip ] && tools/fiptool create --soc-fw "$IMMORTALWRT_DIR/staging_dir/image/bl31.bin" --nt-fw u-boot.bin u-boot.fip
 cp -v u-boot.fip "$OUTPUT_DIR/uboot/fip.bin"
 
-# 4. 编译内核（利用 OpenWrt 已生成的 Image.gz）
+# 4. 编译内核（手动进入源码生成 Image.gz）
 cd "$IMMORTALWRT_DIR"
 make -j$(nproc) toolchain/install
 make -j$(nproc) target/linux/compile
 
-# 直接查找 OpenWrt 编译出的内核镜像
-KERNEL_IMAGE=$(find build_dir -type f -path "*/linux-*/arch/arm64/boot/Image.gz" | head -1)
-if [ -z "$KERNEL_IMAGE" ]; then
-    echo "❌ 未找到内核镜像 Image.gz"
-    exit 1
-fi
-cp -v "$KERNEL_IMAGE" "$OUTPUT_DIR/firmware/kernel.bin"
+# 定位内核源码目录
+KERNEL_DIR=$(find build_dir -maxdepth 3 -type d -path "*/target-aarch64_cortex-a53_musl/linux-*" | head -1)
+[ -n "$KERNEL_DIR" ] || { echo "❌ 未找到内核源码目录"; exit 1; }
+cd "$KERNEL_DIR"
 
-# 5. 组装 32MB 镜像
+# 直接编译 Image（确保使用 OpenWrt 已配置好的 .config）
+make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- Image
+# 压缩内核镜像
+gzip -9 -c arch/arm64/boot/Image > arch/arm64/boot/Image.gz
+
+[ -f arch/arm64/boot/Image.gz ] || { echo "❌ Image.gz 生成失败"; exit 1; }
+cp -v arch/arm64/boot/Image.gz "$OUTPUT_DIR/firmware/kernel.bin"
+
+# 5. 组装完整 32MB SPI 镜像
 FULL_IMG="$OUTPUT_DIR/firmware/SL3000-full-spi-nor-32mb.bin"
 dd if=/dev/zero bs=1M count=32 | tr '\000' '\377' > "$FULL_IMG"
 dd if="$OUTPUT_DIR/atf/bl2.bin" of="$FULL_IMG" conv=notrunc
