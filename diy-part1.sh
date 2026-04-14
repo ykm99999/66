@@ -25,11 +25,21 @@ sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 ./scripts/feeds update -a || exit 1
 ./scripts/feeds install -a || exit 1
 
-# 删除问题包
-PROBLEM_PKGS="aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server gst1-plugins-base gst1-plugins-good gst1-plugins-ugly gst1-plugins-bad gst1-libav dmapd gmediarender gnunet gnunet-fuse gnunet-fs grilo-plugins lcdgrilo libdmapsharing kamailio smartdns pymysql python-orjson python-paramiko python-pyopenssl python-rpds-py python-service-identity python-twisted python-docker python-jsonschema python-jsonschema-specifications python-referencing onionshare-cli onionshare weston wpewebkit libextractor python-bcrypt python-cryptography python-maturin podman ruby-yaml"
+# 删除所有可能干扰 initramfs 构建的包目录（包括 luci 应用）
+rm -rf feeds/luci/applications/luci-app-clamav \
+       feeds/luci/applications/luci-app-dufs \
+       feeds/luci/applications/luci-app-openclash \
+       feeds/luci/applications/luci-app-rustdesk-server \
+       feeds/luci/applications/luci-app-smartdns \
+       feeds/luci/applications/luci-app-passwall \
+       feeds/luci/applications/luci-app-passwall2 \
+       package/feeds/luci 2>/dev/null || true
+
+PROBLEM_PKGS="clamav dufs ruby smartdns rustdesk-server"
 for pkg in $PROBLEM_PKGS; do
     find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
 done
+
 rm -rf feeds/video feeds/telephony package/feeds
 ./scripts/feeds update -i || exit 1
 ./scripts/feeds install -a || exit 1
