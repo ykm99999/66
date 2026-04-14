@@ -2,7 +2,6 @@
 set -euo pipefail
 
 WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
-SOURCE_DIR="$WORKSPACE/source-repo"
 CONFIG_DIR="$WORKSPACE/888"
 OUTPUT_DIR="$WORKSPACE/output"
 IMMORTALWRT_BUILD="$WORKSPACE/immortalwrt-build"
@@ -26,7 +25,7 @@ sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
 ./scripts/feeds update -a || exit 1
 ./scripts/feeds install -a || exit 1
 
-# 删除问题包（参考您提供的列表）
+# 删除问题包
 PROBLEM_PKGS="aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server gst1-plugins-base gst1-plugins-good gst1-plugins-ugly gst1-plugins-bad gst1-libav dmapd gmediarender gnunet gnunet-fuse gnunet-fs grilo-plugins lcdgrilo libdmapsharing kamailio smartdns pymysql python-orjson python-paramiko python-pyopenssl python-rpds-py python-service-identity python-twisted python-docker python-jsonschema python-jsonschema-specifications python-referencing onionshare-cli onionshare weston wpewebkit libextractor python-bcrypt python-cryptography python-maturin podman ruby-yaml"
 for pkg in $PROBLEM_PKGS; do
     find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
@@ -35,6 +34,7 @@ rm -rf feeds/video feeds/telephony package/feeds
 ./scripts/feeds update -i || exit 1
 ./scripts/feeds install -a || exit 1
 make package/symlinks || exit 1
+
 # 复制 DTS（双路径保险）
 DTS_OLD="target/linux/mediatek/dts"
 DTS_NEW="target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek"
@@ -76,7 +76,7 @@ CONFIG_TARGET_ROOTFS_INITRAMFS=y
 CONFIG_TARGET_INITRAMFS_COMPRESSION_LZMA=y
 EOF
 
-defconfig
+make defconfig
 make -j1 V=s oldconfig
 grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_spi_rescue=y" .config || { echo "❌ 设备未启用"; exit 1; }
 
