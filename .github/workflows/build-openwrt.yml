@@ -1,34 +1,89 @@
-name: Build SL3000 Rescue Image
+name: SL3000 Final Build with 1-Click Rescue V1
 
 on:
   workflow_dispatch:
+  push:
+    tags: [ 'v*' ]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      - name: Checkout repository
+      - name: Checkout main branch
         uses: actions/checkout@v4
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
-          flex bison gawk git libncurses5-dev libssl-dev python3 python3-setuptools \
-          unzip wget cpio gdisk device-tree-compiler
-
-      - name: Run diy-part1.sh
-        run: |
-          chmod +x diy-part1.sh
-          ./diy-part1.sh
-
-      - name: Run diy-part2.sh
-        run: |
-          chmod +x diy-part2.sh
-          ./diy-part2.sh
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
         with:
-          name: sl3000-rescue-images
-          path: output/
+          ref: main
+          path: main-repo
+
+      - name: Checkout source branch
+        uses: actions/checkout@v4
+        with:
+          repository: ykm99999/66
+          [span_2](start_span)ref: sl3000-full-sync  # 这里拉取你仓库的底层救砖源码源[span_2](end_span)
+          path: source-repo
+
+      - name: Generate release tag
+        id: release_tag
+        run: |
+          TAG_NAME="v$(date -u +'%Y%m%d-%H%M%S')"
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential clang flex bison gawk \
+            gettext git libncurses-dev libssl-dev \
+            python3-distutils python3-setuptools rsync unzip zlib1g-dev file wget \
+            gcc-aarch64-linux-gnu device-tree-compiler
+
+      - name: Optimize disk space & Fix permissions
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
+          sudo chown -R runner:runner $GITHUB_WORKSPACE
+          df -h
+
+      - name: Run diy-part1.sh (Inject Device & Feeds)
+        run: |
+          chmod +x main-repo/diy-part1.sh
+          [span_3](start_span)./main-repo/diy-part1.sh  # 物理对齐：在根目录执行[span_3](end_span)
+
+      - name: Run diy-part2.sh (ATF/U-Boot/Firmware/Rescue-Pack)
+        run: |
+          chmod +x main-repo/diy-part2.sh
+          [span_4](start_span)./main-repo/diy-part2.sh  # 执行 1版物理合成逻辑[span_4](end_span)
+
+      - name: List firmware files
+        run: |
+          echo "=== 1版产物清单 ==="
+          ls -R output/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_tag.outputs.tag_name }}
+          name: "SL3000 救砖全家桶 V1-${{ steps.release_tag.outputs.tag_name }}"
+          body: |
+            ## 🚀 SL3000 1版物理修复固件
+            - **救砖核心**: `SL3000_SPI_RESCUE_V1.bin` (32MB 完整镜像)
+            - **[span_5](start_span)[span_6](start_span)引导补丁**: 强制 1GB DDR4 + 9秒串口拦截窗[span_5](end_span)[span_6](end_span)
+            - **[span_7](start_span)系统包含**: PassWall2, Docker, Ksmbd, 1GB RAM 支持[span_7](end_span)
+            
+            ### ⚠️ 救砖必读
+            1. 使用编程器将 `SL3000_SPI_RESCUE_V1.bin` 刷入 32MB SPI-NOR 芯片。
+            2. 串口波特率 `115200`，上电有 9 秒拦截窗口。
+            3. 进入系统后手动设置电脑 IP 为 `192.168.1.x`。
+          files: |
+            output/firmware/SL3000_SPI_RESCUE_V1.bin
+            output/firmware/*sysupgrade.bin
+            output/atf/bl2-ram-1g.bin
+            output/atf/bl2-1g-nor.bin
+            output/uboot/fip-nor.bin
+            output/mtk_uartboot.tar.gz
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
