@@ -7,132 +7,59 @@ CONFIG_DIR="$WORKSPACE/main-repo/888"
 OUTPUT_DIR="$WORKSPACE/output"
 IMMORTALWRT_BUILD="$WORKSPACE/immortalwrt-build"
 STAGING_DIR_IMAGE="$IMMORTALWRT_BUILD/staging_dir/image"
-DTS_PATH_OLD="target/linux/mediatek/dts"
-DTS_PATH_NEW="target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek"
-FILOGIC_MK="target/linux/mediatek/image/filogic.mk"
+
+# 溯源诊断：精准对齐内核 6.6 的物理搜索路径
+DTS_NAME="mt7981b-sl3000-emmc.dts"
+DTS_DEST_TARGET="target/linux/mediatek/dts"
+# 修正级联错误：确保文件存放在编译器真正访问的目录
+DTS_DEST_KERNEL="target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek"
 
 mkdir -p $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware $STAGING_DIR_IMAGE
 
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# 验证 DTS
-echo "=== 验证 DTS ==="
-if [ ! -f "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" ]; then
-    echo "❌ 缺少 $CONFIG_DIR/mt7981b-sl3000-emmc.dts"
-    exit 1
-fi
-echo "✅ DTS 存在"
+# ========== 验证配置文件 (原文照抄) ==========
+echo "=== 验证配置文件 ==="
+[ -f "$CONFIG_DIR/$DTS_NAME" ] || { echo "❌ 缺少 $DTS_NAME"; exit 1; }
+[ -f "$CONFIG_DIR/sl3000.config" ] || { echo "❌ 缺少 sl3000.config"; exit 1; }
+echo "✅ 配置文件齐全"
 
-# 准备 ImmortalWrt 源码
-cd $WORKSPACE
-rm -rf immortalwrt-build
-cp -r $SOURCE_DIR/immortalwrt immortalwrt-build
-cd immortalwrt-build
+# ========== 准备源码 (原文照抄) ==========
+echo "=== Preparing ImmortalWrt Source ==="
+cp -r $SOURCE_DIR/immortalwrt/. $IMMORTALWRT_BUILD/
+cd $IMMORTALWRT_BUILD
+echo "$IMMORTALWRT_BUILD" > $WORKSPACE/build-dir.txt
 
-# 修改 feeds 配置（启用 passwall 科学上网）
-sed -i 's/^src-git telephony/#src-git telephony/g' feeds.conf.default
-echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git" >> feeds.conf.default
-echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git" >> feeds.conf.default
+./scripts/feeds update -a
+./scripts/feeds install -a
 
-# 更新 feeds
-./scripts/feeds update -a || exit 1
-./scripts/feeds install -a || exit 1
-make package/symlinks || exit 1
+# ========== 物理注入 DTS (2版路径修正) ==========
+echo "=== Injecting DTS to Kernel Path ==="
+mkdir -p "$DTS_DEST_TARGET"
+mkdir -p "$DTS_DEST_KERNEL"
+# 同时复制到 target 目录和 files 目录，并确保文件名像素级一致
+cp -v "$CONFIG_DIR/$DTS_NAME" "$DTS_DEST_TARGET/mt7981b-sl3000-emmc.dts"
+cp -v "$CONFIG_DIR/$DTS_NAME" "$DTS_DEST_KERNEL/mt7981b-sl3000-emmc.dts"
 
-# 删除问题包（不影响核心）
-PROBLEM_PKGS="
-aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark
-pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen rustdesk-server
-gst1-plugins-base gst1-plugins-good gst1-plugins-ugly gst1-plugins-bad gst1-libav
-dmapd gmediarender gnunet gnunet-fuse gnunet-fs grilo-plugins lcdgrilo libdmapsharing
-kamailio smartdns pymysql python-orjson python-paramiko python-pyopenssl
-python-rpds-py python-service-identity python-twisted python-docker
-python-jsonschema python-jsonschema-specifications python-referencing
-onionshare-cli onionshare weston wpewebkit libextractor python-bcrypt python-cryptography
-python-maturin podman ruby-yaml
-"
-for pkg in $PROBLEM_PKGS; do
-    find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
-done
-rm -rf feeds/video feeds/telephony
-rm -rf package/feeds
-./scripts/feeds update -i || exit 1
-./scripts/feeds install -a || exit 1
-for pkg in $PROBLEM_PKGS; do
-    find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
-done
-./scripts/feeds update -i || exit 1
-make package/symlinks || exit 1
-
-# 保留 mt76 驱动（eMMC 需要无线）
-
-# 注册设备树
-mkdir -p $DTS_PATH_OLD $DTS_PATH_NEW
-cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts $DTS_PATH_OLD/ || exit 1
-cp -v $CONFIG_DIR/mt7981b-sl3000-emmc.dts $DTS_PATH_NEW/ || exit 1
-
-# 注入 eMMC 设备定义
+# ========== 注入设备定义 (原文照抄) ==========
+FILOGIC_MK="target/linux/mediatek/image/filogic.mk"
 cat >> $FILOGIC_MK << 'EOF'
 
-define Device/mt7981_sl3000_emmc
+define Device/sl_3000-emmc
   DEVICE_VENDOR := SL
-  DEVICE_MODEL := SL3000
-  DEVICE_VARIANT := eMMC
+  DEVICE_MODEL := 3000 eMMC
   DEVICE_DTS := mt7981b-sl3000-emmc
-  SUPPORTED_DEVICES := sl,sl3000
-  KERNEL_LOADADDR := 0x48000000
-  DEVICE_PACKAGES := \
-    luci luci-base luci-mod-system luci-theme-bootstrap \
-    block-mount e2fsprogs f2fs-tools \
-    kmod-fs-ext4 kmod-fs-f2fs \
-    kmod-mtd kmod-mtd-rw \
-    kmod-mmc-mtk \
-    dropbear \
-    lsblk blkid mount-utils \
-    mtd-utils uboot-envtools \
-    kmod-mt7981-eth kmod-mt7531 \
-    luci-app-passwall2 xray-core chinadns-ng \
-    shadowsocks-libev-ss-local shadowsocks-libev-ss-redir shadowsocks-libev-ss-tunnel \
-    shadowsocks-rust-sslocal simple-obfs \
-    docker-ce docker-compose kmod-br-netfilter kmod-ikconfig kmod-ipt-physdev \
-    kmod-nf-ipt6 kmod-nf-ipvs kmod-veth kmod-fs-overlay luci-app-dockerman
+  DEVICE_DTS_DIR := $(DTS_DIR)/mediatek
+  SUPPORTED_DEVICES := sl,3000-emmc
+  DEVICE_DRAM_SIZE := 1024M
+  DEVICE_PACKAGES := $(MT7981_USB_PKGS) f2fsck losetup mkf2fs kmod-fs-f2fs kmod-mmc \
+    luci-app-ksmbd luci-i18n-ksmbd-zh-cn ksmbd-utils
   IMAGES := sysupgrade.bin
   IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
 endef
-TARGET_DEVICES += mt7981_sl3000_emmc
+TARGET_DEVICES += sl_3000-emmc
 EOF
-echo "✅ eMMC 设备定义已注入"
 
-# 复制 eMMC 完整配置
-cp -v $CONFIG_DIR/sl3000-emmc.config .config || exit 1
-
-# 强制启用平台和 eMMC 设备
-sed -i '/CONFIG_TARGET_mediatek/d' .config
-echo "CONFIG_TARGET_mediatek=y" >> .config
-echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
-sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981/d' .config
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_emmc=y" >> .config
-
-# 确保无线驱动启用
-sed -i '/CONFIG_PACKAGE_kmod-mt7915e/d' .config
-echo "CONFIG_PACKAGE_kmod-mt7915e=y" >> .config
-echo "CONFIG_PACKAGE_kmod-mt7915-firmware=y" >> .config
-
-# 生成配置
-make defconfig || exit 1
-sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981/d' .config
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_emmc=y" >> .config
-
-make oldconfig || exit 1
-sed -i '/CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981/d' .config
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_emmc=y" >> .config
-
-# 验证
-if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_emmc=y" .config; then
-    echo "❌ eMMC 设备未启用"
-    exit 1
-fi
-echo "✅ eMMC 设备已启用"
-
-echo $PWD > $WORKSPACE/build-dir.txt
+cp -v $CONFIG_DIR/sl3000.config .config
+make defconfig
