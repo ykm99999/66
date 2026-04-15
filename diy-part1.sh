@@ -3,7 +3,6 @@ set -euo pipefail
 
 WORKSPACE="$GITHUB_WORKSPACE"
 SOURCE_DIR="$WORKSPACE/source-repo"
-# 最小物理修补：恢复 888 目录引用，确保与真实仓库路径对齐
 CONFIG_DIR="$WORKSPACE/main-repo/888"
 OUTPUT_DIR="$WORKSPACE/output"
 IMMORTALWRT_BUILD="$WORKSPACE/immortalwrt-build"
@@ -12,7 +11,7 @@ DTS_PATH_OLD="target/linux/mediatek/dts"
 DTS_PATH_NEW="target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek"
 FILOGIC_MK="target/linux/mediatek/image/filogic.mk"
 
-# 最小物理修补：根据用户反馈修正 DTS 文件名变量
+# 溯源诊断：修正用户真实文件名
 DTS_NAME="mt7981b-sl3000-emmc.dts"
 
 mkdir -p $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware $STAGING_DIR_IMAGE
@@ -20,7 +19,7 @@ mkdir -p $OUTPUT_DIR/atf $OUTPUT_DIR/uboot $OUTPUT_DIR/firmware $STAGING_DIR_IMA
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# ========== 验证三件套文件是否存在 (原文照抄+最小修补) ==========
+# ========== 验证三件套文件是否存在 (原文照抄) ==========
 echo "=== 验证配置文件 ==="
 if [ ! -f "$CONFIG_DIR/$DTS_NAME" ]; then
     echo "❌ 缺少 $CONFIG_DIR/$DTS_NAME"
@@ -32,21 +31,28 @@ if [ ! -f "$CONFIG_DIR/sl3000.config" ]; then
 fi
 echo "✅ 配置文件齐全"
 
-# ========== 准备 ImmortalWrt 源码 (原文照抄) ==========
+# ========== 准备 ImmortalWrt 源码 (物理对齐修补) ==========
 echo "=== Preparing ImmortalWrt Source ==="
-cp -r $SOURCE_DIR/immortalwrt $IMMORTALWRT_BUILD
+# 溯源诊断：根据用户反馈，源码在 source-repo/immortalwrt
+if [ ! -d "$SOURCE_DIR/immortalwrt" ]; then
+    echo "❌ 物理错误：找不到 $SOURCE_DIR/immortalwrt 目录"
+    ls -R $SOURCE_DIR
+    exit 1
+fi
+cp -r $SOURCE_DIR/immortalwrt/. $IMMORTALWRT_BUILD/
 cd $IMMORTALWRT_BUILD
+
 echo "$IMMORTALWRT_BUILD" > $WORKSPACE/build-dir.txt
 
+# ========== 同步 Feeds (原文照抄) ==========
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-# ========== 物理注入 DTS (原文照抄+最小修补) ==========
+# ========== 注入 DTS 与设备定义 (原文照抄) ==========
 cp -v $CONFIG_DIR/$DTS_NAME $DTS_PATH_OLD/
 mkdir -p $DTS_PATH_NEW
 cp -v $CONFIG_DIR/$DTS_NAME $DTS_PATH_NEW/
 
-# ========== 注入设备定义 (原文照抄) ==========
 cat >> $FILOGIC_MK << 'EOF'
 
 define Device/sl_3000-emmc
