@@ -1,4 +1,4 @@
-name: SL3000 Final Build with 1-Click Rescue V1
+name: SL3000_Rescue_Build_V1
 
 on:
   workflow_dispatch:
@@ -13,76 +13,81 @@ jobs:
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      - name: Checkout main branch
+      - name: Checkout main branch (Scripts)
         uses: actions/checkout@v4
         with:
           ref: main
-          path: main-repo
+          [span_3](start_span)path: main-repo[span_3](end_span)
 
-      - name: Checkout source branch
+      - name: Checkout source branch (Base Source)
         uses: actions/checkout@v4
         with:
           repository: ykm99999/66
-          [span_2](start_span)ref: sl3000-full-sync  # 这里拉取你仓库的底层救砖源码源[span_2](end_span)
-          path: source-repo
+          ref: sl3000-full-sync  # 溯源诊断：拉取包含 ATF/U-Boot 的完整源码分支
+          [span_4](start_span)path: source-repo[span_4](end_span)
 
       - name: Generate release tag
         id: release_tag
         run: |
           TAG_NAME="v$(date -u +'%Y%m%d-%H%M%S')"
-          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          [span_5](start_span)echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT[span_5](end_span)
 
-      - name: Install dependencies
+      - name: Install cross-compilation tools
         run: |
           sudo apt update
           sudo apt install -y build-essential clang flex bison gawk \
             gettext git libncurses-dev libssl-dev \
             python3-distutils python3-setuptools rsync unzip zlib1g-dev file wget \
-            gcc-aarch64-linux-gnu device-tree-compiler
+            [span_6](start_span)gcc-aarch64-linux-gnu device-tree-compiler[span_6](end_span)
 
-      - name: Optimize disk space & Fix permissions
+      - name: Optimize disk & Fix IO permissions
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
           sudo chown -R runner:runner $GITHUB_WORKSPACE
-          df -h
+          [span_7](start_span)df -h[span_7](end_span)
 
-      - name: Run diy-part1.sh (Inject Device & Feeds)
+      - name: Run diy-part1.sh (DTS & Feeds Injection)
         run: |
           chmod +x main-repo/diy-part1.sh
-          [span_3](start_span)./main-repo/diy-part1.sh  # 物理对齐：在根目录执行[span_3](end_span)
+          # 像素级诊断：在根目录执行以确保 $GITHUB_WORKSPACE 路径对齐
+          [span_8](start_span)[span_9](start_span)./main-repo/diy-part1.sh[span_8](end_span)[span_9](end_span)
 
-      - name: Run diy-part2.sh (ATF/U-Boot/Firmware/Rescue-Pack)
+      - name: Run diy-part2.sh (ATF/U-Boot/V1-Rescue-Pack)
         run: |
           chmod +x main-repo/diy-part2.sh
-          [span_4](start_span)./main-repo/diy-part2.sh  # 执行 1版物理合成逻辑[span_4](end_span)
+          # 执行 1GB DDR4 强制补丁与 32MB 物理合成逻辑
+          [span_10](start_span)[span_11](start_span)./main-repo/diy-part2.sh[span_10](end_span)[span_11](end_span)
 
-      - name: List firmware files
+      - name: List All Artifacts
         run: |
-          echo "=== 1版产物清单 ==="
-          ls -R output/
+          echo "=== 1版物理合成清单 ==="
+          [span_12](start_span)[span_13](start_span)find output/ -maxdepth 3 -not -path '*/.*'[span_12](end_span)[span_13](end_span)
 
-      - name: Create Release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.release_tag.outputs.tag_name }}
-          name: "SL3000 救砖全家桶 V1-${{ steps.release_tag.outputs.tag_name }}"
+          name: "SL3000 救砖全家桶 V1 [${{ steps.release_tag.outputs.tag_name }}]"
           body: |
-            ## 🚀 SL3000 1版物理修复固件
-            - **救砖核心**: `SL3000_SPI_RESCUE_V1.bin` (32MB 完整镜像)
-            - **[span_5](start_span)[span_6](start_span)引导补丁**: 强制 1GB DDR4 + 9秒串口拦截窗[span_5](end_span)[span_6](end_span)
-            - **[span_7](start_span)系统包含**: PassWall2, Docker, Ksmbd, 1GB RAM 支持[span_7](end_span)
-            
-            ### ⚠️ 救砖必读
-            1. 使用编程器将 `SL3000_SPI_RESCUE_V1.bin` 刷入 32MB SPI-NOR 芯片。
-            2. 串口波特率 `115200`，上电有 9 秒拦截窗口。
-            3. 进入系统后手动设置电脑 IP 为 `192.168.1.x`。
+            ## 🚀 SL3000 1版物理修复固件 (V1)
+            本固件基于 1GB DDR4 硬件规格进行像素级全链路溯源构建。
+
+            ### 📦 核心产物说明
+            - **[span_14](start_span)[span_15](start_span)`SL3000_SPI_RESCUE_V1.bin`**: 32MB 完整救砖包。包含 BL2、FIP (U-Boot) 与极简 OpenWrt 救援系统。[span_14](end_span)[span_15](end_span)
+            - **[span_16](start_span)`bl2-ram-1g.bin`**: 串口救砖专用 RAM 加载文件。[span_16](end_span)
+            - **[span_17](start_span)[span_18](start_span)`sysupgrade.bin`**: 常规升级固件。[span_17](end_span)[span_18](end_span)
+
+            ### 🔧 救砖指南
+            1. **物理刷入**: 使用编程器将 `V1.bin` 刷入 SPI-NOR 芯片。
+            2. **串口拦截**: 波特率 115200，上电有 **9 秒** 拦截窗口（已注入补丁）。
+            3. **[span_19](start_span)eMMC 清理**: 进入 U-Boot 后，建议执行 `mmc erase 0 0x800` 彻底清除旧分区表冲突。[span_19](end_span)
           files: |
             output/firmware/SL3000_SPI_RESCUE_V1.bin
             output/firmware/*sysupgrade.bin
             output/atf/bl2-ram-1g.bin
             output/atf/bl2-1g-nor.bin
             output/uboot/fip-nor.bin
-            output/mtk_uartboot.tar.gz
+            [span_20](start_span)[span_21](start_span)[span_22](start_span)output/mtk_uartboot.tar.gz[span_20](end_span)[span_21](end_span)[span_22](end_span)
           draft: false
           prerelease: false
         env:
