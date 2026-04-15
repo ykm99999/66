@@ -1,4 +1,4 @@
-Name: SL3000_Rescue_Build_V1
+name: SL3000_Rescue_Build_V1
 
 on:
   workflow_dispatch:
@@ -29,41 +29,38 @@ jobs:
         id: release_tag
         run: echo "tag_name=v$(date -u +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
 
-      - name: Initialize Physical Environment
+      - name: Initialize Environment & Clean Scripts
         run: |
           sudo apt update
-          sudo apt install -y build-essential gcc-aarch64-linux-gnu device-tree-compiler gawk python3-distutils
-          # 物理锁定输出目录，确保即使脚本失败，Release 插件也不会找不到目录
+          sudo apt install -y build-essential gcc-aarch64-linux-gnu device-tree-compiler gawk dos2unix
+          
+          # 物理清洗：防止 Windows 编码导致的脚本执行失败
+          find main-repo/ -name "*.sh" -exec dos2unix {} +
+          
           mkdir -p output/atf output/uboot output/firmware
           sudo chown -R runner:runner .
 
-      - name: Run diy-part1 (Source Prep)
+      - name: Run diy-part1
         run: |
           chmod +x main-repo/diy-part1.sh
-          # 溯源修复：确保在根目录运行，以便脚本内的相对路径准确指向 source-repo
-          ./main-repo/diy-part1.sh
+          bash ./main-repo/diy-part1.sh
 
-      - name: Run diy-part2 (Compiling & Rescue Pack)
+      - name: Run diy-part2
         run: |
           chmod +x main-repo/diy-part2.sh
-          # 溯源修复：延续上一版原文，仅修复路径上下文
-          ./main-repo/diy-part2.sh
+          bash ./main-repo/diy-part2.sh
 
       - name: Physical Audit Artifacts
         run: |
-          echo "=== 物理产物核验清单 ==="
+          echo "=== 物理产物清单 ==="
           ls -R output/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
-        if: always() # 物理保护：即使 make 固件失败，也要尝试上传已生成的救砖包
+        if: always()
         with:
           tag_name: ${{ steps.release_tag.outputs.tag_name }}
           name: "SL3000 救砖全家桶 V1 [${{ steps.release_tag.outputs.tag_name }}]"
-          body: |
-            ## 🚀 SL3000 物理全链路修复 (V1)
-            - **SL3000_SPI_RESCUE_V1.bin**: 救砖专用 (32MB)
-            - **bl2-ram-1g.bin**: 串口 UART 加载专用
           files: |
             output/firmware/SL3000_SPI_RESCUE_V1.bin
             output/firmware/*sysupgrade.bin
