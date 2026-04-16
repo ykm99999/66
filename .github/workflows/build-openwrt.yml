@@ -1,48 +1,41 @@
 name: SL3000 Final Build with Auto Release
-
 on:
   workflow_dispatch:
   push:
     tags: [ 'v*' ]
-
 jobs:
   build:
     runs-on: ubuntu-22.04
     env:
-      TERM: linux  # 物理修复：全局锁定终端类型
+      TERM: linux
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout main branch
         uses: actions/checkout@v4
         with:
           path: main-repo
-
       - name: Checkout source branch
         uses: actions/checkout@v4
         with:
           repository: ykm99999/66
           ref: sl3000-full-sync
           path: source-repo
-
-      - name: Install dependencies (原文照抄)
+      - name: Install dependencies
         run: |
           sudo apt update
           sudo apt install -y build-essential clang flex bison gawk \
             gettext git libncurses-dev libssl-dev \
             python3-distutils python3-setuptools rsync unzip zlib1g-dev file wget \
             gcc-aarch64-linux-gnu device-tree-compiler
-
       - name: Run diy-part1.sh
         run: |
           chmod +x main-repo/diy-part1.sh
           ./main-repo/diy-part1.sh
-
       - name: Run diy-part2.sh
         run: |
           chmod +x main-repo/diy-part2.sh
           ./main-repo/diy-part2.sh
-
-      - name: Create Release (原文照抄)
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v$(date -u +'%Y%m%d-%H%M%S')
