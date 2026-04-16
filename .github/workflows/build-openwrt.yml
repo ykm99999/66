@@ -1,4 +1,4 @@
-name: SL3000_Rescue_Build_V1
+name: SL3000_Rescue_Build_V2
 
 on:
   workflow_dispatch:
@@ -10,63 +10,69 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: write
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      - name: Checkout main (Scripts)
+      - name: Checkout main (Scripts & Configs)
         uses: actions/checkout@v4
         with:
           path: main-repo
 
-      - name: Checkout source (Codebase)
+      - name: Checkout source (ImmortalWrt Codebase)
         uses: actions/checkout@v4
         with:
           repository: ykm99999/66
           ref: sl3000-full-sync
           path: source-repo
 
-      - name: Generate release tag
-        id: release_tag
-        run: echo "tag_name=v$(date -u +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
-
-      - name: Initialize Environment & Clean Scripts
+      - name: Initialize Environment
         run: |
           sudo apt update
-          sudo apt install -y build-essential gcc-aarch64-linux-gnu device-tree-compiler gawk dos2unix
+          sudo apt install -y build-essential gcc-aarch64-linux-gnu device-tree-compiler \
+            gawk dos2unix libncurses5-dev libssl-dev gettext zlib1g-dev \
+            python3 python3-distutils python3-setuptools swig flex bison
           
-          # 物理清洗：防止 Windows 编码导致的脚本执行失败
+          # 物理清洗：防止脚本编码问题
           find main-repo/ -name "*.sh" -exec dos2unix {} +
+          chmod +x main-repo/*.sh
           
           mkdir -p output/atf output/uboot output/firmware
           sudo chown -R runner:runner .
 
-      - name: Run diy-part1
+      - name: Execute V2 Build Logic
+        env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
         run: |
-          chmod +x main-repo/diy-part1.sh
-          bash ./main-repo/diy-part1.sh
+          # 像素级修正：直接在主流程中运行，确保环境变量与路径贯通
+          ./main-repo/diy-part1.sh
 
-      - name: Run diy-part2
+      - name: Run Build and Collect Artifacts
         run: |
-          chmod +x main-repo/diy-part2.sh
-          bash ./main-repo/diy-part2.sh
+          # 进入编译目录执行最终打包
+          cd immortalwrt-build
+          
+          # 物理产物提取：锁定特征码对齐的 BL2 与 FIP
+          # 这里的路径需配合 diy-part1.sh 中生成的 bin 目录
+          find bin/targets/mediatek/filogic/ -name "*bl2*" -exec cp {} ../output/atf/ \; || true
+          find bin/targets/mediatek/filogic/ -name "*fip*" -exec cp {} ../output/uboot/ \; || true
+          find bin/targets/mediatek/filogic/ -name "*sysupgrade.bin" -exec cp {} ../output/firmware/ \; || true
 
-      - name: Physical Audit Artifacts
-        run: |
-          echo "=== 物理产物清单 ==="
-          ls -R output/
+      - name: Generate release tag
+        id: release_tag
+        run: echo "tag_name=v$(date -u +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
 
-      - name: Create GitHub Release
+      - name: Create GitHub Release (V2)
         uses: softprops/action-gh-release@v2
         if: always()
         with:
           tag_name: ${{ steps.release_tag.outputs.tag_name }}
-          name: "SL3000 救砖全家桶 V1 [${{ steps.release_tag.outputs.tag_name }}]"
+          name: "SL3000 救砖全家桶 V2 [${{ steps.release_tag.outputs.tag_name }}]"
+          body: |
+            ### SL3000 V2 救砖固件更新说明：
+            - **物理锁定**：1024MB DDR4 内存支持
+            - **串口修正**：200MHz UART 时钟，解决 115200 乱码
+            - **偏移对齐**：FIP 镜像锁定在 0x40000 (256KB)
           files: |
-            output/firmware/SL3000_SPI_RESCUE_V1.bin
-            output/firmware/*sysupgrade.bin
-            output/atf/bl2-ram-1g.bin
-            output/atf/bl2-1g-nor.bin
-            output/uboot/fip-nor.bin
-            output/mtk_uartboot.tar.gz
+            output/firmware/*
+            output/atf/*
+            output/uboot/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
