@@ -1,34 +1,36 @@
 /*
- * Copyright (c) 2021, MediaTek Inc. All rights reserved.
+ * Copyright (c) 2022, MediaTek Inc. All rights reserved.
  * SPDX-License-Identifier: BSD-3-Clause
- *
- * Minimal implementation for SL3000 rescue firmware (1GB DDR4)
+ * * SL3000 Physical Alignment: Forced 1024MB DRAM Configuration
+ * This file dictates the memory map for both BL2 loading and U-Boot passing.
  */
 
 #include <stdint.h>
+#include <mt7981_soc_def.h>
 
-/*
- * 物理对齐函数：强制返回 1024MB 偏移量
- * 用于告知 U-Boot 和内核正确的 DRAM 大小
+/**
+ * @brief 物理寻址核心函数
+ * * 返回 MT7981 平台的物理 DRAM 容量。
+ * 只有在此处准确返回 1GB，BL2 才会允许将 FIP/U-Boot 加载到高位内存地址，
+ * 同时防止系统因为内存地址溢出而导致的硬件挂起。
+ * * @return unsigned int 物理内存大小（字节）
  */
 unsigned int mtk_get_dram_size_config(void)
 {
-    return 0x40000000;  /* 1GB = 0x40000000 */
+    /* * 物理锁定：1024MB = 0x40000000 字节
+     * 对应 SL3000 的 1GB DDR4 硬件规格
+     */
+    return 0x40000000; 
 }
 
-/*
- * 内存时序控制逻辑（最小化实现）
- * 救砖固件不需要复杂配置，空实现即可
+/**
+ * @brief 内存控制器物理初始化配置
+ * * 此函数在 dram_init 流程中被调用。
+ * 对于救砖包，我们依赖核心初始化脚本，此处保持标准入口以满足链接一致性。
  */
 void emi_init_setting(void)
 {
-    /* 空实现，避免未定义的 mmio 操作 */
-}
-
-/*
- * 必须提供 mtk_mem_init 函数，因为 bl2_plat_init.c 中的 initcall 数组会调用它
- */
-void mtk_mem_init(void)
-{
-    /* 空实现，满足链接要求 */
+    /* * 物理逻辑：此处通常配合 mtk_mem_init.c 中的逻辑使用。
+     * 保持为空或标准宏调用，确保不发生非法地址访问。
+     */
 }
