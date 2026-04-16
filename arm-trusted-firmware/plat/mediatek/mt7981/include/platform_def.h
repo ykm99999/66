@@ -34,6 +34,10 @@
 #define PLATFORM_STACK_SIZE		0x440
 #endif
 
+/* 物理修复：先撤销系统默认宏定义，防止 Redefined 报错 */
+#ifdef FIRMWARE_WELCOME_STR
+#undef FIRMWARE_WELCOME_STR
+#endif
 #define FIRMWARE_WELCOME_STR		"Booting Trusted Firmware (SL3000 1GB)\n"
 
 #define PLATFORM_MAX_AFFLVL		MPIDR_AFFLVL2
