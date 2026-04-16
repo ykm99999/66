@@ -19,13 +19,14 @@
 
 	chosen {
 		stdout-path = "serial0:115200n8";
-		/* 1版修复：在没有 GPT 的救砖模式下，强制使用 MTD 物理分区挂载 rootfs */
+		/* 物理锁定：强制串口与 MTD 根文件系统挂载逻辑 */
 		bootargs = "console=ttyS0,115200n8 earlycon=uart8250,mmio32,0x11002000 root=/dev/mtdblock4 rw rootwait";
 	};
 
 	memory@40000000 {
 		device_type = "memory";
-		reg = <0x0 0x40000000 0x0 0x40000000>; /* 1GB DDR4 */
+		/* 像素级锁定：1GB DDR4 (0x40000000) */
+		reg = <0x0 0x40000000 0x0 0x40000000>;
 	};
 
 	reg_1p8v: regulator-1p8v {
@@ -101,32 +102,39 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 
-			/* 分区布局与 Makefile 的合成逻辑严格对应 */
+			/* --- V2 物理分区链条修复 --- */
+			
+			/* 1. BL2 引导区：物理占用前 256KB */
 			partition@0 {
 				label = "bl2";
-				reg = <0x000000 0x40000>;      /* 256KB */
+				reg = <0x000000 0x040000>;
 				read-only;
 			};
 
+			/* 2. FIP 镜像区：起始于 0x40000 (对应你查看到的 78 56 34 12) */
 			partition@40000 {
 				label = "fip";
-				reg = <0x040000 0x1c0000>;    /* 1.75MB 入口必须在 0x40000 */
+				reg = <0x040000 0x080000>; /* 512KB */
 				read-only;
 			};
 
-			partition@200000 {
+			/* 3. 环境变量区：物理对齐 0xC0000 (768KB) */
+			/* 修正：必须与 defconfig 中的 CONFIG_ENV_OFFSET=0xC0000 像素级对齐 */
+			partition@c0000 {
 				label = "u-boot-env";
-				reg = <0x200000 0x20000>;     /* 128KB 环境变量区 */
+				reg = <0x0c0000 0x040000>; /* 256KB */
 			};
 
-			partition@220000 {
+			/* 4. 内核镜像区：起始于 1MB */
+			partition@100000 {
 				label = "kernel";
-				reg = <0x220000 0xc00000>;    /* 12MB 内核镜像区 */
+				reg = <0x100000 0xa00000>; /* 10MB */
 			};
 
-			partition@e20000 {
+			/* 5. 根文件系统：剩余 21MB 空间 */
+			partition@b00000 {
 				label = "rootfs";
-				reg = <0xe20000 0x11e0000>;   /* 剩余空间挂载文件系统 */
+				reg = <0xb00000 0x1500000>;
 			};
 		};
 	};
@@ -154,7 +162,7 @@
 	gmac0: mac@0 {
 		compatible = "mediatek,eth-mac";
 		reg = <0>;
-		phy-mode = "2500base-x";
+		phy-mode = "2500base-x"; /* 2.5G 网口物理对齐 */
 
 		fixed-link {
 			speed = <2500>;
