@@ -1,45 +1,51 @@
 #!/bin/bash
-# SL3000 V2 Physical Alignment Script
-# 目标：修复 1GB 内存识别、解决串口乱码、锁定 256K 分区偏移
 set -euo pipefail
 
-echo "=== 执行 V2 物理像素级修复逻辑 ==="
+# 物理修复：终端环境锁定
+export TERM=xterm-256color
 
-# 1. 物理时钟修复：解决 115200 乱码 (将 UART 时钟从 40M 提升至 200M)
-# 修正 U-Boot 编译配置 (defconfig)
-find package/boot/uboot-mtk/src/configs/ -name "mt7981_spim_nor_rfb_defconfig" -exec sed -i 's/CONFIG_DEBUG_UART_CLOCK.*/CONFIG_DEBUG_UART_CLOCK=200000000/g' {} +
-find package/boot/uboot-mtk/src/configs/ -name "mt7981_spim_nor_rfb_defconfig" -exec sed -i 's/CONFIG_SYS_NS16550_CLK.*/CONFIG_SYS_NS16550_CLK=200000000/g' {} +
+WORKSPACE="$GITHUB_WORKSPACE"
+SOURCE_DIR="$WORKSPACE/source-repo"
+OUTPUT_DIR="$WORKSPACE/output"
+STAGING_DIR_IMAGE="$WORKSPACE/immortalwrt-build/staging_dir/image"
 
-# 修正 U-Boot 物理头文件：锁定硬件波特率分母 (彻底消除乱码)
-find package/boot/uboot-mtk/src/include/configs/ -name "mt7981.h" -exec sed -i 's/#define CFG_SYS_NS16550_CLK.*/#define CFG_SYS_NS16550_CLK 200000000/g' {} +
+mkdir -p "$STAGING_DIR_IMAGE"
+IMMORTALWRT_BUILD_DIR=$(cat $WORKSPACE/build-dir.txt)
+cd "$IMMORTALWRT_BUILD_DIR"
 
-# 2. 内存物理锁定：强制 1024MB (DDR4)
-# 修改 ATF 内存初始化逻辑：锁定返回值为 0x40000000 (1GB)
-find package/boot/arm-trusted-firmware-mtk/src/ -name "emicfg.c" -exec sed -i 's/return 0x20000000/return 0x40000000/g' {} +
+export CROSS_COMPILE=aarch64-linux-gnu-
+export ARCH=arm64
 
-# 强制开启 DDR4 模式补丁：确保 BL2 初始化时使用正确的内存协议
-find package/boot/arm-trusted-firmware-mtk/src/ -name "mtk_mem_init.c" -exec sed -i 's/mt7981_use_ddr4 = 0/mt7981_use_ddr4 = 1/g' {} +
+# ========== 强制修改 ATF 源码 (原文照抄) ==========
+echo "=== Patching ATF source to force DDR4 ==="
+cd $SOURCE_DIR/arm-trusted-firmware
+mkdir -p plat/mediatek/mt7981/drivers/dram
 
-# 3. 引导偏移修复：锁定 256KB (0x40000) 寻址
-# 理由：确保 BL2 引导后在 0x40000 位置寻找特征码 (78563412)
-find package/boot/arm-trusted-firmware-mtk/src/ -name "platform_def.h" -exec sed -i '/#define FLASH_FIP_BASE/d' {} +
-find package/boot/arm-trusted-firmware-mtk/src/ -name "platform_def.h" -exec sed -i '/#define FLASH_FIP_MAX_SIZE/d' {} +
+cat > plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c << 'EOF'
+#include <plat/common/platform.h>
+#include <common/debug.h>
+#include <lib/mmio.h>
+#include <stdarg.h>
+#include <stdio.h>
 
-# 获取 platform_def.h 物理路径并注入锁定宏 (禁用 EOF 遵照指令)
-ATF_PLAT_DEF=$(find package/boot/arm-trusted-firmware-mtk/src/ -name "platform_def.h" | head -n 1)
-if [ -n "$ATF_PLAT_DEF" ]; then
-    echo "#define FLASH_FIP_BASE (0x40000)" >> "$ATF_PLAT_DEF"
-    echo "#define FLASH_FIP_MAX_SIZE (0x80000)" >> "$ATF_PLAT_DEF"
-fi
+extern void mtk_mem_init_real(void);
+extern int mt7981_use_ddr4;
+void mtk_mem_init(void) {
+	mt7981_use_ddr4 = 1;
+	NOTICE("EMI: Using DDR4 settings forced\n");
+	mtk_mem_init_real();
+}
+EOF
 
-# 4. 物理跳转对齐：锁定 U-Boot 加载基址 0x41e00000 (与 ATF 链接地址对齐)
-find package/boot/uboot-mtk/src/configs/ -name "mt7981_spim_nor_rfb_defconfig" -exec sed -i 's/CONFIG_TEXT_BASE.*/CONFIG_TEXT_BASE=0x41e00000/g' {} +
+# ========== 编译 ATF/U-Boot/固件 (原文照抄) ==========
+make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 BOOT_DEVICE=emmc DRAM_SIZE=1024 DRAM_USE_DDR4=1 BOARD_BGA=1
+cp build/mt7981/release/bl2.bin $OUTPUT_DIR/atf/bl2-1g-emmc.bin
 
-# 5. 网络救砖通路：预设 IP 192.168.1.1 (方便 TFTP 环境直接物理拦截)
-find package/boot/uboot-mtk/src/configs/ -name "mt7981_spim_nor_rfb_defconfig" -exec sed -i 's/CONFIG_IPADDR.*/CONFIG_IPADDR="192.168.1.1"/g' {} +
-find package/boot/uboot-mtk/src/configs/ -name "mt7981_spim_nor_rfb_defconfig" -exec sed -i 's/CONFIG_SERVERIP.*/CONFIG_SERVERIP="192.168.1.2"/g' {} +
+cd $SOURCE_DIR/u-boot
+make CROSS_COMPILE=aarch64-linux-gnu- mt7981_emmc_rfb_defconfig
+make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
+cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-emmc.bin"
 
-# 6. 设备树像素级对齐 (确保 U-Boot 引用你提供的 1G 版 DTS 定义)
-find package/boot/uboot-mtk/src/configs/ -name "mt7981_spim_nor_rfb_defconfig" -exec sed -i 's/CONFIG_DEFAULT_DEVICE_TREE.*/CONFIG_DEFAULT_DEVICE_TREE="mt7981b-sl3000-emmc"/g' {} +
-
-echo "V2 Physical Patch Applied: All hardware constraints have been locked."
+cd "$IMMORTALWRT_BUILD_DIR"
+make -j$(nproc) V=s
+find bin/targets/ -type f \( -name "*sysupgrade*" \) -exec cp -v {} "$OUTPUT_DIR/firmware/" \;
