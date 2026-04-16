@@ -1,67 +1,96 @@
-name: 一键修复并构建固件
+name: SL3000_Manual_Build
 
+# 核心修改：仅手动触发，绝不乱动
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-
-env:
-  # 注入终端信息，防止 ncurses 报错，解决 Error opening terminal: unknown
-  TERM: xterm
-  TERMINFO: /usr/share/terminfo
 
 jobs:
-  repair_and_build:
+  build:
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout Main Branch
+      - name: Checkout Scripts (main)
         uses: actions/checkout@v4
         with:
-          ref: main
+          path: main-repo
 
-      - name: 环境初始化与克隆分支
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential libncurses5-dev libncursesw5-dev zlib1g-dev gawk git gettext libssl-dev xsltproc wget unzip python3
-          # 原文照抄：检出 openwrt-24.10-6.6 框架
-          git clone -b openwrt-24.10-6.6 https://github.com/immortalwrt/immortalwrt immortalwrt-build
+      - name: Checkout Source (sl3000-full-sync)
+        uses: actions/checkout@v4
+        with:
+          repository: ykm99999/66
+          ref: sl3000-full-sync
+          path: source-repo
 
-      - name: 更新与安装 Feeds
-        working-directory: ./immortalwrt-build
+      - name: Initialize Environment
         run: |
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
+          sudo apt update
+          sudo apt install -y build-essential gcc-aarch64-linux-gnu device-tree-compiler \
+            gawk dos2unix libncurses5-dev libssl-dev gettext zlib1g-dev \
+            python3 python3-distutils swig flex bison
+          
+          # 物理清洗脚本格式
+          find main-repo/ -name "*.sh" -exec dos2unix {} +
+          chmod +x main-repo/*.sh
+          
+          mkdir -p output/atf output/uboot output/firmware
+          sudo chown -R runner:runner .
 
-      - name: 物理修复：配置注入 (取代 menuconfig)
-        working-directory: ./immortalwrt-build
+      - name: Execute V5 Physical Build
+        env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
         run: |
-          # 修复点：从远程分支下载 config，而非交互式生成
-          wget https://raw.githubusercontent.com/ykm888/66/main/custom-config/sl3000.config -O .config
-          # 使用 defconfig 物理展开配置，避免触发交互式 mconf
-          make defconfig
-
-      - name: 修正底层 Bootloader 物理参数
-        working-directory: ./immortalwrt-build
-        run: |
-          # 修复点：增加路径存在性校验，防止 find 报错
-          UBOOT_PATH="package/boot/uboot-mtk"
-          if [ ! -d "$UBOOT_PATH" ]; then
-            # 如果路径不一致，尝试寻找包含 mtk/mediatek 的相似目录
-            UBOOT_PATH=$(find package/boot/ -maxdepth 1 -name "*mediatek*" -o -name "*mtk*" | head -n 1)
+          # 1. 定义物理路径
+          WORKSPACE="${{ github.workspace }}"
+          SOURCE_DIR="$WORKSPACE/source-repo"
+          CONFIG_DIR="$WORKSPACE/main-repo/888"
+          OUTPUT_DIR="$WORKSPACE/output"
+          IMMORTALWRT_BUILD="$WORKSPACE/immortalwrt-build"
+          
+          # 2. 物理对齐：提取子目录源码 (根据你提供的仓库结构)
+          mkdir -p "$IMMORTALWRT_BUILD"
+          if [ -d "$SOURCE_DIR/immortalwrt" ]; then
+              cp -r "$SOURCE_DIR/immortalwrt/." "$IMMORTALWRT_BUILD/"
+          else
+              echo "❌ 物理错误：在分支中未找到 immortalwrt 目录"
+              exit 1
           fi
           
-          if [ -z "$UBOOT_PATH" ]; then
-            echo "Error: 找不到 Bootloader 源码目录，请检查 Feeds 是否安装成功。"
-            exit 1
-          fi
+          cd "$IMMORTALWRT_BUILD"
+          
+          # 3. 预解压与物理锁定 (1G/200M/256K)
+          ./scripts/feeds update -a && ./scripts/feeds install -a
+          make package/boot/uboot-mtk/prepare V=s
+          make package/boot/arm-trusted-firmware-mtk/prepare V=s
+          
+          # 修正串口乱码 (200MHz)
+          find package/boot/uboot-mtk/ -name "mt7981.h" -exec sed -i 's/#define CFG_SYS_NS16550_CLK.*/#define CFG_SYS_NS16550_CLK 200000000/g' {} +
+          # 修正内存 (1GB)
+          find package/boot/arm-trusted-firmware-mtk/ -name "emicfg.c" -exec sed -i 's/return 0x20000000/return 0x40000000/g' {} +
+          # 修正偏移 (256K)
+          PLAT_DEF=$(find package/boot/arm-trusted-firmware-mtk/ -name "platform_def.h" | head -n 1)
+          [ -n "$PLAT_DEF" ] && {
+              sed -i '/#define FLASH_FIP_BASE/d' "$PLAT_DEF"
+              echo "#define FLASH_FIP_BASE (0x40000)" >> "$PLAT_DEF"
+          }
 
-          echo "目标路径已锁定: $UBOOT_PATH"
-          # 在此处执行具体的 DTS 或 Makefile 修改逻辑（延续 1 版逻辑）
-          # sed -i 's/OLD/NEW/g' $UBOOT_PATH/Makefile 
+          # 4. 注入用户 Config 并编译
+          cp -v "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" target/linux/mediatek/dts/
+          cp -v "$CONFIG_DIR/sl3000.config" .config
+          make defconfig
+          make V=s -j$(nproc)
 
-      - name: 编译固件
-        working-directory: ./immortalwrt-build
-        run: |
-          # 静默审计确认：不再调用 menuconfig，直接执行编译
-          make -j$(nproc) || make -j1 V=s
+          # 5. 产物物理抓取
+          find bin/targets/mediatek/filogic/ -type f \( -name "*bl2*" -o -name "*fip*" -o -name "*sysupgrade.bin" \) -exec cp -v {} "$OUTPUT_DIR/" \;
+
+      - name: Generate release tag
+        id: release_tag
+        run: echo "tag_name=v$(date -u +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: success()
+        with:
+          tag_name: ${{ steps.release_tag.outputs.tag_name }}
+          name: "SL3000 手动构建版 [${{ steps.release_tag.outputs.tag_name }}]"
+          files: output/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
