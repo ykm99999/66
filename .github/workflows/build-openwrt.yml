@@ -7,12 +7,14 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
+      # 1️⃣ 检出主仓库（包含构建脚本）
       - name: Checkout main (Scripts)
         uses: actions/checkout@v4
         with:
           ref: main
           path: main-repo
 
+      # 2️⃣ 检出固件源码仓库
       - name: Checkout source (Firmware)
         uses: actions/checkout@v4
         with:
@@ -20,24 +22,55 @@ jobs:
           ref: sl3000-full-sync
           path: source-repo
 
+      # 3️⃣ 安装必要的构建依赖（根据脚本实际需求调整）
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses5-dev gawk git \
+            gettext unzip file python3 python3-pip device-tree-compiler \
+            libssl-dev wget cpio rsync
+
+      # 4️⃣ 调试：列出检出目录结构，确认脚本存在
+      - name: Debug - List directories
+        run: |
+          echo "=== main-repo contents ==="
+          ls -la main-repo/
+          echo "=== source-repo contents ==="
+          ls -la source-repo/
+
+      # 5️⃣ 运行 diy-part1.sh（如果文件存在）
       - name: Run diy-part1.sh
         run: |
-          chmod +x main-repo/diy-part1.sh
-          ./main-repo/diy-part1.sh
+          set -e
+          cd main-repo
+          if [ -f diy-part1.sh ]; then
+            chmod +x diy-part1.sh
+            ./diy-part1.sh
+          else
+            echo "⚠️ diy-part1.sh not found, skipping."
+          fi
 
+      # 6️⃣ 运行 diy-part2.sh（如果文件存在）
       - name: Run diy-part2.sh
         run: |
-          chmod +x main-repo/diy-part2.sh
-          ./main-repo/diy-part2.sh
+          set -e
+          cd main-repo
+          if [ -f diy-part2.sh ]; then
+            chmod +x diy-part2.sh
+            ./diy-part2.sh
+          else
+            echo "⚠️ diy-part2.sh not found, skipping."
+          fi
 
+      # 7️⃣ 上传编译产物（根据实际输出路径调整）
       - name: Upload Release
         uses: softprops/action-gh-release@v2
         if: success()
         with:
           tag_name: v${{ github.run_id }}
           files: |
-            output/atf/*.bin
-            output/uboot/*.bin
-            output/firmware/*.bin
+            source-repo/output/atf/*.bin
+            source-repo/output/uboot/*.bin
+            source-repo/output/firmware/*.bin
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }
