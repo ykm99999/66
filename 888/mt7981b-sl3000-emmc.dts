@@ -103,16 +103,16 @@
 			};
 			partition@180000 {
 				label = "factory";
-				reg = <0x180000 0x040000>;
+				reg = <0x180000 0x200000>;  /* 修正为 2MB */
 				read-only;
 			};
-			partition@1c0000 {
+			partition@380000 {
 				label = "kernel";
-				reg = <0x1c0000 0x400000>;
+				reg = <0x380000 0x400000>;
 			};
-			partition@5c0000 {
+			partition@780000 {
 				label = "rootfs";
-				reg = <0x5c0000 0x1a40000>;
+				reg = <0x780000 0x1880000>;  /* 剩余空间 ~24.5MB */
 			};
 		};
 	};
