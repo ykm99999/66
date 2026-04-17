@@ -1,4 +1,5 @@
 #!/bin/bash
+# diy-part2.sh
 set -euo pipefail
 
 WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
@@ -41,7 +42,7 @@ make PLAT=mt7981 DEBUG=0 BOOT_DEVICE=emmc DRAM_SIZE=1024 DRAM_USE_DDR4=1 BOARD_B
 cp -v build/mt7981/release/bl2.bin "$OUTPUT_DIR/atf/bl2-1g-emmc.bin"
 cp -v build/mt7981/release/bl31.bin "$OUTPUT_DIR/atf/bl31-1g-emmc.bin"
 
-# 1G NOR (用于 SPI 救砖)
+# 1G NOR
 make clean
 make PLAT=mt7981 DEBUG=0 BOOT_DEVICE=nor DRAM_SIZE=1024 DRAM_USE_DDR4=1 BOARD_BGA=1
 cp -v build/mt7981/release/bl2.bin "$OUTPUT_DIR/atf/bl2-1g-nor.bin"
@@ -107,13 +108,13 @@ ROOTFS_BIN=$(find build_dir/target-aarch64_cortex-a53_musl/root-* -name root.squ
 cp -v "$KERNEL_BIN" "$PARTS_DIR/kernel.bin"
 cp -v "$ROOTFS_BIN" "$PARTS_DIR/rootfs.bin"
 
-# ---------- 6. 准备 Factory 分区 ----------
+# ---------- 6. 准备 Factory 分区 (占位) ----------
 FACTORY_SRC="$MAIN_REPO/888/factory.bin"
 if [ -f "$FACTORY_SRC" ]; then
     cp -v "$FACTORY_SRC" "$PARTS_DIR/factory.bin"
 else
-    echo "⚠️ 未找到 factory.bin，将创建空白占位文件（无线校准数据缺失）"
-    dd if=/dev/zero bs=256k count=1 2>/dev/null | tr '\000' '\377' > "$PARTS_DIR/factory.bin"
+    echo "⚠️ 未找到 factory.bin，创建 2MB 空白占位文件（Wi-Fi 需后续校准）"
+    dd if=/dev/zero bs=2M count=1 2>/dev/null | tr '\000' '\377' > "$PARTS_DIR/factory.bin"
 fi
 
 # ---------- 7. 复制合成所需文件到 BIN_DIR ----------
@@ -124,12 +125,11 @@ cp -v "$PARTS_DIR/factory.bin" "$BIN_DIR/factory.bin"
 cp -v "$PARTS_DIR/kernel.bin" "$BIN_DIR/kernel.bin"
 cp -v "$PARTS_DIR/rootfs.bin" "$BIN_DIR/rootfs.bin"
 
-# ---------- 8. 重新运行 make 以触发合成镜像 ----------
+# ---------- 8. 重新运行 make 触发合成镜像 ----------
 echo "=== 触发 OpenWrt 合成完整 32MB 镜像 ==="
 cd "$IMMORTALWRT_BUILD"
 make target/linux/compile
 
-# 合成的镜像位于 bin/targets/mediatek/filogic/
 FULL_IMAGE=$(find bin/targets/mediatek/filogic/ -name "spi-full-32mb.bin" -type f | head -1)
 if [ -f "$FULL_IMAGE" ]; then
     cp -v "$FULL_IMAGE" "$OUTPUT_DIR/Spi-flash-32MB-full.bin"
