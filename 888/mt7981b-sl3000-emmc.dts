@@ -100,36 +100,32 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 
-			/* BL2 引导区 */
 			partition@0 {
 				label = "bl2";
 				reg = <0x000000 0x040000>;		/* 256KB */
 				read-only;
 			};
 
-			/* FIP 镜像区 (BL31 + U-Boot) */
 			partition@40000 {
 				label = "fip";
 				reg = <0x040000 0x080000>;		/* 512KB */
 				read-only;
 			};
 
-			/* U-Boot 环境变量区 */
-			partition@c0000 {
-				label = "u-boot-env";
-				reg = <0x0c0000 0x040000>;		/* 256KB */
+			partition@180000 {
+				label = "factory";
+				reg = <0x180000 0x040000>;		/* 256KB */
+				read-only;
 			};
 
-			/* 内核镜像区 (占位，实际由 initramfs 启动) */
-			partition@100000 {
+			partition@1c0000 {
 				label = "kernel";
-				reg = <0x100000 0xa00000>;		/* 10MB */
+				reg = <0x1c0000 0x400000>;		/* 4MB */
 			};
 
-			/* 根文件系统区 (占位) */
-			partition@b00000 {
+			partition@5c0000 {
 				label = "rootfs";
-				reg = <0xb00000 0x1500000>;		/* 21MB */
+				reg = <0x5c0000 0x1a40000>;		/* ~26MB */
 			};
 		};
 	};
