@@ -25,11 +25,11 @@ rm -rf immortalwrt-build
 cp -r $SOURCE_DIR/immortalwrt immortalwrt-build
 cd immortalwrt-build
 
-# 更新 Feeds
+# 更新 Feeds (原文照抄逻辑)
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-# 注册设备 (禁用 EOF，物理注入)
+# 注册设备定义 (禁用 EOF)
 echo "" >> $FILOGIC_MK
 echo "define Device/sl_3000-emmc" >> $FILOGIC_MK
 echo "  DEVICE_VENDOR := SL" >> $FILOGIC_MK
