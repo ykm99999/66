@@ -1,4 +1,4 @@
-name: Sync SL3000 Full Source (Firmware + Bootloader + Tools)
+name: Sync SL3000 Full Source to Main
 
 on:
   workflow_dispatch:        # 手动触发
@@ -6,16 +6,12 @@ on:
 env:
   GH_USER: ${{ github.repository_owner }}
   TARGET_REPO: ${{ github.repository }}
-  HW_SPI: "25Q256FSSIG"
-  HW_DDR4: "P3A8GL4MLF-GJN"
-  HW_EMMC: "HSEMSDS7D2B128G"
-  SOC: "MT7981B"
 
 jobs:
-  sync-full-source:
+  sync-and-patch:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout current repo (main branch)
+      - name: Checkout main branch
         uses: actions/checkout@v4
         with:
           ref: main
@@ -26,103 +22,61 @@ jobs:
           git config --global user.email "actions@github.com"
           git config --global user.name "GitHub Actions"
 
-      - name: Ensure we are on main branch
+      # ---------- 1. 物理创建并同步 ATF (补齐目录逻辑) ----------
+      - name: Sync & Patch ATF
         run: |
-          git checkout main || git checkout -b main
-          git pull origin main || echo "No remote main branch"
-
-      # ---------- ImmortalWrt (官方主线) ----------
-      - name: Sync ImmortalWrt (official)
-        run: |
-          rm -rf immortalwrt
-          git clone --recursive --depth=1 -b openwrt-24.10 https://github.com/immortalwrt/immortalwrt.git immortalwrt-temp
-          rm -rf immortalwrt-temp/.git
-          mv immortalwrt-temp immortalwrt
-          git add immortalwrt
-          git commit -m "Sync: ImmortalWrt official (branch openwrt-24.10) ($(date +'%Y-%m-%d'))" || echo "No changes"
-
-      # ---------- ATF (Arm Trusted Firmware) ----------
-      - name: Sync ATF
-        run: |
+          # 物理确保目录结构
           rm -rf arm-trusted-firmware
+          mkdir -p arm-trusted-firmware
+          
           git clone --recursive --depth=1 -b mtksoc-20260123 https://github.com/mtk-openwrt/arm-trusted-firmware.git atf-temp
-          rm -rf atf-temp/.git
-          mv atf-temp arm-trusted-firmware
+          
+          echo "=== 执行 ATF 物理手术 (解决重定义与头文件缺失) ==="
+          # 修复公共头文件，防止 redefined 报错
+          sed -i 's/#define FIRMWARE_WELCOME_STR.*/#ifndef FIRMWARE_WELCOME_STR\n\0\n#endif/' atf-temp/include/plat/common/common_def.h
+          
+          # 精准修正 SL3000 定义，保留所有 #include 引用 (防止 mt7981_soc_def.h 丢失)
+          sed -i '/#define FIRMWARE_WELCOME_STR/c\#define FIRMWARE_WELCOME_STR "Booting Trusted Firmware (SL3000 1GB)\\n"' atf-temp/plat/mediatek/mt7981/include/platform_def.h
+          sed -i 's/#define BL33_BASE.*/#define BL33_BASE (0x41e00000)/' atf-temp/plat/mediatek/mt7981/include/platform_def.h
+          sed -i 's/#define FLASH_FIP_BASE.*/#define FLASH_FIP_BASE (0x40000)/' atf-temp/plat/mediatek/mt7981/include/platform_def.h
+          sed -i 's/#define FLASH_FIP_MAX_SIZE.*/#define FLASH_FIP_MAX_SIZE (0x80000)/' atf-temp/plat/mediatek/mt7981/include/platform_def.h
+          
+          # 物理补齐 TRNG 寄存器定义
+          if ! grep -q "TRNG_BASE" atf-temp/plat/mediatek/mt7981/include/platform_def.h; then
+            sed -i '/#define SOC_CHIP_ID/a #define TRNG_BASE (0x1020F000)\n#define TRNG_SIZE (0x1000)' atf-temp/plat/mediatek/mt7981/include/platform_def.h
+          fi
+          
+          # 物理移动回正确目录并清理
+          cp -r atf-temp/. arm-trusted-firmware/
+          rm -rf atf-temp
+          
           git add arm-trusted-firmware
-          git commit -m "Sync: ATF (branch mtksoc-20260123) $(date +'%Y-%m-%d')" || echo "No changes"
+          git commit -m "Sync & Fixed: ATF for SL3000 (Redefined & SOC Header Fix)" || echo "No changes"
 
-      # ---------- U-Boot (MediaTek 官方) ----------
-      - name: Sync U-Boot (official)
+      # ---------- 2. 物理同步 U-Boot ----------
+      - name: Sync U-Boot
         run: |
           rm -rf u-boot
+          mkdir -p u-boot
           git clone --recursive --depth=1 -b mtksoc-20250711 https://github.com/mtk-openwrt/u-boot.git u-boot-temp
-          rm -rf u-boot-temp/.git
-          mv u-boot-temp u-boot
+          cp -r u-boot-temp/. u-boot/
+          rm -rf u-boot-temp
           git add u-boot
-          git commit -m "Sync: U-Boot (branch mtksoc-20250711) $(date +'%Y-%m-%d')" || echo "No changes"
+          git commit -m "Sync: U-Boot (official branch)" || echo "No changes"
 
-      # ---------- mtk_uartboot (救砖工具) ----------
-      - name: Sync mtk_uartboot
+      # ---------- 3. 物理同步 ImmortalWrt ----------
+      - name: Sync ImmortalWrt
         run: |
-          rm -rf mtk_uartboot
-          git clone --depth=1 https://github.com/981213/mtk_uartboot.git mtk_uartboot-temp
-          rm -rf mtk_uartboot-temp/.git
-          mv mtk_uartboot-temp mtk_uartboot
-          git add mtk_uartboot
-          git commit -m "Sync: mtk_uartboot ($(date +'%Y-%m-%d'))" || echo "No changes"
+          rm -rf immortalwrt
+          mkdir -p immortalwrt
+          git clone --recursive --depth=1 -b openwrt-24.10 https://github.com/immortalwrt/immortalwrt.git im-temp
+          cp -r im-temp/. immortalwrt/
+          rm -rf im-temp
+          git add immortalwrt
+          git commit -m "Sync: ImmortalWrt (24.10)" || echo "No changes"
 
-      # ---------- 硬件配置与救砖文档（永久记录）----------
-      - name: Generate SL3000 Hardware Configuration
-        run: |
-          mkdir -p device/sl3000
-
-          echo "# 司络 SL3000 完整源码与救砖配置" > device/sl3000/README.md
-          echo "" >> device/sl3000/README.md
-          echo "## 硬件参数（永久记录）" >> device/sl3000/README.md
-          echo "- **SoC**: MediaTek MT7981B (Filogic 820)" >> device/sl3000/README.md
-          echo "- **WiFi**: MT7976CN (DBDC)" >> device/sl3000/README.md
-          echo "- **RAM**: 1GB DDR4 (型号: P3A8GL4MLF-GJN)" >> device/sl3000/README.md
-          echo "- **eMMC**: 128GB (型号: HSEMSDS7D2B128G)" >> device/sl3000/README.md
-          echo "- **SPI NOR**: 32MB (型号: 25Q256FSSIG)" >> device/sl3000/README.md
-          echo "" >> device/sl3000/README.md
-          echo "## 🔥 救砖关键步骤" >> device/sl3000/README.md
-          echo "1. **使用 mtk_uartboot 加载内存引导**：" >> device/sl3000/README.md
-          echo "   - 工具路径：\`/mtk_uartboot\`" >> device/sl3000/README.md
-          echo "   - 需要先编译 ATF 生成 \`bl2.bin\`（注意 DDR4 和 BGA 封装）" >> device/sl3000/README.md
-          echo "2. **内存降容救砖**：使用 512MB 配置的 BL2 引导（\`DRAM_SIZE=512\`）" >> device/sl3000/README.md
-          echo "3. **恢复 1GB 运行内存**：救砖成功后刷入正常 1GB 固件" >> device/sl3000/README.md
-          echo "" >> device/sl3000/README.md
-          echo "## 分区布局（SPI NOR + eMMC）" >> device/sl3000/README.md
-          echo "- **SPI NOR (32MB)**: BL2, FIP, Factory (ART)" >> device/sl3000/README.md
-          echo "- **eMMC**: kernel, rootfs, rootfs_data, 用户存储" >> device/sl3000/README.md
-          echo "" >> device/sl3000/README.md
-          echo "## ATF 编译参数" >> device/sl3000/README.md
-          echo '```bash' >> device/sl3000/README.md
-          echo "# 512MB 救砖版（DDR4, BGA）" >> device/sl3000/README.md
-          echo "make PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=512" >> device/sl3000/README.md
-          echo "" >> device/sl3000/README.md
-          echo "# 1GB 正常版（DDR4, BGA）" >> device/sl3000/README.md
-          echo "make PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=1024" >> device/sl3000/README.md
-          echo '```' >> device/sl3000/README.md
-          echo "" >> device/sl3000/README.md
-          echo "## U-Boot 编译参数" >> device/sl3000/README.md
-          echo '```make' >> device/sl3000/README.md
-          echo "make mt7981_sl3000_emmc_defconfig  # 需要自行创建此配置" >> device/sl3000/README.md
-          echo '```' >> device/sl3000/README.md
-
-          # 写入正确的 config.seed（与设备定义匹配）
-          echo "CONFIG_TARGET_mediatek=y" > device/sl3000/config.seed
-          echo "CONFIG_TARGET_mediatek_filogic=y" >> device/sl3000/config.seed
-          echo "CONFIG_TARGET_mediatek_filogic_DEVICE_mt7981_sl3000_spi_rescue=y" >> device/sl3000/config.seed
-          echo "CONFIG_TARGET_ROOTFS_INITRAMFS=y" >> device/sl3000/config.seed
-          echo "CONFIG_PACKAGE_kmod-mt7981-eth=y" >> device/sl3000/config.seed
-          echo "CONFIG_PACKAGE_kmod-mt7531=y" >> device/sl3000/config.seed
-          echo "CONFIG_DRAM_SIZE=1024" >> device/sl3000/config.seed
-
-          git add device/sl3000
-          git commit -m "docs: add SL3000 full source config and rescue guide" || echo "Config exists"
-
-      # ---------- 推送至 main 分支 ----------
+      # ---------- 4. 推送到 main 分支 ----------
       - name: Push to main branch
         run: |
+          # 物理强制更新 main 分支，确保存储已修复的源码
           git push origin main --force-with-lease
