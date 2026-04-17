@@ -1,4 +1,4 @@
-name: Sync SL3000 Full Source (Physical Directory Fix)
+name: Sync SL3000 Full Source (Hard Physical Fix)
 
 on:
   workflow_dispatch:
@@ -18,18 +18,20 @@ jobs:
           git config --global user.email "actions@github.com"
           git config --global user.name "GitHub Actions"
 
-      # ---------- 1. 物理同步 ATF (剥离 Git 痕迹 + 修复) ----------
-      - name: Sync & Patch ATF (Physical)
+      # ---------- 1. 物理清理 & 同步 ATF (彻底解决箭头) ----------
+      - name: Sync & Patch ATF (Hard Cleanup)
         run: |
+          # 物理清理 Git 索引记录，防止箭头残留
+          git rm -rf --cached arm-trusted-firmware || true
           rm -rf arm-trusted-firmware
-          # 临时克隆到临时目录
+          
+          # 临时克隆
           git clone --recursive --depth=1 -b mtksoc-20260123 https://github.com/mtk-openwrt/arm-trusted-firmware.git atf-temp
           
-          # 【核心修复】物理强行删除 .git 文件夹，防止出现“带箭头的指针”
-          rm -rf atf-temp/.git
-          rm -rf atf-temp/**/.git
+          # 【关键步骤】剥离所有 Git 痕迹，包括隐藏的 Submodule .git 文件
+          find atf-temp -name ".git" -exec rm -rf {} +
           
-          # 执行物理手术，解决重定义与 TRNG 缺失问题
+          # 物理手术：修复重定义与 TRNG 逻辑
           sed -i 's/#define FIRMWARE_WELCOME_STR.*/#ifndef FIRMWARE_WELCOME_STR\n\0\n#endif/' atf-temp/include/plat/common/common_def.h
           sed -i '/#define FIRMWARE_WELCOME_STR/c\#define FIRMWARE_WELCOME_STR "Booting Trusted Firmware (SL3000 1GB)\\n"' atf-temp/plat/mediatek/mt7981/include/platform_def.h
           sed -i 's/#define BL33_BASE.*/#define BL33_BASE (0x41e00000)/' atf-temp/plat/mediatek/mt7981/include/platform_def.h
@@ -40,32 +42,34 @@ jobs:
             sed -i '/#define SOC_CHIP_ID/a #define TRNG_BASE (0x1020F000)\n#define TRNG_SIZE (0x1000)' atf-temp/plat/mediatek/mt7981/include/platform_def.h
           fi
 
-          # 物理转正为仓库内的普通文件夹
           mv atf-temp arm-trusted-firmware
           git add arm-trusted-firmware
-          git commit -m "Fix: Physical ATF directory and SL3000 patches"
+          git commit -m "Fix: Hard physical ATF directory and SL3000 patches" || echo "No changes to commit"
 
       # ---------- 2. 物理同步 U-Boot (剥离 Git 痕迹) ----------
-      - name: Sync U-Boot (Physical)
+      - name: Sync U-Boot (Hard Cleanup)
         run: |
+          git rm -rf --cached u-boot || true
           rm -rf u-boot
           git clone --recursive --depth=1 -b mtksoc-20250711 https://github.com/mtk-openwrt/u-boot.git u-boot-temp
-          rm -rf u-boot-temp/.git
+          find u-boot-temp -name ".git" -exec rm -rf {} +
           mv u-boot-temp u-boot
           git add u-boot
-          git commit -m "Fix: Physical U-Boot directory"
+          git commit -m "Fix: Physical U-Boot directory" || echo "No changes to commit"
 
       # ---------- 3. 物理同步 ImmortalWrt (剥离 Git 痕迹) ----------
-      - name: Sync ImmortalWrt (Physical)
+      - name: Sync ImmortalWrt (Hard Cleanup)
         run: |
+          git rm -rf --cached immortalwrt || true
           rm -rf immortalwrt
           git clone --recursive --depth=1 -b openwrt-24.10 https://github.com/immortalwrt/immortalwrt.git im-temp
-          rm -rf im-temp/.git
+          find im-temp -name ".git" -exec rm -rf {} +
           mv im-temp immortalwrt
           git add immortalwrt
-          git commit -m "Fix: Physical ImmortalWrt directory"
+          git commit -m "Fix: Physical ImmortalWrt directory" || echo "No changes to commit"
 
-      # ---------- 4. 强制推送 ----------
+      # ---------- 4. 强制推送至 main 分支 ----------
       - name: Push to main branch
         run: |
-          git push origin main --force-with-lease
+          # 强制覆盖 main，物理切断旧的 Submodule 引用
+          git push origin main --force
