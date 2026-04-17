@@ -1,4 +1,4 @@
-name: SL3000 Full Image Build
+name: SL3000 Full 32MB Image Build
 
 on:
   workflow_dispatch:
@@ -38,12 +38,25 @@ jobs:
           cd main-repo
           ./diy-part1.sh
 
-      - name: Run diy-part2.sh (Build All & Create Full Image)
+      - name: Run diy-part2.sh (Build All & Prepare Full Image)
         run: |
           chmod +x main-repo/diy-part2.sh
           cd main-repo
           ./diy-part2.sh
         timeout-minutes: 360
+
+      - name: List output files
+        run: |
+          echo "=== Output directory ==="
+          ls -la output/
+          echo "=== ATF files ==="
+          ls -la output/atf/ || true
+          echo "=== U-Boot files ==="
+          ls -la output/uboot/ || true
+          echo "=== Firmware files ==="
+          ls -la output/firmware/ || true
+          echo "=== Full 32MB image ==="
+          ls -la output/Spi-flash-32MB-full.bin || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
