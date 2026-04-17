@@ -6,15 +6,15 @@ MAIN_REPO="$WORKSPACE/main-repo"
 CONFIG_DIR="$MAIN_REPO/888"
 OUTPUT_DIR="$WORKSPACE/output"
 IMMORTALWRT_BUILD="$WORKSPACE/immortalwrt-build"
-DTS_NAME="mt7981-sl-3000-emmc.dts"
-FILOGIC_MK="target/linux/mediatek/image/filogic.mk"
 
-echo "=== diy-part1: 配置 ImmortalWrt 编译环境 ==="
+DEVICE_NAME="mt7981_sl3000_spi_rescue"
+DTS_FILE="mt7981b-sl3000-emmc.dts"
+
+echo "=== diy-part1: 配置 ImmortalWrt 环境 ==="
 
 mkdir -p "$OUTPUT_DIR"/{atf,uboot,firmware,parts}
-cd "$WORKSPACE"
 
-# 复制 ImmortalWrt 源码
+cd "$WORKSPACE"
 rm -rf immortalwrt-build
 cp -r "$MAIN_REPO/immortalwrt" immortalwrt-build
 cd immortalwrt-build
@@ -27,46 +27,31 @@ echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.gi
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-# 删除问题包 (精简)
+# 删除问题包
 for pkg in aardvark-dns netavark podman rust rust-bindgen python-jsonschema; do
     find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
 done
 rm -rf feeds/video feeds/telephony
-
 ./scripts/feeds update -i
 ./scripts/feeds install -a
 
-# 复制设备树
+# 复制设备树文件
 mkdir -p target/linux/mediatek/dts
-cp -v "$CONFIG_DIR/$DTS_NAME" target/linux/mediatek/dts/
+cp -v "$CONFIG_DIR/$DTS_FILE" target/linux/mediatek/dts/
+mkdir -p target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek
+cp -v "$CONFIG_DIR/$DTS_FILE" target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek/
 
-# 添加设备定义到 filogic.mk（防重复）
-if ! grep -q "sl_3000-emmc" "$FILOGIC_MK"; then
-    cat >> "$FILOGIC_MK" <<'EOF'
+# 复制设备 makefile（覆盖原文件以确保设备定义正确）
+cp -v "$CONFIG_DIR/mt7981_sl3000.mk" target/linux/mediatek/image/filogic.mk
 
-define Device/sl_3000-emmc
-  DEVICE_VENDOR := SL
-  DEVICE_MODEL := 3000 eMMC (1GB)
-  DEVICE_DTS := mt7981-sl-3000-emmc
-  DEVICE_DTS_DIR := $(DTS_DIR)
-  SUPPORTED_DEVICES := sl,3000-emmc
-  DEVICE_PACKAGES := kmod-usb3 kmod-usb-storage kmod-mmc luci-app-passwall2 xray-core docker-ce
-  IMAGES := sysupgrade.bin
-  IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
-endef
-TARGET_DEVICES += sl_3000-emmc
-EOF
-fi
-
-# 复制配置文件并启用设备
+# 使用提供的配置文件
 cp -v "$CONFIG_DIR/sl3000.config" .config
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
+echo "CONFIG_TARGET_mediatek_filogic_DEVICE_${DEVICE_NAME}=y" >> .config
 
 make defconfig
 make -j1 V=s oldconfig
 
-# 验证设备已启用
-grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" .config || {
+grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_${DEVICE_NAME}=y" .config || {
     echo "❌ 设备未在 .config 中启用"
     exit 1
 }
