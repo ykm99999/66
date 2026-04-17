@@ -1,69 +1,67 @@
-name: SL3000 Final Build V2
+name: SL3000 Rescue Bundle Build
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
 
 jobs:
-  build:
+  build-rescue:
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout main (Scripts)
+      - name: Checkout main repository (scripts & sources)
         uses: actions/checkout@v4
         with:
           ref: main
           path: main-repo
 
-      - name: Checkout source (Firmware)
-        uses: actions/checkout@v4
-        with:
-          repository: ykm99999/66
-          ref: sl3000-full-sync
-          path: source-repo
-
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential libncurses5-dev gawk git \
-            gettext unzip file python3 python3-pip device-tree-compiler \
-            libssl-dev wget cpio rsync
+          sudo apt-get install -y gcc-aarch64-linux-gnu build-essential device-tree-compiler
 
-      - name: Debug - List directories
+      - name: Build rescue bundle
         run: |
-          echo "=== main-repo contents ==="
-          ls -la main-repo/
-          echo "=== source-repo contents ==="
-          ls -la source-repo/
-
-      - name: Run diy-part1.sh
-        run: |
-          set -e
+          chmod +x main-repo/diy-part2.sh
           cd main-repo
-          if [ -f diy-part1.sh ]; then
-            chmod +x diy-part1.sh
-            ./diy-part1.sh
-          else
-            echo "⚠️ diy-part1.sh not found, skipping."
-          fi
+          ./diy-part2.sh
 
-      - name: Run diy-part2.sh
+      - name: List generated files
         run: |
-          set -e
-          cd main-repo
-          if [ -f diy-part2.sh ]; then
-            chmod +x diy-part2.sh
-            ./diy-part2.sh
-          else
-            echo "⚠️ diy-part2.sh not found, skipping."
-          fi
+          echo "=== Rescue files ==="
+          ls -la output/
+          ls -la output/atf/ || true
+          ls -la output/uboot/ || true
 
-      - name: Upload Release
-        uses: softprops/action-gh-release@v2
-        if: success()
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: v${{ github.run_id }}
+          name: sl3000-rescue-bundle
+          path: output/
+
+      - name: Create Release (only on tag push)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "SL3000 Rescue ${{ github.ref_name }}"
+          body: |
+            ## 🔧 救砖全家桶（ATF + U-Boot + mtk_uartboot）
+            - 构建时间: ${{ github.ref_name }}
+            - 包含可直接用于编程器烧录的 `Spi-flash-32MB.bin`
+
+            ### 📦 文件说明
+            - `Spi-flash-32MB.bin` —— **编程器烧录文件（32MB 全镜像）**
+            - `atf/` —— ARM 可信固件（BL2/BL31）
+            - `uboot/` —— U-Boot 引导程序（eMMC/NOR 版本）
+            - `mtk_uartboot.tar.gz` —— 串口救砖工具
           files: |
-            source-repo/output/atf/*.bin
-            source-repo/output/uboot/*.bin
-            source-repo/output/firmware/*.bin
+            output/atf/*.bin
+            output/uboot/*.bin
+            output/mtk_uartboot.tar.gz
+            output/Spi-flash-32MB.bin
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
