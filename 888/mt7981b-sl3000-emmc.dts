@@ -5,7 +5,7 @@
 #include <dt-bindings/leds/common.h>
 
 / {
-	model = "Siluo SL3000 (1GB DDR4 / 32MB SPI-NOR Rescue)";
+	model = "Siluo SL3000 (1GB DDR4 / 32MB SPI-NOR)";
 	compatible = "siluo,sl3000-spi-rescue", "mediatek,mt7981";
 
 	aliases {
@@ -19,14 +19,12 @@
 
 	chosen {
 		stdout-path = "serial0:115200n8";
-		/* 物理锁定：强制串口与 MTD 根文件系统挂载逻辑 */
-		bootargs = "console=ttyS0,115200n8 earlycon=uart8250,mmio32,0x11002000 root=/dev/mtdblock4 rw rootwait";
+		bootargs = "console=ttyS0,115200n8 earlycon=uart8250,mmio32,0x11002000";
 	};
 
 	memory@40000000 {
 		device_type = "memory";
-		/* 像素级锁定：1GB DDR4 (0x40000000) */
-		reg = <0x0 0x40000000 0x0 0x40000000>;
+		reg = <0x0 0x40000000 0x0 0x40000000>; /* 1GB */
 	};
 
 	reg_1p8v: regulator-1p8v {
@@ -102,39 +100,36 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 
-			/* --- V2 物理分区链条修复 --- */
-			
-			/* 1. BL2 引导区：物理占用前 256KB */
+			/* BL2 引导区 */
 			partition@0 {
 				label = "bl2";
-				reg = <0x000000 0x040000>;
+				reg = <0x000000 0x040000>;		/* 256KB */
 				read-only;
 			};
 
-			/* 2. FIP 镜像区：起始于 0x40000 (对应你查看到的 78 56 34 12) */
+			/* FIP 镜像区 (BL31 + U-Boot) */
 			partition@40000 {
 				label = "fip";
-				reg = <0x040000 0x080000>; /* 512KB */
+				reg = <0x040000 0x080000>;		/* 512KB */
 				read-only;
 			};
 
-			/* 3. 环境变量区：物理对齐 0xC0000 (768KB) */
-			/* 修正：必须与 defconfig 中的 CONFIG_ENV_OFFSET=0xC0000 像素级对齐 */
+			/* U-Boot 环境变量区 */
 			partition@c0000 {
 				label = "u-boot-env";
-				reg = <0x0c0000 0x040000>; /* 256KB */
+				reg = <0x0c0000 0x040000>;		/* 256KB */
 			};
 
-			/* 4. 内核镜像区：起始于 1MB */
+			/* 内核镜像区 (占位，实际由 initramfs 启动) */
 			partition@100000 {
 				label = "kernel";
-				reg = <0x100000 0xa00000>; /* 10MB */
+				reg = <0x100000 0xa00000>;		/* 10MB */
 			};
 
-			/* 5. 根文件系统：剩余 21MB 空间 */
+			/* 根文件系统区 (占位) */
 			partition@b00000 {
 				label = "rootfs";
-				reg = <0xb00000 0x1500000>;
+				reg = <0xb00000 0x1500000>;		/* 21MB */
 			};
 		};
 	};
@@ -162,7 +157,7 @@
 	gmac0: mac@0 {
 		compatible = "mediatek,eth-mac";
 		reg = <0>;
-		phy-mode = "2500base-x"; /* 2.5G 网口物理对齐 */
+		phy-mode = "2500base-x";
 
 		fixed-link {
 			speed = <2500>;
