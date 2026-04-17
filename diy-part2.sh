@@ -6,24 +6,22 @@ SOURCE_DIR="$WORKSPACE/source-repo"
 OUTPUT_DIR="$WORKSPACE/output"
 STAGING_DIR_IMAGE="$WORKSPACE/immortalwrt-build/staging_dir/image"
 
-# 物理修复：强制指定交叉编译器前缀
+# 物理注入交叉编译环境变量
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-mkdir -p "$STAGING_DIR_IMAGE" "$OUTPUT_DIR/atf" "$OUTPUT_DIR/uboot"
-
 IMMORTALWRT_BUILD_DIR=$(cat $WORKSPACE/build-dir.txt)
 
-# ========== 1. ATF 补丁 (禁用 EOF) ==========
+# ========== 1. ATF 补丁 (物理注入，禁用 EOF) ==========
 cd "$SOURCE_DIR/arm-trusted-firmware"
 mkdir -p plat/mediatek/mt7981/drivers/dram
 
-printf "#include <plat/common/platform.h>\n#include <common/debug.h>\n#include <lib/mmio.h>\n#include <stdarg.h>\n#include <stdio.h>\nextern void mtk_mem_init_real(void);\nextern int mt7981_use_ddr4;\nvoid mtk_mem_init(void) {\n    mt7981_use_ddr4 = 1;\n    NOTICE(\"EMI: Forced DDR4 for SL3000\\\\n\");\n    mtk_mem_init_real();\n}\nvoid mtk_mem_dbg_print(const char *fmt, ...) {}\nvoid mtk_mem_err_print(const char *fmt, ...) {}\n" > plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c
+printf "#include <plat/common/platform.h>\n#include <common/debug.h>\n#include <lib/mmio.h>\nextern void mtk_mem_init_real(void);\nextern int mt7981_use_ddr4;\nvoid mtk_mem_init(void) {\n    mt7981_use_ddr4 = 1;\n    NOTICE(\"EMI: Forced DDR4 for SL3000\\\\n\");\n    mtk_mem_init_real();\n}\nvoid mtk_mem_dbg_print(const char *fmt, ...) {}\nvoid mtk_mem_err_print(const char *fmt, ...) {}\n" > plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c
 
-# ========== 2. 编译 ATF (修复编译器找不到) ==========
+# ========== 2. 编译 ATF (像素级修复 make 参数) ==========
 echo "=== Building ATF Versions ==="
 
-# 强制在执行 make 时传入编译器环境变量
+# 强制在 make 命令行指定 CROSS_COMPILE 解决 Error 127
 make clean
 make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 \
      BOOT_DEVICE=emmc DRAM_SIZE=1024 DRAM_USE_DDR4=1 BOARD_BGA=1
@@ -44,4 +42,4 @@ cd "$IMMORTALWRT_BUILD_DIR"
 make -j$(nproc) V=s
 
 find bin/targets/ -type f -name "*sysupgrade*" -exec cp {} "$OUTPUT_DIR/firmware/" \;
-echo "✅ 编译流程完成"
+echo "✅ SL3000 编译流程全部完成"
