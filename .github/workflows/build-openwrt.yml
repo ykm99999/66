@@ -7,36 +7,18 @@ on:
       - 'v*'
 
 jobs:
-  build-full:
+  build:
     runs-on: ubuntu-22.04
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      # 1. 检出主仓库（包含脚本和 ATF/U-Boot 源码）
       - name: Checkout main repository
         uses: actions/checkout@v4
         with:
           ref: main
           path: main-repo
 
-      # 2. 检出 ImmortalWrt 源码仓库
-      - name: Checkout ImmortalWrt source
-        uses: actions/checkout@v4
-        with:
-          repository: ykm99999/66
-          ref: sl3000-full-sync
-          path: source-repo
-
-      # 3. 生成 Release 标签（用于手动触发时自动生成版本号）
-      - name: Generate release tag
-        id: release_tag
-        run: |
-          TAG_NAME="v$(date -u +'%Y%m%d-%H%M%S')"
-          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
-          echo "Release tag: $TAG_NAME"
-
-      # 4. 安装编译依赖
-      - name: Install build dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential clang flex bison gawk \
@@ -44,85 +26,42 @@ jobs:
             python3-distutils python3-setuptools rsync unzip zlib1g-dev file wget \
             gcc-aarch64-linux-gnu device-tree-compiler
 
-      # 5. 优化磁盘空间
       - name: Optimize disk space
         run: |
           sudo apt-get clean
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
           df -h
 
-      # 6. 准备 OpenWrt 配置（diy-part1.sh）
       - name: Run diy-part1.sh (Prepare OpenWrt)
         run: |
           chmod +x main-repo/diy-part1.sh
           cd main-repo
           ./diy-part1.sh
 
-      # 7. 编译 OpenWrt 固件（此步骤耗时较长）
-      - name: Build OpenWrt firmware
-        run: |
-          cd immortalwrt-build
-          make -j$(nproc) V=s
-        timeout-minutes: 360
-
-      # 8. 编译救砖全家桶（ATF + U-Boot）
-      - name: Run diy-part2.sh (Build ATF & U-Boot)
+      - name: Run diy-part2.sh (Build All & Create Full Image)
         run: |
           chmod +x main-repo/diy-part2.sh
           cd main-repo
           ./diy-part2.sh
+        timeout-minutes: 360
 
-      # 9. 合成完整的 32MB 编程器镜像
-      - name: Build full SPI image
-        run: |
-          chmod +x main-repo/build-full-image.sh
-          cd main-repo
-          ./build-full-image.sh
-
-      # 10. 列出生成的文件
-      - name: List generated files
-        run: |
-          echo "=== Output directory ==="
-          ls -la output/
-          echo "=== ATF files ==="
-          ls -la output/atf/ || true
-          echo "=== U-Boot files ==="
-          ls -la output/uboot/ || true
-          echo "=== Firmware files ==="
-          ls -la output/firmware/ || true
-
-      # 11. 上传 Artifacts（所有产物）
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sl3000-full-image-${{ steps.release_tag.outputs.tag_name }}
+          name: sl3000-full-image
           path: output/
 
-      # 12. 创建 Release（仅当推送标签时触发）
-      - name: Create Release
+      - name: Create Release (on tag)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: "SL3000 Full Image ${{ github.ref_name }}"
-          body: |
-            ## 完整编程器镜像
-            - 构建时间: ${{ github.ref_name }}
-            - 包含 ATF、U-Boot、Factory、Kernel、RootFS
-
-            ### 📦 文件说明
-            - `Spi-flash-32MB-full.bin` —— **编程器直接烧录的 32MB 全镜像**
-            - `atf/` —— ARM 可信固件
-            - `uboot/` —— U-Boot 引导程序
-            - `firmware/` —— OpenWrt sysupgrade 固件
-            - `parts/firmware.bin` —— 内核 + rootfs 合并文件
           files: |
             output/atf/*.bin
             output/uboot/*.bin
             output/firmware/*.bin
             output/mtk_uartboot.tar.gz
             output/Spi-flash-32MB-full.bin
-          draft: false
-          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
