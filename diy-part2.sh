@@ -49,13 +49,10 @@ make clean
 make PLAT=mt7981 DEBUG=0 BOOT_DEVICE=ram DRAM_SIZE=1024 DRAM_USE_DDR4=1 BOARD_BGA=1 RAM_BOOT_UART_DL=1
 cp -v build/mt7981/release/bl2.bin "$OUTPUT_DIR/atf/bl2-ram-1g.bin"
 
-# ---------- 2. 编译 fiptool（彻底隔离） ----------
-echo "=== Building fiptool (standalone) ==="
-cd "$MAIN_REPO/arm-trusted-firmware/tools/fiptool"
-rm -f fiptool *.o
-gcc -Wall -Werror -pedantic -std=c99 -c fiptool.c -o fiptool.o
-gcc -Wall -Werror -pedantic -std=c99 -o fiptool fiptool.o
+# ---------- 2. 编译 fiptool（正确传递 BUILD_BASE） ----------
+echo "=== Building fiptool ==="
 cd "$MAIN_REPO/arm-trusted-firmware"
+make -C tools/fiptool CROSS_COMPILE= HOSTCC=gcc BUILD_BASE="$PWD/build" V=1
 FIPTOOL="$PWD/tools/fiptool/fiptool"
 if [ ! -x "$FIPTOOL" ]; then
     echo "❌ fiptool 编译失败"
