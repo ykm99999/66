@@ -1,145 +1,102 @@
 #!/bin/bash
 set -euo pipefail
 
-# 物理修复：锁定终端环境
-export TERM=xterm-256color
-
 WORKSPACE="$GITHUB_WORKSPACE"
 SOURCE_DIR="$WORKSPACE/source-repo"
-CONFIG_DIR="$WORKSPACE/main-repo/888"
 OUTPUT_DIR="$WORKSPACE/output"
 STAGING_DIR_IMAGE="$WORKSPACE/immortalwrt-build/staging_dir/image"
 
 mkdir -p "$STAGING_DIR_IMAGE"
+mkdir -p "$OUTPUT_DIR/atf" "$OUTPUT_DIR/uboot" "$OUTPUT_DIR/firmware"
+
 IMMORTALWRT_BUILD_DIR=$(cat $WORKSPACE/build-dir.txt)
-cd "$IMMORTALWRT_BUILD_DIR"
 
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# ========== 1. 物理修复 ATF 源码 (彻底解决未定义与重定义) ==========
-echo "=== Executing ATF Absolute Physical Fix V9 ==="
-cd $SOURCE_DIR/arm-trusted-firmware
-
-# 物理修补点 1：给系统公共头文件加锁，防止欢迎词冲突
-sed -i 's/#define FIRMWARE_WELCOME_STR.*/#ifndef FIRMWARE_WELCOME_STR\n\0\n#endif/' include/plat/common/common_def.h
-
-# 物理修补点 2：物理注入补全后的 platform_def.h (包含 TRNG 定义)
-cat > plat/mediatek/mt7981/include/platform_def.h << 'EOF'
-/*
- * Copyright (c) 2021, MediaTek Inc. All rights reserved.
- * SPDX-License-Identifier: BSD-3-Clause
- * SL3000 Rescue Firmware - Version 2 (Fixed TRNG & RAM Aligned)
- */
-#ifndef PLATFORM_DEF_H
-#define PLATFORM_DEF_H
-
-#include <common/interrupt_props.h>
-#include <drivers/arm/gic_common.h>
-#include <lib/utils_def.h>
-#include "mt7981_def.h"
-
-#define PLATFORM_LINKER_FORMAT		"elf64-littleaarch64"
-#define PLATFORM_LINKER_ARCH		aarch64
-
-#if defined(IMAGE_BL1)
-#define PLATFORM_STACK_SIZE		0x440
-#elif defined(IMAGE_BL2)
-#define PLATFORM_STACK_SIZE		0x1000
-#elif defined(IMAGE_BL31)
-#define PLATFORM_STACK_SIZE		0x800
-#elif defined(IMAGE_BL32)
-#define PLATFORM_STACK_SIZE		0x440
-#endif
-
-/* 物理锁定：SL3000 自定义欢迎词 */
-#ifndef FIRMWARE_WELCOME_STR
-#define FIRMWARE_WELCOME_STR		"Booting Trusted Firmware (SL3000 1GB)\n"
-#endif
-
-#define PLATFORM_MAX_AFFLVL		MPIDR_AFFLVL2
-#define PLAT_MAX_PWR_LVL		U(2)
-#define PLAT_MAX_RET_STATE		U(1)
-#define PLAT_MAX_OFF_STATE		U(2)
-#define PLATFORM_SYSTEM_COUNT		1
-#define PLATFORM_CLUSTER_COUNT		1
-#define PLATFORM_CLUSTER0_CORE_COUNT	2
-#define PLATFORM_CORE_COUNT		2
-#define PLATFORM_MAX_CPUS_PER_CLUSTER	2
-#define PLATFORM_NUM_AFFS		(PLATFORM_SYSTEM_COUNT + PLATFORM_CLUSTER_COUNT + PLATFORM_CORE_COUNT)
-
-/* 硬件寄存器定义补全：物理解决 TRNG undeclared 错误 */
-#define TRNG_BASE			(0x1020F000)
-#define TRNG_SIZE			(0x1000)
-
-/* 物理对齐：SL3000 1GB RAM 布局 */
-#define IMAGE_LOAD_ADDR			(0x40000000)
-#define TZRAM_BASE			(0x43000000)
-#define TZRAM_SIZE			(0x20000)
-#define TZRAM2_BASE			(TZRAM_BASE + TZRAM_SIZE)
-#define TZRAM2_SIZE			(0x10000)
-#define SOC_CHIP_ID			U(0x7981)
-
-#define BL2_LIMIT			(0x280000)
-#define BL31_BASE			(TZRAM_BASE + 0x1000)
-#define BL31_LIMIT			(TZRAM_BASE + TZRAM_SIZE)
-#define BL32_BASE			(TZRAM2_BASE)
-#define BL32_LIMIT			(TZRAM2_BASE + TZRAM2_SIZE)
-#define BL33_BASE			(0x41e00000)
-
-/* 物理对齐：Flash 布局 */
-#define FLASH_FIP_BASE			(0x40000)
-#define FLASH_FIP_MAX_SIZE		(0x80000)
-
-#define MAX_IO_DEVICES			U(3)
-#define MAX_IO_HANDLES			U(4)
-#define MAX_IO_BLOCK_DEVICES		1
-#define FIP_DECOMP_TEMP_BASE		(0x42000000)
-#define FIP_DECOMP_TEMP_SIZE		(0x400000)
-
-#define PLAT_PHY_ADDR_SPACE_SIZE	(1ULL << 32)
-#define PLAT_VIRT_ADDR_SPACE_SIZE	(1ULL << 32)
-#define MAX_XLAT_TABLES			4
-#define MAX_MMAP_REGIONS		16
-#define CACHE_WRITEBACK_SHIFT		6
-#define CACHE_WRITEBACK_GRANULE		(1 << CACHE_WRITEBACK_SHIFT)
-
-#define PLAT_ARM_G1S_IRQ_PROPS(grp) \
-	INTR_PROP_DESC(MT_IRQ_SEC_SGI_0, GIC_HIGHEST_SEC_PRIORITY, grp, GIC_INTR_CFG_EDGE)
-#define PLAT_ARM_G0_IRQ_PROPS(grp)
-
-#endif /* PLATFORM_DEF_H */
-EOF
-
-# ========== 2. 强制锁定 DDR4 补丁 (原文照抄) ==========
+# ========== 1. 强制修改 ATF 源码，启用 DDR4 (物理复刻，禁用 EOF) ==========
+echo "=== Patching ATF source to force DDR4 ==="
+cd "$SOURCE_DIR/arm-trusted-firmware"
 mkdir -p plat/mediatek/mt7981/drivers/dram
-cat > plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c << 'EOF'
-#include <plat/common/platform.h>
-#include <common/debug.h>
-#include <lib/mmio.h>
-#include <stdarg.h>
-#include <stdio.h>
-extern void mtk_mem_init_real(void);
-extern int mt7981_use_ddr4;
-void mtk_mem_init(void) {
-	mt7981_use_ddr4 = 1;
-	NOTICE("EMI: Using DDR4 settings forced\n");
-	mtk_mem_init_real();
-}
-EOF
 
-# ========== 3. 编译各组件 (原文照抄) ==========
+# 使用 printf 替代 cat <<EOF
+printf "/*\n * Copyright (c) 2021, MediaTek Inc. All rights reserved.\n *\n * SPDX-License-Identifier: BSD-3-Clause\n */\n\n#include <plat/common/platform.h>\n#include <common/debug.h>\n#include <lib/mmio.h>\n#include <stdarg.h>\n#include <stdio.h>\n\n#define IAP_REBB_SWITCH 0x11D00A0C\n#define IAP_IND 0x01\n\nextern void mtk_mem_init_real(void);\nextern int mt7981_use_ddr4;\nextern int mt7981_ddr_size_limit;\nextern int mt7981_dram_debug;\nextern int mt7981_bga_pkg;\nextern int mt7981_ddr3_freq;\n\nvoid mtk_mem_init(void)\n{\n    mt7981_use_ddr4 = 1;\n#ifdef DRAM_SIZE_LIMIT\n    mt7981_ddr_size_limit = DRAM_SIZE_LIMIT;\n    if (!mt7981_use_ddr4 && mt7981_ddr_size_limit > 512)\n        mt7981_ddr_size_limit = 512;\n#endif\n#ifdef DRAM_DEBUG_LOG\n    mt7981_dram_debug = 1;\n#endif\n#if defined(BOARD_BGA)\n    mt7981_bga_pkg = 1;\n#elif defined(BOARD_QFN)\n    mt7981_bga_pkg = 0;\n#endif\n#ifdef DDR3_FREQ_2133\n    mt7981_ddr3_freq = 2133;\n#endif\n#ifdef DDR3_FREQ_1866\n    mt7981_ddr3_freq = 1866;\n#endif\n    NOTICE(\"EMI: Using DDR%%u settings\\\\n\", mt7981_use_ddr4 ? 4 : 3);\n    mtk_mem_init_real();\n}\n\nvoid mtk_mem_dbg_print(const char *fmt, ...)\n{\n    va_list args;\n    if (!mt7981_dram_debug) return;\n    va_start(args, fmt);\n    (void)vprintf(fmt, args);\n    va_end(args);\n}\n\nvoid mtk_mem_err_print(const char *fmt, ...)\n{\n    const char *prefix_str;\n    va_list args;\n    prefix_str = plat_log_get_prefix(LOG_LEVEL_ERROR);\n    while (*prefix_str != '\\\\0') {\n        (void)putchar(*prefix_str);\n        prefix_str++;\n    }\n    va_start(args, fmt);\n    (void)vprintf(fmt, args);\n    va_end(args);\n}\n" > plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c
+
+echo "✅ ATF source patched for DDR4"
+
+# ========== 2. 编译多版本 ATF (原文参数复刻) ==========
+echo "=== Building ATF Versions ==="
+
+# 512M EMMC
 make clean
-make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 BOOT_DEVICE=emmc DRAM_SIZE=1024 DRAM_USE_DDR4=1 BOARD_BGA=1
-cp build/mt7981/release/bl2.bin $OUTPUT_DIR/atf/bl2-1g-emmc.bin
+make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=512 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
+cp build/mt7981/release/bl2.bin "$OUTPUT_DIR/atf/bl2-512m-emmc.bin"
+cp build/mt7981/release/bl2.elf "$OUTPUT_DIR/atf/bl2-512m-emmc.elf"
 
-cd $SOURCE_DIR/u-boot
+# 1G EMMC
+make clean
+make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=emmc LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
+cp build/mt7981/release/bl2.bin "$OUTPUT_DIR/atf/bl2-1g-emmc.bin"
+cp build/mt7981/release/bl2.elf "$OUTPUT_DIR/atf/bl2-1g-emmc.elf"
+cp build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin"
+
+# 1G NOR (Recovery)
+make clean
+make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 DDR3_FLY=0 USE_NMBM=0 BOOT_DEVICE=nor LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1
+cp build/mt7981/release/bl2.bin "$OUTPUT_DIR/atf/bl2-1g-nor.bin"
+cp build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin"
+
+# 1G RAM (UART Boot)
+make clean
+make CROSS_COMPILE=aarch64-linux-gnu- PLAT=mt7981 DEBUG=0 BOOT_DEVICE=ram LOG_LEVEL=20 DRAM_SIZE=1024 DDR_TYPE=ddr4 DRAM_USE_DDR4=1 BOARD_BGA=1 RAM_BOOT_UART_DL=1
+cp build/mt7981/release/bl2.bin "$OUTPUT_DIR/atf/bl2-ram-1g.bin"
+
+# 编译 fiptool
+make -C tools/fiptool CROSS_COMPILE=
+FIPTOOL="$PWD/tools/fiptool/fiptool"
+
+# ========== 3. 编译 U-Boot (EMMC/NOR) ==========
+cd "$SOURCE_DIR/u-boot"
+
+# EMMC 版
 make clean
 make CROSS_COMPILE=aarch64-linux-gnu- mt7981_emmc_rfb_defconfig
+echo "CONFIG_MTK_FIP_SUPPORT=y" >> .config
+make olddefconfig
 make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
+"$FIPTOOL" create --soc-fw "$STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin" --nt-fw u-boot.bin u-boot.fip
+cp u-boot.fip "$OUTPUT_DIR/uboot/fip-emmc.bin"
 cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-emmc.bin"
 
+# NOR 版 (物理对齐配置名)
+make clean
+if [ -f configs/mt7981_spim_nor_rfb_defconfig ]; then
+    make CROSS_COMPILE=aarch64-linux-gnu- mt7981_spim_nor_rfb_defconfig
+else
+    # 物理回退至确认存在的 nor_emmc 配置
+    make CROSS_COMPILE=aarch64-linux-gnu- mt7981_nor_emmc_rfb_defconfig
+fi
+echo "CONFIG_MTK_FIP_SUPPORT=y" >> .config
+make olddefconfig
+make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
+"$FIPTOOL" create --soc-fw "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin" --nt-fw u-boot.bin u-boot.fip
+cp u-boot.fip "$OUTPUT_DIR/uboot/fip-nor.bin"
+cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
+
+# ========== 4. 编译 ImmortalWrt 固件 ==========
+echo "=== Building ImmortalWrt Firmware ==="
 cd "$IMMORTALWRT_BUILD_DIR"
-make -j$(nproc) V=s
-mkdir -p "$OUTPUT_DIR/firmware"
-find bin/targets/ -type f \( -name "*sysupgrade*" -o -name "*.img.gz" \) -exec cp -v {} "$OUTPUT_DIR/firmware/" \;
+if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" .config; then
+    echo "❌ Device sl_3000-emmc not enabled!"
+    exit 1
+fi
+
+make VERSION_NUMBER="${VERSION_NUMBER:-1.0.0}" -j$(nproc) V=s 2>&1 | tee build.log || exit 1
+
+find bin/targets/ -type f \( -name "*.bin" -o -name "*.img.gz" -o -name "*sysupgrade*" \) -exec cp -v {} "$OUTPUT_DIR/firmware/" \;
+
+# ========== 5. 打包 mtk_uartboot ==========
+cd "$SOURCE_DIR/mtk_uartboot"
+tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
+
+echo "✅ diy-part2.sh 执行完毕"
