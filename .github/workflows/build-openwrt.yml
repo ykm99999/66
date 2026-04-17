@@ -10,27 +10,31 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout main repository
+      - name: Checkout Repository (Main Branch)
         uses: actions/checkout@v4
         with:
           ref: main
-          path: main-repo
+          # 不再使用子目录 path，直接检出到工作空间根目录
+          # 这样脚本、u-boot、immortalwrt 等文件夹会直接出现在当前物理路径
 
-      - name: Install dependencies
+      - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu build-essential device-tree-compiler
+          sudo apt-get install -y gcc-aarch64-linux-gnu build-essential device-tree-compiler \
+          bison flex libssl-dev python3-setuptools swig python3-dev
 
-      - name: Run diy-part1.sh (Prepare environment)
+      - name: Run diy-part1.sh (Physical Path Audit)
         run: |
-          chmod +x main-repo/diy-part1.sh
-          cd main-repo
+          # 物理模拟：确保脚本具有执行权限
+          chmod +x diy-part1.sh
+          # diy-part1.sh 应包含将 immortalwrt 等目录准备就绪的逻辑
           ./diy-part1.sh
 
-      - name: Run diy-part2.sh (Build ATF/U-Boot & Create Rescue Image)
+      - name: Run diy-part2.sh (Build Kernel & Bootloaders)
         run: |
-          chmod +x main-repo/diy-part2.sh
-          cd main-repo
+          chmod +x diy-part2.sh
+          # 修复：传递工作空间，确保脚本能定位到根目录下的 u-boot/ 和 immortalwrt/
+          export GITHUB_WORKSPACE=$GITHUB_WORKSPACE
           ./diy-part2.sh
 
       - name: Upload artifacts
@@ -46,9 +50,7 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: "SL3000 Rescue Bundle ${{ github.ref_name }}"
           files: |
-            output/atf/*.bin
-            output/uboot/*.bin
-            output/mtk_uartboot.tar.gz
-            output/Spi-flash-32MB-rescue.bin
+            output/*.bin
+            output/*.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
