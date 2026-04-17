@@ -1,5 +1,4 @@
-# .github/workflows/build-full.yml
-name: SL3000 Full 32MB Image Build
+name: SL3000 Rescue Bundle Build
 
 on:
   workflow_dispatch:
@@ -10,8 +9,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout main repository
         uses: actions/checkout@v4
@@ -22,41 +19,31 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang flex bison gawk \
-            gettext git libncurses-dev libssl-dev \
-            python3-distutils python3-setuptools rsync unzip zlib1g-dev file wget \
-            gcc-aarch64-linux-gnu device-tree-compiler
+          sudo apt-get install -y gcc-aarch64-linux-gnu build-essential device-tree-compiler
 
-      - name: Optimize disk space
-        run: |
-          sudo apt-get clean
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
-          df -h
-
-      - name: Run diy-part1.sh (Prepare OpenWrt)
+      - name: Run diy-part1.sh (Prepare environment)
         run: |
           chmod +x main-repo/diy-part1.sh
           cd main-repo
           ./diy-part1.sh
 
-      - name: Run diy-part2.sh (Build All & Prepare Full Image)
+      - name: Run diy-part2.sh (Build ATF/U-Boot & Create Rescue Image)
         run: |
           chmod +x main-repo/diy-part2.sh
           cd main-repo
           ./diy-part2.sh
-        timeout-minutes: 360
 
       - name: List output files
         run: |
-          echo "=== Output directory ==="
+          echo "=== Rescue files ==="
           ls -la output/
-          echo "=== Full 32MB image ==="
-          ls -la output/Spi-flash-32MB-full.bin || true
+          ls -la output/atf/ || true
+          ls -la output/uboot/ || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sl3000-full-image
+          name: sl3000-rescue-bundle
           path: output/
 
       - name: Create Release (on tag)
@@ -64,12 +51,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: "SL3000 Full Image ${{ github.ref_name }}"
+          name: "SL3000 Rescue Bundle ${{ github.ref_name }}"
           files: |
             output/atf/*.bin
             output/uboot/*.bin
-            output/firmware/*.bin
             output/mtk_uartboot.tar.gz
-            output/Spi-flash-32MB-full.bin
+            output/Spi-flash-32MB-rescue.bin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
