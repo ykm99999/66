@@ -1,3 +1,4 @@
+# .github/workflows/build-full.yml
 name: SL3000 Full 32MB Image Build
 
 on:
@@ -49,12 +50,6 @@ jobs:
         run: |
           echo "=== Output directory ==="
           ls -la output/
-          echo "=== ATF files ==="
-          ls -la output/atf/ || true
-          echo "=== U-Boot files ==="
-          ls -la output/uboot/ || true
-          echo "=== Firmware files ==="
-          ls -la output/firmware/ || true
           echo "=== Full 32MB image ==="
           ls -la output/Spi-flash-32MB-full.bin || true
 
