@@ -1,4 +1,3 @@
-# 888/mt7981_sl3000.mk
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 include ./common/common.mk
@@ -51,13 +50,13 @@ define Build/gen_spi_full_32mb
 	fi
 
 	if [ -f $(BIN_DIR)/kernel.bin ]; then \
-		dd if=$(BIN_DIR)/kernel.bin of=$@.tmp bs=256k seek=7 conv=notrunc status=none; \
-		echo "  Kernel written at 0x1C0000"; \
+		dd if=$(BIN_DIR)/kernel.bin of=$@.tmp bs=256k seek=14 conv=notrunc status=none; \
+		echo "  Kernel written at 0x380000"; \
 	fi
 
 	if [ -f $(BIN_DIR)/rootfs.bin ]; then \
-		dd if=$(BIN_DIR)/rootfs.bin of=$@.tmp bs=256k seek=23 conv=notrunc status=none; \
-		echo "  RootFS written at 0x5C0000"; \
+		dd if=$(BIN_DIR)/rootfs.bin of=$@.tmp bs=256k seek=30 conv=notrunc status=none; \
+		echo "  RootFS written at 0x780000"; \
 	fi
 
 	mv $@.tmp $@
