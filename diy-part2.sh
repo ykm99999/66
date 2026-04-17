@@ -49,14 +49,20 @@ make clean
 make PLAT=mt7981 DEBUG=0 BOOT_DEVICE=ram DRAM_SIZE=1024 DRAM_USE_DDR4=1 BOARD_BGA=1 RAM_BOOT_UART_DL=1
 cp -v build/mt7981/release/bl2.bin "$OUTPUT_DIR/atf/bl2-ram-1g.bin"
 
-# 编译 fiptool
-cd tools/fiptool
+# ---------- 2. 编译 fiptool（手动 cd 方式，避开顶层 Makefile 路径 bug） ----------
+echo "=== Building fiptool ==="
+cd "$MAIN_REPO/arm-trusted-firmware/tools/fiptool"
 make clean
 make CC=gcc
 cd "$MAIN_REPO/arm-trusted-firmware"
 FIPTOOL="$PWD/tools/fiptool/fiptool"
+if [ ! -x "$FIPTOOL" ]; then
+    echo "❌ fiptool 编译失败"
+    exit 1
+fi
+echo "✅ fiptool 编译成功"
 
-# ---------- 2. 编译 U-Boot ----------
+# ---------- 3. 编译 U-Boot ----------
 echo "=== Building U-Boot (eMMC) ==="
 cd "$MAIN_REPO/u-boot"
 make clean
@@ -78,12 +84,12 @@ make -j$(nproc)
 cp -v fip-nor.bin "$OUTPUT_DIR/uboot/"
 cp -v u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
 
-# ---------- 3. 打包 mtk_uartboot ----------
+# ---------- 4. 打包 mtk_uartboot ----------
 echo "=== Packaging mtk_uartboot ==="
 cd "$MAIN_REPO/mtk_uartboot"
 tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
 
-# ---------- 4. 准备 Factory 占位文件 ----------
+# ---------- 5. 准备 Factory 占位文件 ----------
 FACTORY_SRC="$MAIN_REPO/888/factory.bin"
 if [ -f "$FACTORY_SRC" ]; then
     cp -v "$FACTORY_SRC" "$PARTS_DIR/factory.bin"
@@ -92,18 +98,13 @@ else
     dd if=/dev/zero bs=2M count=1 2>/dev/null | tr '\000' '\377' > "$PARTS_DIR/factory.bin"
 fi
 
-# ---------- 5. 合成 32MB 救砖镜像 (仅 BL2 + FIP) ----------
+# ---------- 6. 合成 32MB 救砖镜像 ----------
 echo "=== Creating Spi-flash-32MB-rescue.bin ==="
 RESCUE_BIN="$OUTPUT_DIR/Spi-flash-32MB-rescue.bin"
 dd if=/dev/zero bs=1M count=32 2>/dev/null | tr '\000' '\377' > "$RESCUE_BIN"
 
-# 写入 BL2 (0x0)
 dd if="$OUTPUT_DIR/atf/bl2-1g-nor.bin" of="$RESCUE_BIN" bs=1 conv=notrunc status=none
-
-# 写入 FIP (0x40000)
 dd if="$OUTPUT_DIR/uboot/fip-nor.bin" of="$RESCUE_BIN" bs=256k seek=1 conv=notrunc status=none
-
-# 写入 Factory (0x180000) —— 可选，但为了分区表完整性
 dd if="$PARTS_DIR/factory.bin" of="$RESCUE_BIN" bs=256k seek=6 conv=notrunc status=none
 
 echo "✅ 救砖镜像已生成: $RESCUE_BIN"
