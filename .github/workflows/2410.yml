@@ -1,11 +1,7 @@
-name: Sync SL3000 Full Source to Main
+name: Sync SL3000 Full Source (Physical Directory Fix)
 
 on:
-  workflow_dispatch:        # 手动触发
-
-env:
-  GH_USER: ${{ github.repository_owner }}
-  TARGET_REPO: ${{ github.repository }}
+  workflow_dispatch:
 
 jobs:
   sync-and-patch:
@@ -22,61 +18,54 @@ jobs:
           git config --global user.email "actions@github.com"
           git config --global user.name "GitHub Actions"
 
-      # ---------- 1. 物理创建并同步 ATF (补齐目录逻辑) ----------
-      - name: Sync & Patch ATF
+      # ---------- 1. 物理同步 ATF (剥离 Git 痕迹 + 修复) ----------
+      - name: Sync & Patch ATF (Physical)
         run: |
-          # 物理确保目录结构
           rm -rf arm-trusted-firmware
-          mkdir -p arm-trusted-firmware
-          
+          # 临时克隆到临时目录
           git clone --recursive --depth=1 -b mtksoc-20260123 https://github.com/mtk-openwrt/arm-trusted-firmware.git atf-temp
           
-          echo "=== 执行 ATF 物理手术 (解决重定义与头文件缺失) ==="
-          # 修复公共头文件，防止 redefined 报错
-          sed -i 's/#define FIRMWARE_WELCOME_STR.*/#ifndef FIRMWARE_WELCOME_STR\n\0\n#endif/' atf-temp/include/plat/common/common_def.h
+          # 【核心修复】物理强行删除 .git 文件夹，防止出现“带箭头的指针”
+          rm -rf atf-temp/.git
+          rm -rf atf-temp/**/.git
           
-          # 精准修正 SL3000 定义，保留所有 #include 引用 (防止 mt7981_soc_def.h 丢失)
+          # 执行物理手术，解决重定义与 TRNG 缺失问题
+          sed -i 's/#define FIRMWARE_WELCOME_STR.*/#ifndef FIRMWARE_WELCOME_STR\n\0\n#endif/' atf-temp/include/plat/common/common_def.h
           sed -i '/#define FIRMWARE_WELCOME_STR/c\#define FIRMWARE_WELCOME_STR "Booting Trusted Firmware (SL3000 1GB)\\n"' atf-temp/plat/mediatek/mt7981/include/platform_def.h
           sed -i 's/#define BL33_BASE.*/#define BL33_BASE (0x41e00000)/' atf-temp/plat/mediatek/mt7981/include/platform_def.h
           sed -i 's/#define FLASH_FIP_BASE.*/#define FLASH_FIP_BASE (0x40000)/' atf-temp/plat/mediatek/mt7981/include/platform_def.h
           sed -i 's/#define FLASH_FIP_MAX_SIZE.*/#define FLASH_FIP_MAX_SIZE (0x80000)/' atf-temp/plat/mediatek/mt7981/include/platform_def.h
           
-          # 物理补齐 TRNG 寄存器定义
           if ! grep -q "TRNG_BASE" atf-temp/plat/mediatek/mt7981/include/platform_def.h; then
             sed -i '/#define SOC_CHIP_ID/a #define TRNG_BASE (0x1020F000)\n#define TRNG_SIZE (0x1000)' atf-temp/plat/mediatek/mt7981/include/platform_def.h
           fi
-          
-          # 物理移动回正确目录并清理
-          cp -r atf-temp/. arm-trusted-firmware/
-          rm -rf atf-temp
-          
-          git add arm-trusted-firmware
-          git commit -m "Sync & Fixed: ATF for SL3000 (Redefined & SOC Header Fix)" || echo "No changes"
 
-      # ---------- 2. 物理同步 U-Boot ----------
-      - name: Sync U-Boot
+          # 物理转正为仓库内的普通文件夹
+          mv atf-temp arm-trusted-firmware
+          git add arm-trusted-firmware
+          git commit -m "Fix: Physical ATF directory and SL3000 patches"
+
+      # ---------- 2. 物理同步 U-Boot (剥离 Git 痕迹) ----------
+      - name: Sync U-Boot (Physical)
         run: |
           rm -rf u-boot
-          mkdir -p u-boot
           git clone --recursive --depth=1 -b mtksoc-20250711 https://github.com/mtk-openwrt/u-boot.git u-boot-temp
-          cp -r u-boot-temp/. u-boot/
-          rm -rf u-boot-temp
+          rm -rf u-boot-temp/.git
+          mv u-boot-temp u-boot
           git add u-boot
-          git commit -m "Sync: U-Boot (official branch)" || echo "No changes"
+          git commit -m "Fix: Physical U-Boot directory"
 
-      # ---------- 3. 物理同步 ImmortalWrt ----------
-      - name: Sync ImmortalWrt
+      # ---------- 3. 物理同步 ImmortalWrt (剥离 Git 痕迹) ----------
+      - name: Sync ImmortalWrt (Physical)
         run: |
           rm -rf immortalwrt
-          mkdir -p immortalwrt
           git clone --recursive --depth=1 -b openwrt-24.10 https://github.com/immortalwrt/immortalwrt.git im-temp
-          cp -r im-temp/. immortalwrt/
-          rm -rf im-temp
+          rm -rf im-temp/.git
+          mv im-temp immortalwrt
           git add immortalwrt
-          git commit -m "Sync: ImmortalWrt (24.10)" || echo "No changes"
+          git commit -m "Fix: Physical ImmortalWrt directory"
 
-      # ---------- 4. 推送到 main 分支 ----------
+      # ---------- 4. 强制推送 ----------
       - name: Push to main branch
         run: |
-          # 物理强制更新 main 分支，确保存储已修复的源码
           git push origin main --force-with-lease
