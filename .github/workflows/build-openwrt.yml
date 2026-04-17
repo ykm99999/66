@@ -33,13 +33,6 @@ jobs:
           cd main-repo
           ./diy-part2.sh
 
-      - name: List output files
-        run: |
-          echo "=== Rescue files ==="
-          ls -la output/
-          ls -la output/atf/ || true
-          ls -la output/uboot/ || true
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
