@@ -1,25 +1,36 @@
 name: SL3000 Final Build with Auto Release
+
 on:
   workflow_dispatch:
   push:
     tags: [ 'v*' ]
+
 jobs:
   build:
     runs-on: ubuntu-22.04
     env:
-      TERM: linux
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      - name: Checkout main branch
+      - name: Checkout main branch (Scripts & Config)
         uses: actions/checkout@v4
         with:
+          ref: main
           path: main-repo
-      - name: Checkout source branch
+
+      - name: Checkout source branch (Firmware Base)
         uses: actions/checkout@v4
         with:
           repository: ykm99999/66
           ref: sl3000-full-sync
           path: source-repo
+
+      - name: Generate release tag
+        id: release_tag
+        run: |
+          TAG_NAME="v$(date -u +'%Y%m%d-%H%M%S')"
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "Release tag: $TAG_NAME"
+
       - name: Install dependencies
         run: |
           sudo apt update
@@ -27,21 +38,63 @@ jobs:
             gettext git libncurses-dev libssl-dev \
             python3-distutils python3-setuptools rsync unzip zlib1g-dev file wget \
             gcc-aarch64-linux-gnu device-tree-compiler
-      - name: Run diy-part1.sh
+
+      - name: Optimize disk space
+        run: |
+          sudo apt clean
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
+          df -h
+
+      - name: Run diy-part1.sh (Configuration & Package Purge)
         run: |
           chmod +x main-repo/diy-part1.sh
+          # 物理执行：在工作流根目录运行脚本，保持路径溯源一致
           ./main-repo/diy-part1.sh
-      - name: Run diy-part2.sh
+
+      - name: Run diy-part2.sh (Compile & Image Build)
         run: |
           chmod +x main-repo/diy-part2.sh
+          # 物理执行：承接 part1 生成的 build-dir.txt 环境
           ./main-repo/diy-part2.sh
+
+      - name: List firmware files
+        run: |
+          echo "=== Generated firmware files ==="
+          ls -la output/atf/ output/uboot/ output/firmware/ || true
+          echo "=== Firmware directory contents ==="
+          find output/ -type f -name "*.bin" -o -name "*.gz" -o -name "*sysupgrade*" | sort
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v$(date -u +'%Y%m%d-%H%M%S')
+          tag_name: ${{ steps.release_tag.outputs.tag_name }}
+          name: "SL3000 Firmware ${{ steps.release_tag.outputs.tag_name }}"
+          body: |
+            ## 自动构建的 SL3000 固件
+            - 构建时间: ${{ steps.release_tag.outputs.tag_name }}
+            - 硬件平台: MT7981 (1024M DDR4)
+            - 包含 PassWall2, Shadowsocks, Docker 等软件包
+            - 救砖全家桶: ATF (DDR4 强制), U-Boot, mtk_uartboot
+
+            ### 📦 下载说明
+            - `firmware/` 目录包含 sysupgrade 固件，可直接用于刷机
+            - `atf/` 包含不同内存定义的 BL2 引导文件
+            - `uboot/` 包含 eMMC 和 NOR 版本的 FIP 文件
+            - `mtk_uartboot.tar.gz` 为串口救砖专用工具
           files: |
             output/atf/*.bin
+            output/atf/*.elf
             output/uboot/*.bin
             output/firmware/*.bin
+            output/firmware/*.img.gz
+            output/mtk_uartboot.tar.gz
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts (Backup Storage)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sl3000-firmware-${{ steps.release_tag.outputs.tag_name }}
+          path: output/
