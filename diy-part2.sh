@@ -6,21 +6,14 @@ MAIN_REPO="$WORKSPACE/main-repo"
 OUTPUT_DIR="$WORKSPACE/output"
 IMMORTALWRT_BUILD="$WORKSPACE/immortalwrt-build"
 PARTS_DIR="$OUTPUT_DIR/parts"
+BIN_DIR="$IMMORTALWRT_BUILD/bin/targets/mediatek/filogic"
 
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-mkdir -p "$OUTPUT_DIR"/{atf,uboot,firmware} "$PARTS_DIR"
+mkdir -p "$OUTPUT_DIR"/{atf,uboot,firmware} "$PARTS_DIR" "$BIN_DIR"
 
-# ---------- 1. 编译 OpenWrt 固件 ----------
-echo "=== 编译 ImmortalWrt 固件 ==="
-cd "$IMMORTALWRT_BUILD"
-make -j$(nproc) V=s
-
-# 收集 sysupgrade 固件
-find bin/targets -type f -name "*sysupgrade*" -exec cp -v {} "$OUTPUT_DIR/firmware/" \;
-
-# ---------- 2. 编译 ATF ----------
+# ---------- 1. 编译 ATF ----------
 echo "=== 编译 ATF (DDR4, 1GB) ==="
 cd "$MAIN_REPO/arm-trusted-firmware"
 mkdir -p plat/mediatek/mt7981/drivers/dram
@@ -48,7 +41,7 @@ make PLAT=mt7981 DEBUG=0 BOOT_DEVICE=emmc DRAM_SIZE=1024 DRAM_USE_DDR4=1 BOARD_B
 cp -v build/mt7981/release/bl2.bin "$OUTPUT_DIR/atf/bl2-1g-emmc.bin"
 cp -v build/mt7981/release/bl31.bin "$OUTPUT_DIR/atf/bl31-1g-emmc.bin"
 
-# 1G NOR
+# 1G NOR (用于 SPI 救砖)
 make clean
 make PLAT=mt7981 DEBUG=0 BOOT_DEVICE=nor DRAM_SIZE=1024 DRAM_USE_DDR4=1 BOARD_BGA=1
 cp -v build/mt7981/release/bl2.bin "$OUTPUT_DIR/atf/bl2-1g-nor.bin"
@@ -65,7 +58,7 @@ make CC=gcc
 cd "$MAIN_REPO/arm-trusted-firmware"
 FIPTOOL="$PWD/tools/fiptool/fiptool"
 
-# ---------- 3. 编译 U-Boot ----------
+# ---------- 2. 编译 U-Boot ----------
 echo "=== 编译 U-Boot (eMMC) ==="
 cd "$MAIN_REPO/u-boot"
 make clean
@@ -87,12 +80,20 @@ make -j$(nproc)
 cp -v fip-nor.bin "$OUTPUT_DIR/uboot/"
 cp -v u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
 
-# ---------- 4. 打包 mtk_uartboot ----------
+# ---------- 3. 打包 mtk_uartboot ----------
 echo "=== 打包 mtk_uartboot ==="
 cd "$MAIN_REPO/mtk_uartboot"
 tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
 
-# ---------- 5. 提取内核与 rootfs，合成 firmware.bin ----------
+# ---------- 4. 编译 OpenWrt 固件 ----------
+echo "=== 编译 ImmortalWrt 固件 ==="
+cd "$IMMORTALWRT_BUILD"
+make -j$(nproc) V=s
+
+# 收集 sysupgrade 固件
+find bin/targets -type f -name "*sysupgrade*" -exec cp -v {} "$OUTPUT_DIR/firmware/" \;
+
+# ---------- 5. 提取内核与 rootfs ----------
 echo "=== 提取内核与根文件系统 ==="
 cd "$IMMORTALWRT_BUILD"
 KERNEL_ELF=$(find build_dir/target-aarch64_cortex-a53_musl/linux-* -name vmlinux -type f | head -1)
@@ -103,29 +104,40 @@ if [ ! -f "$KERNEL_BIN" ]; then
 fi
 ROOTFS_BIN=$(find build_dir/target-aarch64_cortex-a53_musl/root-* -name root.squashfs -type f | head -1)
 
-FIRMWARE_BIN="$PARTS_DIR/firmware.bin"
-cat "$KERNEL_BIN" "$ROOTFS_BIN" > "$FIRMWARE_BIN"
-echo "✅ firmware.bin 已生成 ($(stat -c%s "$FIRMWARE_BIN") 字节)"
+cp -v "$KERNEL_BIN" "$PARTS_DIR/kernel.bin"
+cp -v "$ROOTFS_BIN" "$PARTS_DIR/rootfs.bin"
 
-# ---------- 6. 检查 Factory 分区 ----------
-FACTORY_BIN="$PARTS_DIR/factory.bin"
-if [ ! -f "$FACTORY_BIN" ]; then
+# ---------- 6. 准备 Factory 分区 ----------
+FACTORY_SRC="$MAIN_REPO/888/factory.bin"
+if [ -f "$FACTORY_SRC" ]; then
+    cp -v "$FACTORY_SRC" "$PARTS_DIR/factory.bin"
+else
     echo "⚠️ 未找到 factory.bin，将创建空白占位文件（无线校准数据缺失）"
-    dd if=/dev/zero bs=1M count=2 2>/dev/null | tr '\000' '\377' > "$FACTORY_BIN"
+    dd if=/dev/zero bs=256k count=1 2>/dev/null | tr '\000' '\377' > "$PARTS_DIR/factory.bin"
 fi
 
-# ---------- 7. 合成 32MB 全镜像 ----------
-echo "=== 合成 Spi-flash-32MB-full.bin ==="
-FULL_BIN="$OUTPUT_DIR/Spi-flash-32MB-full.bin"
-dd if=/dev/zero bs=1M count=32 2>/dev/null | tr '\000' '\377' > "$FULL_BIN"
+# ---------- 7. 复制合成所需文件到 BIN_DIR ----------
+echo "=== 复制文件到 BIN_DIR 供 Makefile 合成 ==="
+cp -v "$OUTPUT_DIR/atf/bl2-1g-nor.bin" "$BIN_DIR/bl2.img"
+cp -v "$OUTPUT_DIR/uboot/fip-nor.bin" "$BIN_DIR/fip.bin"
+cp -v "$PARTS_DIR/factory.bin" "$BIN_DIR/factory.bin"
+cp -v "$PARTS_DIR/kernel.bin" "$BIN_DIR/kernel.bin"
+cp -v "$PARTS_DIR/rootfs.bin" "$BIN_DIR/rootfs.bin"
 
-dd if="$OUTPUT_DIR/atf/bl2-1g-nor.bin" of="$FULL_BIN" bs=1 conv=notrunc status=none
-dd if="$FACTORY_BIN" of="$FULL_BIN" bs=1 seek=$((0x180000)) conv=notrunc status=none
-dd if="$OUTPUT_DIR/uboot/fip-nor.bin" of="$FULL_BIN" bs=1 seek=$((0x380000)) conv=notrunc status=none
-dd if="$FIRMWARE_BIN" of="$FULL_BIN" bs=1 seek=$((0x580000)) conv=notrunc status=none
+# ---------- 8. 重新运行 make 以触发合成镜像 ----------
+echo "=== 触发 OpenWrt 合成完整 32MB 镜像 ==="
+cd "$IMMORTALWRT_BUILD"
+make target/linux/compile
 
-echo "✅ 完整镜像已生成: $FULL_BIN"
-ls -lh "$FULL_BIN"
+# 合成的镜像位于 bin/targets/mediatek/filogic/
+FULL_IMAGE=$(find bin/targets/mediatek/filogic/ -name "spi-full-32mb.bin" -type f | head -1)
+if [ -f "$FULL_IMAGE" ]; then
+    cp -v "$FULL_IMAGE" "$OUTPUT_DIR/Spi-flash-32MB-full.bin"
+    echo "✅ 完整镜像已生成: $OUTPUT_DIR/Spi-flash-32MB-full.bin"
+else
+    echo "❌ 未找到合成镜像，请检查 Makefile 中的合成步骤"
+    exit 1
+fi
 
 echo "=========================================="
 echo "✅ diy-part2 全部完成"
