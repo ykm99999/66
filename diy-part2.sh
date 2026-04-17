@@ -1,21 +1,18 @@
 #!/bin/bash
-# diy-part2.sh
 set -euo pipefail
 
 WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
 MAIN_REPO="$WORKSPACE/main-repo"
 OUTPUT_DIR="$WORKSPACE/output"
-IMMORTALWRT_BUILD="$WORKSPACE/immortalwrt-build"
 PARTS_DIR="$OUTPUT_DIR/parts"
-BIN_DIR="$IMMORTALWRT_BUILD/bin/targets/mediatek/filogic"
 
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-mkdir -p "$OUTPUT_DIR"/{atf,uboot,firmware} "$PARTS_DIR" "$BIN_DIR"
+mkdir -p "$OUTPUT_DIR"/{atf,uboot} "$PARTS_DIR"
 
 # ---------- 1. 编译 ATF ----------
-echo "=== 编译 ATF (DDR4, 1GB) ==="
+echo "=== Building ATF (DDR4, 1GB) ==="
 cd "$MAIN_REPO/arm-trusted-firmware"
 mkdir -p plat/mediatek/mt7981/drivers/dram
 
@@ -60,7 +57,7 @@ cd "$MAIN_REPO/arm-trusted-firmware"
 FIPTOOL="$PWD/tools/fiptool/fiptool"
 
 # ---------- 2. 编译 U-Boot ----------
-echo "=== 编译 U-Boot (eMMC) ==="
+echo "=== Building U-Boot (eMMC) ==="
 cd "$MAIN_REPO/u-boot"
 make clean
 make mt7981_emmc_rfb_defconfig
@@ -71,7 +68,7 @@ make -j$(nproc)
 cp -v fip-emmc.bin "$OUTPUT_DIR/uboot/"
 cp -v u-boot.bin "$OUTPUT_DIR/uboot/u-boot-emmc.bin"
 
-echo "=== 编译 U-Boot (NOR) ==="
+echo "=== Building U-Boot (NOR) ==="
 make clean
 make mt7981_spim_nor_rfb_defconfig
 echo "CONFIG_MTK_FIP_SUPPORT=y" >> .config
@@ -82,65 +79,38 @@ cp -v fip-nor.bin "$OUTPUT_DIR/uboot/"
 cp -v u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
 
 # ---------- 3. 打包 mtk_uartboot ----------
-echo "=== 打包 mtk_uartboot ==="
+echo "=== Packaging mtk_uartboot ==="
 cd "$MAIN_REPO/mtk_uartboot"
 tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
 
-# ---------- 4. 编译 OpenWrt 固件 ----------
-echo "=== 编译 ImmortalWrt 固件 ==="
-cd "$IMMORTALWRT_BUILD"
-make -j$(nproc) V=s
-
-# 收集 sysupgrade 固件
-find bin/targets -type f -name "*sysupgrade*" -exec cp -v {} "$OUTPUT_DIR/firmware/" \;
-
-# ---------- 5. 提取内核与 rootfs ----------
-echo "=== 提取内核与根文件系统 ==="
-cd "$IMMORTALWRT_BUILD"
-KERNEL_ELF=$(find build_dir/target-aarch64_cortex-a53_musl/linux-* -name vmlinux -type f | head -1)
-KERNEL_DIR=$(dirname "$KERNEL_ELF")
-KERNEL_BIN="$KERNEL_DIR/vmlinux.bin"
-if [ ! -f "$KERNEL_BIN" ]; then
-    aarch64-linux-gnu-objcopy -O binary "$KERNEL_ELF" "$KERNEL_BIN"
-fi
-ROOTFS_BIN=$(find build_dir/target-aarch64_cortex-a53_musl/root-* -name root.squashfs -type f | head -1)
-
-cp -v "$KERNEL_BIN" "$PARTS_DIR/kernel.bin"
-cp -v "$ROOTFS_BIN" "$PARTS_DIR/rootfs.bin"
-
-# ---------- 6. 准备 Factory 分区 (占位) ----------
+# ---------- 4. 准备 Factory 占位文件 ----------
 FACTORY_SRC="$MAIN_REPO/888/factory.bin"
 if [ -f "$FACTORY_SRC" ]; then
     cp -v "$FACTORY_SRC" "$PARTS_DIR/factory.bin"
 else
-    echo "⚠️ 未找到 factory.bin，创建 2MB 空白占位文件（Wi-Fi 需后续校准）"
+    echo "⚠️ 未找到 factory.bin，创建 2MB 空白占位文件"
     dd if=/dev/zero bs=2M count=1 2>/dev/null | tr '\000' '\377' > "$PARTS_DIR/factory.bin"
 fi
 
-# ---------- 7. 复制合成所需文件到 BIN_DIR ----------
-echo "=== 复制文件到 BIN_DIR 供 Makefile 合成 ==="
-cp -v "$OUTPUT_DIR/atf/bl2-1g-nor.bin" "$BIN_DIR/bl2.img"
-cp -v "$OUTPUT_DIR/uboot/fip-nor.bin" "$BIN_DIR/fip.bin"
-cp -v "$PARTS_DIR/factory.bin" "$BIN_DIR/factory.bin"
-cp -v "$PARTS_DIR/kernel.bin" "$BIN_DIR/kernel.bin"
-cp -v "$PARTS_DIR/rootfs.bin" "$BIN_DIR/rootfs.bin"
+# ---------- 5. 合成 32MB 救砖镜像 (仅 BL2 + FIP) ----------
+echo "=== Creating Spi-flash-32MB-rescue.bin ==="
+RESCUE_BIN="$OUTPUT_DIR/Spi-flash-32MB-rescue.bin"
+dd if=/dev/zero bs=1M count=32 2>/dev/null | tr '\000' '\377' > "$RESCUE_BIN"
 
-# ---------- 8. 重新运行 make 触发合成镜像 ----------
-echo "=== 触发 OpenWrt 合成完整 32MB 镜像 ==="
-cd "$IMMORTALWRT_BUILD"
-make target/linux/compile
+# 写入 BL2 (0x0)
+dd if="$OUTPUT_DIR/atf/bl2-1g-nor.bin" of="$RESCUE_BIN" bs=1 conv=notrunc status=none
 
-FULL_IMAGE=$(find bin/targets/mediatek/filogic/ -name "spi-full-32mb.bin" -type f | head -1)
-if [ -f "$FULL_IMAGE" ]; then
-    cp -v "$FULL_IMAGE" "$OUTPUT_DIR/Spi-flash-32MB-full.bin"
-    echo "✅ 完整镜像已生成: $OUTPUT_DIR/Spi-flash-32MB-full.bin"
-else
-    echo "❌ 未找到合成镜像，请检查 Makefile 中的合成步骤"
-    exit 1
-fi
+# 写入 FIP (0x40000)
+dd if="$OUTPUT_DIR/uboot/fip-nor.bin" of="$RESCUE_BIN" bs=256k seek=1 conv=notrunc status=none
+
+# 写入 Factory (0x180000) —— 可选，但为了分区表完整性
+dd if="$PARTS_DIR/factory.bin" of="$RESCUE_BIN" bs=256k seek=6 conv=notrunc status=none
+
+echo "✅ 救砖镜像已生成: $RESCUE_BIN"
+ls -lh "$RESCUE_BIN"
 
 echo "=========================================="
-echo "✅ diy-part2 全部完成"
+echo "✅ 救砖全家桶构建完成"
 echo "输出目录: $OUTPUT_DIR"
 ls -la "$OUTPUT_DIR"
 echo "=========================================="
