@@ -1,4 +1,5 @@
 #!/bin/bash
+# diy-part1.sh
 set -euo pipefail
 
 WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
@@ -35,16 +36,16 @@ rm -rf feeds/video feeds/telephony
 ./scripts/feeds update -i
 ./scripts/feeds install -a
 
-# 复制设备树文件
+# 复制设备树
 mkdir -p target/linux/mediatek/dts
 cp -v "$CONFIG_DIR/$DTS_FILE" target/linux/mediatek/dts/
 mkdir -p target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek
 cp -v "$CONFIG_DIR/$DTS_FILE" target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek/
 
-# 复制设备 makefile（覆盖原文件以确保设备定义正确）
+# 使用三件套中的 Makefile（设备定义）
 cp -v "$CONFIG_DIR/mt7981_sl3000.mk" target/linux/mediatek/image/filogic.mk
 
-# 使用提供的配置文件
+# 复制配置文件并启用设备
 cp -v "$CONFIG_DIR/sl3000.config" .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_${DEVICE_NAME}=y" >> .config
 
