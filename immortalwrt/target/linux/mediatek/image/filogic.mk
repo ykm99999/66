@@ -1,50 +1,37 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
+# 全链路溯源诊断：锁定 SL3000 基因对齐 (1024M RAM / 32MB SPI)
 
 DTS_DIR := $(DTS_DIR)/mediatek
 
 define Image/Prepare
-	# For UBI we want only one extra block
 	rm -f $(KDIR)/ubi_mark
 	echo -ne '\xde\xad\xc0\xde' > $(KDIR)/ubi_mark
 endef
 
-# --- 物理基础构建宏 ---
+# --- 基础构建宏 (必须使用物理 Tab) ---
 define Build/mt7981-bl2
-	cat $(STAGING_DIR_IMAGE)/mt7981-$1-bl2.img >> $@
+	cat $(STAGING_DIR_IMAGE)/mt7981-$(1)-bl2.img >> $@
 endef
 
 define Build/mt7981-bl31-uboot
-	cat $(STAGING_DIR_IMAGE)/mt7981_$1-u-boot.fip >> $@
+	cat $(STAGING_DIR_IMAGE)/mt7981_$(1)-u-boot.fip >> $@
 endef
 
-define Build/mt798x-gpt
-	cp $@ $@.tmp 2>/dev/null || true
-	ptgen -g -o $@.tmp -a 1 -l 1024 \
-		$(if $(findstring sdmmc,$1), -H -t 0x83 -N bl2 -r -p 4079k@17k ) \
-		-t 0x83 -N ubootenv -r -p 512k@4M \
-		-t 0x83 -N factory -r -p 2M@4608k \
-		-t 0xef -N fip -r -p 4M@6656k \
-		-N recovery -r -p 32M@12M \
-		$(if $(findstring sdmmc,$1), -N install -r -p 20M@44M -t 0x2e -N production -p $(CONFIG_TARGET_ROOTFS_PARTSIZE)M@64M ) \
-		$(if $(findstring emmc,$1), -t 0x2e -N production -p $(CONFIG_TARGET_ROOTFS_PARTSIZE)M@64M )
-	cat $@.tmp >> $@
-	rm $@.tmp
-endef
-
-# --- SL3000 专用物理合成宏 ---
+# --- 32MB 救砖镜像合成宏 (像素级偏移锁定) ---
 define Build/gen_spi_full_32mb
 	@echo "=== 物理审计：正在合成 32MB 救砖镜像 ==="
 	dd if=/dev/zero bs=1M count=32 | tr '\000' '\377' > $@.tmp
-	# 偏移对齐：0M->BL2, 1M->FIP, 2M->Factory, 3M->Kernel (适配 DTS partition@300000)
+	# 偏移对齐：0M->BL2, 1M->FIP, 2M->Factory, 3M->Kernel (与 DTS partition@300000 闭合)
 	[ -f $(BIN_DIR)/bl2.img ] && dd if=$(BIN_DIR)/bl2.img of=$@.tmp conv=notrunc status=none
 	[ -f $(BIN_DIR)/fip.bin ] && dd if=$(BIN_DIR)/fip.bin of=$@.tmp bs=1M seek=1 conv=notrunc status=none
 	[ -f $(BIN_DIR)/factory.bin ] && dd if=$(BIN_DIR)/factory.bin of=$@.tmp bs=1M seek=2 conv=notrunc status=none
+	# 核心名称对齐点：物理引用 fit-mt7981b-sl3000-emmc.itb
 	[ -f $(KDIR)/fit-mt7981b-sl3000-emmc.itb ] && dd if=$(KDIR)/fit-mt7981b-sl3000-emmc.itb of=$@.tmp bs=1M seek=3 conv=notrunc status=none
 	mv $@.tmp $@
 	@echo "✅ 32MB 救砖镜像名称对齐合成成功"
 endef
 
-# --- SL3000 设备定义 (1024M RAM 对齐版) ---
+# --- SL3000 设备定义 (锁定 1024M DDR4 配置) ---
 define Device/mt7981_sl3000_spi_rescue
   DEVICE_VENDOR := Siluo
   DEVICE_MODEL := SL3000
