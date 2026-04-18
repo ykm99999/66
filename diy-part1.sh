@@ -1,27 +1,21 @@
 #!/bin/bash
 set -euo pipefail
 
-# 彻底修复：物理路径对齐
-# 自动探测 immortalwrt 目录位置
+# 物理路径溯源：进入正确的源码目录
 if [ -d "immortalwrt" ]; then
     cd immortalwrt
-elif [ -d "../immortalwrt" ]; then
-    cd ../immortalwrt
+else
+    echo "❌ 错误：未发现 immortalwrt 源码目录"
+    exit 1
 fi
 
-echo "=== 执行 Feeds 物理同步 (路径: $(pwd)) ==="
-
-# 确保执行权限
+echo "=== 执行 Feeds 物理同步 (当前路径: $(pwd)) ==="
 chmod +x scripts/feeds
-
-# 执行同步与安装
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-# 回到根目录（防止影响后续步骤）
+# 确保 888 配置目录物理可达
 cd ..
-
-# 验证核心配置是否存在
-if [ ! -f "888/sl3000.config" ]; then
-    echo "⚠️ 警告：未发现 888/sl3000.config"
+if [ ! -d "888" ]; then
+    echo "⚠️ 警告：未发现 888 资源目录"
 fi
