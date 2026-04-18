@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       TERM: xterm
+      # 强制 OpenWrt 在配置不匹配时使用默认选值，严禁弹出菜单
+      CONF_DEFAULT: 1
       FORCE_UNSAFE_CONFIGURE: 1
     steps:
       - name: Checkout Repository
@@ -21,7 +23,6 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          # 像素级补全：添加构建 host-tools 必须的 libssl-dev 和核心开发库
           sudo apt-get install -y gcc-aarch64-linux-gnu build-essential device-tree-compiler \
           bison flex m4 gawk gettext libncursesw5-dev libncurses5-dev zlib1g-dev \
           python3-setuptools swig python3-dev rsync unzip git qemu-utils libssl-dev
@@ -33,9 +34,8 @@ jobs:
 
       - name: Build and Package (diy-part2)
         run: |
-          # 物理执行：触发内核编译与镜像合成
           chmod +x diy-part2.sh
-          export GITHUB_WORKSPACE=$GITHUB_WORKSPACE
+          # 物理隔离执行
           ./diy-part2.sh
 
       - name: Upload Artifacts
