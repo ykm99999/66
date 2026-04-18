@@ -4,55 +4,72 @@ set -euo pipefail
 WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
 IMMORTAL_DIR="$WORKSPACE/immortalwrt"
 OUTPUT_DIR="$WORKSPACE/output"
+REPO_888="$WORKSPACE/888"
 
 cd "$IMMORTAL_DIR"
 
-echo "=== 1. 物理环境自愈：真空构建工具链 ==="
-# 关键修复：暂时移除所有配置文件，防止 make tools 触发交互
-rm -f .config
-# 使用 --silent 减少日志冗余，直接构建工具链
-make tools/install -j$(nproc) BUILD_LOG=0 || make tools/install -j1 V=s
-
-echo "=== 2. 物理注入配置 (1G RAM + 128G eMMC) ==="
-# 重新创建全新的物理锁定配置
-cat <<EOF > .config
-CONFIG_TARGET_mediatek=y
-CONFIG_TARGET_mediatek_filogic=y
-CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y
-EOF
-
-# 物理清洗 8000 行配置并注入
-if [ -f "$WORKSPACE/888/sl3000.config" ]; then
-    grep -v "CONFIG_TARGET_" "$WORKSPACE/888/sl3000.config" >> .config
+echo "=== 1. 物理基因注入：同步 888 三件套 ==="
+# [1] 注入 Device 定义 (MK)
+FILOGIC_MK="target/linux/mediatek/image/filogic.mk"
+if [ -f "$REPO_888/mt7981_sl3000.mk" ]; then
+    # 清理旧定义，物理追加仓库新定义
+    sed -i '/Device\/sl_3000-emmc/,/endef/d' "$FILOGIC_MK"
+    cat "$REPO_888/mt7981_sl3000.mk" >> "$FILOGIC_MK"
+    echo "✅ Device MK 注入完成"
 fi
 
-# 核心补丁：使用命令重定向粉碎交互需求
-# - oldconfig 配合 /dev/null 会自动对所有新选项选择默认值
-# - defconfig 会自动补全依赖
+# [2] 注入设备树 (DTS)
+# 物理对齐：确保文件名与 MK 中的 DEVICE_DTS 像素级匹配
+TARGET_DTS="target/linux/mediatek/dts/mt7981b-sl-3000-emmc.dts"
+if [ -f "$REPO_888/mt7981b-sl3000-emmc.dts" ]; then
+    cp -f "$REPO_888/mt7981b-sl3000-emmc.dts" "$TARGET_DTS"
+    echo "✅ DTS 物理覆盖完成"
+fi
+
+# [3] 注入配置母本 (.config)
+if [ -f "$REPO_888/sl3000.config" ]; then
+    cp -f "$REPO_888/sl3000.config" .config
+    # 物理封印：强制开启 BUILDBOT 模式，严禁交互
+    echo "CONFIG_BUILDBOT=y" >> .config
+    echo "✅ Config 注入完成"
+fi
+
+echo "=== 2. 物理致盲：切断 mconf 弹窗逻辑 ==="
+# 物理爆破：即便配置有冲突，也让系统以为不支持图形界面，直接报错而不是卡死
+if [ -f "scripts/config/mconf-cfg.sh" ]; then
+    echo "exit 1" > scripts/config/mconf-cfg.sh
+    chmod +x scripts/config/mconf-cfg.sh
+fi
+
+echo "=== 3. 物理构建：工具链与配置补全 ==="
+# 预先处理 Feeds
+./scripts/feeds update -a && ./scripts/feeds install -a
+
+# 执行非交互式配置补全
+# 使用 /dev/null 强制 oldconfig 自动选择默认项
 make oldconfig </dev/null
 make defconfig
 
-echo "=== 3. DTS 物理分区表定义 (32MB SPI) ==="
-DTS_FILE="target/linux/mediatek/dts/mt7981b-sl-3000-emmc.dts"
-if [ -f "$DTS_FILE" ]; then
-    # 强制注入 1M/1M/1M/29M 分区布局
-    sed -i '/&spi0 {/,/};/c\&spi0 {\n\tstatus = "okay";\n\tflash@0 {\n\t\tcompatible = "jedec,spi-nor";\n\t\treg = <0>;\n\t\tspi-max-frequency = <52000000>;\n\t\tpartitions {\n\t\t\tcompatible = "fixed-partitions";\n\t\t\t#address-cells = <1>;\n\t\t\t#size-cells = <1>;\n\t\t\tpartition@0 { label = "bl2"; reg = <0x000000 0x100000>; read-only; };\n\t\t\tpartition@100000 { label = "fip"; reg = <0x100000 0x100000>; read-only; };\n\t\t\tpartition@200000 { label = "factory"; reg = <0x200000 0x100000>; read-only; };\n\t\t\tpartition@300000 { label = "firmware"; reg = <0x300000 0x1D00000>; };\n\t\t};\n\t};\n};' "$DTS_FILE"
-fi
+echo "=== 4. 物理编译：内核与固件 ==="
+# 加上 CONF_DEFAULT=1 作为双重保险
+make target/linux/compile -j$(nproc) V=s CONF_DEFAULT=1
 
-echo "=== 4. 物理编译内核 (1G DDR4) ==="
-# 此时配置已绝对锁定，直接开始
-make target/linux/compile -j$(nproc) V=s
-
-echo "=== 5. 救砖包物理合成 ==="
+echo "=== 5. 救砖包物理合成 (32MB SPI) ==="
 mkdir -p "$OUTPUT_DIR"
 KERNEL_SRC=$(find bin/targets -name "*sysupgrade.itb" | head -n 1)
-[ -z "$KERNEL_SRC" ] && exit 1
+
+if [ -z "$KERNEL_SRC" ]; then
+    echo "❌ 物理审计失败：未找到编译生成的内核镜像"
+    exit 1
+fi
 
 RESCUE_BIN="$OUTPUT_DIR/rescue-32.bin"
+# 创建 32M 纯净空白区 (0xFF 填充)
 dd if=/dev/zero bs=1M count=32 2>/dev/null | tr '\000' '\377' > "$RESCUE_BIN"
-dd if="$WORKSPACE/888/bl2_orig.bin" of="$RESCUE_BIN" bs=1 conv=notrunc status=none
-dd if="$WORKSPACE/888/fip_orig.bin" of="$RESCUE_BIN" bs=1 seek=$((0x100000)) conv=notrunc status=none
-dd if="$WORKSPACE/888/factory_orig.bin" of="$RESCUE_BIN" bs=1 seek=$((0x200000)) conv=notrunc status=none
+# 物理拼接：BL2(0) -> FIP(1M) -> Factory(2M) -> Firmware(3M)
+dd if="$REPO_888/bl2_orig.bin" of="$RESCUE_BIN" bs=1 conv=notrunc status=none
+dd if="$REPO_888/fip_orig.bin" of="$RESCUE_BIN" bs=1 seek=$((0x100000)) conv=notrunc status=none
+dd if="$REPO_888/factory_orig.bin" of="$RESCUE_BIN" bs=1 seek=$((0x200000)) conv=notrunc status=none
 dd if="$KERNEL_SRC" of="$RESCUE_BIN" bs=1 seek=$((0x300000)) conv=notrunc status=none
 
-echo "✅ 构建链路已物理闭合。"
+echo "✅ 构建链路已物理闭合，rescue-32.bin 已生成。"
