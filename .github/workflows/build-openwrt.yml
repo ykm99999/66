@@ -1,4 +1,4 @@
-name: SL3000-1G-DDR4-Rescue-Build
+name: SL3000-Rescue-Physical-Fix
 
 on:
   workflow_dispatch:
@@ -11,8 +11,9 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       TERM: xterm
+      # 物理补丁：禁止一切 Kconfig 交互
+      KCONFIG_OVERWRITECONFIG: 1
       FORCE_UNSAFE_CONFIGURE: 1
-      CONF_DEFAULT: 1
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -34,7 +35,11 @@ jobs:
           chmod +x diy-part2.sh
           ./diy-part2.sh
 
-      - name: Upload Artifacts
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: SL3000-Rescue-Final
+          path: output/      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: SL3000-1G-Rescue-Bundle
