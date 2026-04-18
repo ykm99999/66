@@ -10,47 +10,42 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout Repository (Main Branch)
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           ref: main
-          # 不再使用子目录 path，直接检出到工作空间根目录
-          # 这样脚本、u-boot、immortalwrt 等文件夹会直接出现在当前物理路径
 
-      - name: Install build dependencies
+      - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu build-essential device-tree-compiler \
-          bison flex libssl-dev python3-setuptools swig python3-dev
+          bison flex libssl-dev python3-setuptools swig python3-dev gettext libncurses5-dev \
+          zlib1g-dev gawk git rsync unzip
 
-      - name: Run diy-part1.sh (Physical Path Audit)
+      - name: Prepare Sources & Config
         run: |
-          # 物理模拟：确保脚本具有执行权限
+          # 执行 diy-part1.sh 准备环境（更新 feeds，注入 8000 行配置）
           chmod +x diy-part1.sh
-          # diy-part1.sh 应包含将 immortalwrt 等目录准备就绪的逻辑
           ./diy-part1.sh
 
-      - name: Run diy-part2.sh (Build Kernel & Bootloaders)
+      - name: Build & Package (The Core)
         run: |
+          # 执行修复后的合成脚本
           chmod +x diy-part2.sh
-          # 修复：传递工作空间，确保脚本能定位到根目录下的 u-boot/ 和 immortalwrt/
           export GITHUB_WORKSPACE=$GITHUB_WORKSPACE
           ./diy-part2.sh
 
-      - name: Upload artifacts
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: sl3000-rescue-bundle
           path: output/
 
-      - name: Create Release (on tag)
+      - name: Create Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: "SL3000 Rescue Bundle ${{ github.ref_name }}"
-          files: |
-            output/*.bin
-            output/*.tar.gz
+          files: output/*.bin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
