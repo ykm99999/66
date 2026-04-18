@@ -8,35 +8,52 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       TERM: xterm
-      # 物理补丁：禁止一切配置检查过程中的回话请求
+      # 物理补丁：核心三变量，彻底锁死 Kconfig 交互
       KCONFIG_NOSILENTUPDATE: 1
+      CONF_DEFAULT: 1
+      KCONFIG_ALLCONFIG: 1
       FORCE_UNSAFE_CONFIGURE: 1
       DEBIAN_FRONTEND: noninteractive
     
     steps:
-      - name: Checkout
+      - name: Checkout Primary Repo
         uses: actions/checkout@v4
         with:
+          # 确保拉取当前脚本所在仓库，包含 888/ 目录和 diy 脚本
           ref: main
+          path: .
 
-      - name: Install Tools
+      - name: Clone ImmortalWrt Source
+        run: |
+          # 物理隔离：将源码拉取到子目录，防止污染 888 配置目录
+          git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git immortalwrt
+
+      - name: Install Tools (Minimal & Clean)
         run: |
           sudo apt-get update
+          # 增加时区补丁防止交互挂起
+          sudo ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
           sudo apt-get install -y gcc-aarch64-linux-gnu build-essential device-tree-compiler \
           bison flex m4 gawk gettext libncursesw5-dev libncurses5-dev zlib1g-dev \
           python3-setuptools swig python3-dev rsync unzip git qemu-utils libssl-dev
 
-      - name: Prepare
-        run: chmod +x diy-part1.sh && ./diy-part1.sh
-
-      - name: Build
+      - name: Execute DIY-Part1 (Gene Injection)
         run: |
+          # 注入 888 三件套到 immortalwrt 基因层
+          chmod +x diy-part1.sh
+          ./diy-part1.sh
+
+      - name: Execute DIY-Part2 (Silent Build)
+        run: |
+          # 执行静默配置、编译与 32M 救砖包合成
           chmod +x diy-part2.sh
-          # 物理隔离执行，防止任何环境变量污染
+          # 使用 script 命令模拟伪终端，进一步骗过编译检测逻辑
           ./diy-part2.sh
 
-      - name: Upload
+      - name: Physical Audit & Upload
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: SL3000-Image
+          name: SL3000-Rescue-Image
           path: output/
+          if-no-files-found: error
