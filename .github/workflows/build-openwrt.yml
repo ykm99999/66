@@ -1,4 +1,4 @@
-name: SL3000 Rescue Build Final
+name: SL3000 Rescue Final Build
 
 on:
   workflow_dispatch:
@@ -21,9 +21,10 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
+          # 像素级补全：添加构建 host-tools 必须的 libssl-dev 和核心开发库
           sudo apt-get install -y gcc-aarch64-linux-gnu build-essential device-tree-compiler \
           bison flex m4 gawk gettext libncursesw5-dev libncurses5-dev zlib1g-dev \
-          python3-setuptools swig python3-dev rsync unzip git qemu-utils
+          python3-setuptools swig python3-dev rsync unzip git qemu-utils libssl-dev
 
       - name: Prepare Environment (diy-part1)
         run: |
@@ -32,11 +33,7 @@ jobs:
 
       - name: Build and Package (diy-part2)
         run: |
-          # 物理补丁：强制映射系统 m4 到 OpenWrt 内部路径，彻底解决 flex 调用失败
-          mkdir -p immortalwrt/staging_dir/host/bin
-          ln -sf $(which m4) immortalwrt/staging_dir/host/bin/m4
-          ln -sf $(which flex) immortalwrt/staging_dir/host/bin/flex
-          
+          # 物理执行：触发内核编译与镜像合成
           chmod +x diy-part2.sh
           export GITHUB_WORKSPACE=$GITHUB_WORKSPACE
           ./diy-part2.sh
