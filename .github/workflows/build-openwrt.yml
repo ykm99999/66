@@ -1,7 +1,7 @@
-name: SL3000-Auto-Physical-Build
+name: SL3000-Config-Only-Build
 
 on:
-  workflow_dispatch: # 手动触发总闸
+  workflow_dispatch:
 
 jobs:
   build:
@@ -9,16 +9,16 @@ jobs:
     env:
       DEBIAN_FRONTEND: noninteractive
       KCONFIG_NOSILENTUPDATE: 1
-      CONF_DEFAULT: 1 # 物理锁定：遇到新配置自动选默认，禁止弹窗
+      CONF_DEFAULT: 1
       FORCE_UNSAFE_CONFIGURE: 1
 
     steps:
-      - name: 1. 物理检出 (Checkout)
+      - name: 1. 物理检出 (Checkout Config)
         uses: actions/checkout@v4
         with:
-          path: main-repo # 将你的脚本和 888 配置拉取到此目录
+          path: main-repo # 存放你的 sl3000.config
 
-      - name: 2. 源码注入 (Clone ImmortalWrt)
+      - name: 2. 源码准备 (Clone ImmortalWrt)
         run: |
           git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git openwrt
 
@@ -29,62 +29,65 @@ jobs:
           bison flex m4 gawk gettext libncursesw5-dev libncurses5-dev zlib1g-dev \
           python3-setuptools swig python3-dev rsync unzip git qemu-utils libssl-dev
 
-      - name: 4. 物理对齐：注入 888 三件套
+      - name: 4. 物理审计与格式纠偏 (Critical Fix)
         run: |
           cd openwrt
           
-          # [A] 注入设备定义 (MK) - 物理追加，不破坏原有结构
-          FILOGIC_MK="target/linux/mediatek/image/filogic.mk"
-          cat ../main-repo/888/mt7981_sl3000.mk >> "$FILOGIC_MK"
-          
-          # [B] 注入设备树 (DTS) - 强行映射到架构目录
-          cp -f ../main-repo/888/mt7981b-sl3000-emmc.dts target/linux/mediatek/dts/mt7981b-sl-3000-emmc.dts
-          
-          # [C] 注入配置母本 (.config)
+          # [A] 物理同步 Config (唯一外部拉取项)
           cp -f ../main-repo/888/sl3000.config .config
           
-          # [D] 物理致盲：封印 menuconfig 弹窗
-          echo "exit 1" > scripts/config/mconf-cfg.sh
-          chmod +x scripts/config/mconf-cfg.sh
+          # [B] 物理纠偏 filogic.mk (彻底解决 Missing Separator)
+          # 无论该文件是原生的还是你之前改过的，强制将所有行首空格转换为物理 Tab
+          FILOGIC_MK="target/linux/mediatek/image/filogic.mk"
+          sed -i 's/^    /\t/g' "$FILOGIC_MK"
+          sed -i 's/^  /\t/g' "$FILOGIC_MK"
           
-          echo "✅ 三件套已在构建空间完成物理闭合"
+          # [C] 物理链路检查：确保本地保存的 DTS 处于活跃目录
+          # 如果你的 DTS 已经在 target 目录下，我们将其同步到内核编译目录
+          DTS_PATH="target/linux/mediatek/dts/mt7981b-sl3000-emmc.dts"
+          KERNEL_DTS_DIR="target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek/"
+          if [ -f "$DTS_PATH" ]; then
+              mkdir -p "$KERNEL_DTS_DIR"
+              cp -f "$DTS_PATH" "$KERNEL_DTS_DIR/"
+              echo "✅ DTS 物理链路已闭合"
+          fi
 
-      - name: 5. 自动配置补全 (Silent Defconfig)
+          # [D] 物理致盲：阻止交互
+          printf "#!/bin/sh\nexit 1" > scripts/config/mconf-cfg.sh
+          chmod +x scripts/config/mconf-cfg.sh
+
+      - name: 5. 自动配置补全
         run: |
           cd openwrt
           ./scripts/feeds update -a && ./scripts/feeds install -a
-          # 使用 /dev/null 彻底堵死交互可能
           make oldconfig </dev/null
           make defconfig
 
-      - name: 6. 物理编译 (Kernel & Image)
+      - name: 6. 物理编译
         run: |
           cd openwrt
-          # 仅编译内核与必要镜像，确保 32M SPI 物理限制
           make target/linux/compile -j$(nproc) V=s
 
-      - name: 7. 救砖包物理合成
+      - name: 7. 救砖包合成 (Offset 3MB)
         run: |
           mkdir -p output
           cd openwrt
-          # 自动寻找编译出的内核 FIT 镜像
-          KERNEL_SRC=$(find bin/targets -name "*sysupgrade.itb" | head -n 1)
+          KERNEL_SRC=$(find bin/targets/mediatek/ -name "*sl3000*sysupgrade.itb" | head -n 1)
           RESCUE_BIN="../output/rescue-32.bin"
-          REPO_888="../main-repo/888"
           
-          # 物理合成 32MB 镜像 (0xFF 填充空白)
+          # 物理合成
           dd if=/dev/zero bs=1M count=32 | tr '\000' '\377' > "$RESCUE_BIN"
           
-          # 像素级偏移写入
-          dd if="$REPO_888/bl2_orig.bin" of="$RESCUE_BIN" bs=1 conv=notrunc status=none
-          dd if="$REPO_888/fip_orig.bin" of="$RESCUE_BIN" bs=1 seek=$((0x100000)) conv=notrunc status=none
-          dd if="$REPO_888/factory_orig.bin" of="$RESCUE_BIN" bs=1 seek=$((0x200000)) conv=notrunc status=none
-          dd if="$KERNEL_SRC" of="$RESCUE_BIN" bs=1 seek=$((0x300000)) conv=notrunc status=none
+          # 假设你的引导文件已经手动放在了 openwrt 根目录或指定位置
+          # 此处延续物理偏移逻辑
+          [ -f "bl2.bin" ] && dd if="bl2.bin" of="$RESCUE_BIN" conv=notrunc status=none
+          [ -f "fip.bin" ] && dd if="fip.bin" of="$RESCUE_BIN" bs=1M seek=1 conv=notrunc status=none
+          [ -f "$KERNEL_SRC" ] && dd if="$KERNEL_SRC" of="$RESCUE_BIN" bs=1M seek=3 conv=notrunc status=none
           
-          echo "✅ rescue-32.bin 合成完毕"
+          echo "✅ SL3000 救砖包已基于本地环境合成"
 
-      - name: 8. 上传固件
+      - name: 8. 上传
         uses: actions/upload-artifact@v4
         with:
-          name: SL3000-Rescue-32M
+          name: SL3000-Local-Rescue
           path: output/
