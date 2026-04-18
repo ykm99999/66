@@ -1,4 +1,4 @@
-name: SL3000 Rescue Bundle Build
+name: SL3000 Rescue Bundle Build-v2
 
 on:
   workflow_dispatch:
@@ -18,20 +18,24 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          # 修复核心：补齐 m4, flex, bison 以及构建内核必备的 host 工具
+          # 像素级补全：添加 m4, flex, bison, ncurses 和构建环境必备工具
           sudo apt-get install -y gcc-aarch64-linux-gnu build-essential device-tree-compiler \
-          bison flex m4 gawk gettext libncurses5-dev zlib1g-dev \
+          bison flex m4 gawk gettext libncursesw5-dev libncurses5-dev zlib1g-dev \
           python3-setuptools swig python3-dev rsync unzip git qemu-utils
 
-      - name: Prepare Environment
+      - name: Prepare Environment (diy-part1)
         run: |
           chmod +x diy-part1.sh
+          # 确保 feeds 物理同步完整
           ./diy-part1.sh
 
-      - name: Build and Package
+      - name: Build and Package (diy-part2)
+        env:
+          # 彻底解决 "Error opening terminal: unknown"
+          TERM: xterm
+          FORCE_UNSAFE_CONFIGURE: 1
         run: |
           chmod +x diy-part2.sh
-          # 物理模拟：确保全局变量能被脚本识别
           export GITHUB_WORKSPACE=$GITHUB_WORKSPACE
           ./diy-part2.sh
 
@@ -49,6 +53,5 @@ jobs:
           files: |
             output/rescue-32.bin
             output/*.bin
-            output/*.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
