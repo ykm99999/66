@@ -15,23 +15,23 @@ jobs:
         with:
           ref: main
 
-      - name: Install Dependencies
+      - name: Install System Dependencies
         run: |
           sudo apt-get update
+          # 修复核心：补齐 m4, flex, bison 以及构建内核必备的 host 工具
           sudo apt-get install -y gcc-aarch64-linux-gnu build-essential device-tree-compiler \
-          bison flex libssl-dev python3-setuptools swig python3-dev gettext libncurses5-dev \
-          zlib1g-dev gawk git rsync unzip
+          bison flex m4 gawk gettext libncurses5-dev zlib1g-dev \
+          python3-setuptools swig python3-dev rsync unzip git qemu-utils
 
-      - name: Prepare Sources & Config
+      - name: Prepare Environment
         run: |
-          # 执行 diy-part1.sh 准备环境（更新 feeds，注入 8000 行配置）
           chmod +x diy-part1.sh
           ./diy-part1.sh
 
-      - name: Build & Package (The Core)
+      - name: Build and Package
         run: |
-          # 执行修复后的合成脚本
           chmod +x diy-part2.sh
+          # 物理模拟：确保全局变量能被脚本识别
           export GITHUB_WORKSPACE=$GITHUB_WORKSPACE
           ./diy-part2.sh
 
@@ -46,6 +46,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          files: output/*.bin
+          files: |
+            output/rescue-32.bin
+            output/*.bin
+            output/*.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
