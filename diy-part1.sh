@@ -1,51 +1,71 @@
 #!/bin/bash
-set -euo pipefail
+# 物理审计：SL3000 全链路基因锁定脚本 (禁用 EOF)
 
-# 路径变量审计
-WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
-IMMORTAL_DIR="$WORKSPACE/immortalwrt"
-REPO_888="$WORKSPACE/888"
+# 1. 物理环境准备
+USER_DTS="main-repo/888/mt7981b-sl3000-emmc.dts"
+OPENWRT_ROOT="openwrt"
 
-cd "$IMMORTAL_DIR"
-
-echo "=== 1. 物理注入：锁定 sl3000.config 为全局母本 ==="
-# 物理压制：将你的 8000 行配置强行覆盖内核与全局构建默认值
-if [ -f "$REPO_888/sl3000.config" ]; then
-    cp -f "$REPO_888/sl3000.config" .config
-    # 强制启用非交互模式，防止卡死
-    echo "CONFIG_BUILDBOT=y" >> .config
-    echo "✅ 配置母本物理注入成功"
-fi
-
-echo "=== 2. 物理注入：DTS 地图物理对齐 ==="
-# 物理映射：将仓库 DTS 强行植入 mediatek 架构目录
-# 必须确保文件名与后续 mk 文件中的 DEVICE_DTS 像素级对齐
-USER_DTS="$REPO_888/mt7981b-sl3000-emmc.dts"
-TARGET_DTS_DIR="target/linux/mediatek/dts"
-
+# 2. DTS 像素级多路径注入 (放宽路径策略)
 if [ -f "$USER_DTS" ]; then
-    cp -f "$USER_DTS" "$TARGET_DTS_DIR/mt7981b-sl-3000-emmc.dts"
-    echo "✅ DTS 物理覆盖完成: mt7981b-sl-3000-emmc.dts"
+    echo "=== [物理审计] 正在注入 DTS 到所有索引路径 ==="
+    
+    # 路径 A: 架构通用目录 (Image Builder 预检点)
+    mkdir -p "$OPENWRT_ROOT/target/linux/mediatek/dts"
+    cp -f "$USER_DTS" "$OPENWRT_ROOT/target/linux/mediatek/dts/mt7981b-sl3000-emmc.dts"
+    
+    # 路径 B: 6.6 内核特定目录 (内核编译点)
+    KERNEL_DTS_DIR="$OPENWRT_ROOT/target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek"
+    mkdir -p "$KERNEL_DTS_DIR"
+    cp -f "$USER_DTS" "$KERNEL_DTS_DIR/mt7981b-sl3000-emmc.dts"
+    
+    echo "✅ DTS 物理链路已闭合"
+else
+    echo "❌ 错误：未在 main-repo/888/ 下找到 DTS，请检查仓库！"
+    exit 1
 fi
 
-echo "=== 3. 物理注入：mk 准入名单重构 ==="
-# 物理重写：直接使用你仓库的 .mk 定义替换底层 filogic.mk 中的 sl_3000 块
-FILOGIC_MK="target/linux/mediatek/image/filogic.mk"
-USER_MK="$REPO_888/mt7981_sl3000.mk"
+# 3. 物理覆盖 filogic.mk (仅保留 SL3000 相关逻辑)
+# 这一步直接重写该文件，删除所有无关设备，防止编译冲突
+printf '%s\n' \
+'# SPDX-License-Identifier: GPL-2.0-or-later' \
+'DTS_DIR := $(DTS_DIR)/mediatek' \
+'define Image/Prepare' \
+'	rm -f $(KDIR)/ubi_mark' \
+'	echo -ne '"'"'\xde\xad\xc0\xde'"'"' > $(KDIR)/ubi_mark' \
+'endef' \
+'define Build/mt7981-bl2' \
+'	cat $(STAGING_DIR_IMAGE)/mt7981-$1-bl2.img >> $@' \
+'endef' \
+'define Build/mt7981-bl31-uboot' \
+'	cat $(STAGING_DIR_IMAGE)/mt7981_$1-u-boot.fip >> $@' \
+'endef' \
+'define Build/gen_spi_full_32mb' \
+'	@echo "=== 物理合成：32MB 救砖镜像 ==="' \
+'	dd if=/dev/zero bs=1M count=32 | tr '"'"'\000'"'"' '"'"'\377'"'"' > $@.tmp' \
+'	[ -f $(BIN_DIR)/bl2.img ] && dd if=$(BIN_DIR)/bl2.img of=$@.tmp conv=notrunc status=none' \
+'	[ -f $(BIN_DIR)/fip.bin ] && dd if=$(BIN_DIR)/fip.bin of=$@.tmp bs=1M seek=1 conv=notrunc status=none' \
+'	[ -f $(BIN_DIR)/factory.bin ] && dd if=$(BIN_DIR)/factory.bin of=$@.tmp bs=1M seek=2 conv=notrunc status=none' \
+'	[ -f $(KDIR)/fit-mt7981b-sl3000-emmc.itb ] && dd if=$(KDIR)/fit-mt7981b-sl3000-emmc.itb of=$@.tmp bs=1M seek=3 conv=notrunc status=none' \
+'	mv $@.tmp $@' \
+'endef' \
+'define Device/mt7981_sl3000_spi_rescue' \
+'  DEVICE_VENDOR := Siluo' \
+'  DEVICE_MODEL := SL3000' \
+'  DEVICE_VARIANT := SPI Full (1GB DDR4 / 32MB NOR)' \
+'  DEVICE_DTS := mt7981b-sl3000-emmc' \
+'  SUPPORTED_DEVICES := siluo,sl3000-emmc' \
+'  DEVICE_DRAM_SIZE := 1024M' \
+'  SOC := mt7981' \
+'  KERNEL_LOADADDR := 0x44000000' \
+'  KERNEL := kernel-bin | gzip' \
+'  IMAGES := spi-full-32mb.bin' \
+'  IMAGE/spi-full-32mb.bin := gen_spi_full_32mb' \
+'  DEVICE_PACKAGES := uboot-envtools mtd-utils kmod-mtd-rw block-mount kmod-mmc kmod-mmc-mtk kmod-fs-ext4 kmod-fs-f2fs f2fs-tools e2fsprogs ip-full dropbear' \
+'endef' \
+'TARGET_DEVICES += mt7981_sl3000_spi_rescue' > "$OPENWRT_ROOT/target/linux/mediatek/image/filogic.mk"
 
-if [ -f "$USER_MK" ]; then
-    echo "正在执行底层 Makefile 手术..."
-    # 物理清理：删除源码中可能存在的同名定义块
-    sed -i '/Device\/sl_3000-emmc/,/endef/d' "$FILOGIC_MK"
-    # 物理追加：将你仓库的定义直接注入底册
-    cat "$USER_MK" >> "$FILOGIC_MK"
-    echo "✅ filogic.mk 物理补丁完成"
-fi
+# 4. 物理致盲：封印 Mconf 交互弹窗
+printf '%s\n' '#!/bin/sh' 'echo "[物理审计] 锁定静默模式"' 'exit 1' > "$OPENWRT_ROOT/scripts/config/mconf-cfg.sh"
+chmod +x "$OPENWRT_ROOT/scripts/config/mconf-cfg.sh"
 
-echo "=== 4. 物理致盲：封印 mconf 弹窗总闸 ==="
-# 最后的防线：即便配置有误，也严禁弹窗卡死
-if [ -f "scripts/config/mconf-cfg.sh" ]; then
-    echo "exit 1" > scripts/config/mconf-cfg.sh
-    chmod +x scripts/config/mconf-cfg.sh
-    echo "✅ 弹窗总闸已物理切断"
-fi
+echo "✅ SL3000 编译基因已物理注入并对齐"
