@@ -11,12 +11,16 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       TERM: xterm
-      # 物理补丁：禁止一切 Kconfig 交互
+      # 物理补丁：禁止一切 Kconfig 交互，锁定配置覆盖模式
       KCONFIG_OVERWRITECONFIG: 1
       FORCE_UNSAFE_CONFIGURE: 1
+      DEBIAN_FRONTEND: noninteractive
+    
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Install System Dependencies
         run: |
@@ -25,22 +29,19 @@ jobs:
           bison flex m4 gawk gettext libncursesw5-dev libncurses5-dev zlib1g-dev \
           python3-setuptools swig python3-dev rsync unzip git qemu-utils libssl-dev
 
-      - name: Prepare (diy-part1)
+      - name: Prepare Environment (Part 1)
         run: |
           chmod +x diy-part1.sh
           ./diy-part1.sh
 
-      - name: Build (diy-part2)
+      - name: Physical Build and Sync (Part 2)
         run: |
           chmod +x diy-part2.sh
-          ./diy-part2.sh
+          # 显式传递工作空间，确保脚本物理路径自适应
+          GITHUB_WORKSPACE=$GITHUB_WORKSPACE ./diy-part2.sh
 
-      - name: Upload
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: SL3000-Rescue-Final
-          path: output/      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: SL3000-1G-Rescue-Bundle
           path: output/
