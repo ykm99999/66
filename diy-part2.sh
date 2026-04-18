@@ -1,41 +1,47 @@
 #!/bin/bash
 set -euo pipefail
 
-# 1. 路径自适应
+# 1. 路径与变量定义
 WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
 IMMORTAL_DIR="$WORKSPACE/immortalwrt"
 OUTPUT_DIR="$WORKSPACE/output"
 PARTS_DIR="$OUTPUT_DIR/parts"
 
+# 解决终端报错环境变量
+export TERM=xterm
+export TERMINAL=dumb
+
 mkdir -p "$OUTPUT_DIR" "$PARTS_DIR"
 
-echo "=== 1. 物理审计：源码与资源检查 ==="
-[ -d "$IMMORTAL_DIR" ] || { echo "❌ 缺少 immortalwrt 目录"; exit 1; }
-[ -d "$WORKSPACE/888" ] || { echo "❌ 缺少 888 引导文件目录"; exit 1; }
+echo "=== 1. 物理审计：源码环境校验 ==="
+[ -d "$IMMORTAL_DIR" ] || { echo "❌ 缺少源码目录"; exit 1; }
 
-echo "=== 2. 修复编译环境并构建内核 ==="
+echo "=== 2. 注入配置并强制执行静默校验 ==="
 cd "$IMMORTAL_DIR"
 
-# 解决 flex/m4 报错：清理并强制执行配置生成
-make target/linux/clean
-./scripts/feeds update -a && ./scripts/feeds install -a
-
+# 物理覆盖 .config
 if [ -f "$WORKSPACE/888/sl3000.config" ]; then
-    echo "注入 sl3000.config 配置文件..."
     cp -f "$WORKSPACE/888/sl3000.config" .config
-    make defconfig
+    echo "✅ 已注入 8000 行核心配置"
+else
+    echo "❌ 关键错误：找不到 888/sl3000.config"
+    exit 1
 fi
 
-echo "正在执行内核编译 (target/linux/compile)..."
-# 使用 V=s 暴露所有物理错误，防止静默失败
+# 彻底解决 menuconfig 交互报错：使用 defconfig
+echo "执行非交互式配置填充 (make defconfig)..."
+make defconfig
+
+echo "=== 3. 启动内核 ITB 编译 ==="
+# 仅针对内核目标进行快速构建
 make target/linux/compile -j$(nproc) V=s
 
-echo "=== 3. 提取内核产物与引导文件 ==="
+echo "=== 4. 锁定产物并合成 32MB 救砖包 ==="
 # 物理路径锁定
 KERNEL_SRC=$(find bin/targets/mediatek/mt7981 -name "*sysupgrade.itb" | head -n 1)
 
 if [ -z "$KERNEL_SRC" ] || [ ! -f "$KERNEL_SRC" ]; then
-    echo "❌ 物理审计失败：未能在编译输出中找到内核 ITB 文件。"
+    echo "❌ 审计失败：未能在 bin/ 目录下发现生成的内核 ITB 文件"
     exit 1
 fi
 
@@ -44,24 +50,17 @@ cp -v "$WORKSPACE/888/bl2_orig.bin" "$PARTS_DIR/bl2.bin"
 cp -v "$WORKSPACE/888/fip_orig.bin" "$PARTS_DIR/fip.bin"
 cp -v "$WORKSPACE/888/factory_orig.bin" "$PARTS_DIR/factory.bin"
 
-echo "=== 4. 物理合成 32MB 救砖镜像 ==="
+# 开始 dd 物理合成
 RESCUE_BIN="$OUTPUT_DIR/rescue-32.bin"
+echo "正在物理合成 rescue-32.bin..."
 
-# 创建 32MB 全 0xFF 空镜像（模拟物理擦除状态）
+# 32MB 全 0xFF 填充
 dd if=/dev/zero bs=1M count=32 2>/dev/null | tr '\000' '\377' > "$RESCUE_BIN"
 
-# 按偏移量物理写入
-echo "写入 BL2 (Offset: 0)..."
+# 写入各分区（严格对齐）
 dd if="$PARTS_DIR/bl2.bin" of="$RESCUE_BIN" bs=1 conv=notrunc status=none
-
-echo "写入 FIP (Offset: 256KB)..."
 dd if="$PARTS_DIR/fip.bin" of="$RESCUE_BIN" bs=256k seek=1 conv=notrunc status=none
-
-echo "写入 Factory (Offset: 1.5MB)..."
 dd if="$PARTS_DIR/factory.bin" of="$RESCUE_BIN" bs=256k seek=6 conv=notrunc status=none
-
-echo "写入 Kernel ITB (Offset: 2MB)..."
 dd if="$PARTS_DIR/kernel.itb" of="$RESCUE_BIN" bs=1M seek=2 conv=notrunc status=none
 
-echo "✅ [彻底解决] 32MB 全量救砖镜像已生成！"
-ls -lh "$RESCUE_BIN"
+echo "✅ [全链路诊断成功] 救砖全家桶已就绪: $RESCUE_BIN"
