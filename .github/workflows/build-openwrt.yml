@@ -1,4 +1,4 @@
-name: SL3000 Rescue Final Build
+name: SL3000-1G-DDR4-Rescue-Build
 
 on:
   workflow_dispatch:
@@ -11,14 +11,11 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       TERM: xterm
-      # 强制 OpenWrt 在配置不匹配时使用默认选值，严禁弹出菜单
-      CONF_DEFAULT: 1
       FORCE_UNSAFE_CONFIGURE: 1
+      CONF_DEFAULT: 1
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          ref: main
 
       - name: Install System Dependencies
         run: |
@@ -27,19 +24,18 @@ jobs:
           bison flex m4 gawk gettext libncursesw5-dev libncurses5-dev zlib1g-dev \
           python3-setuptools swig python3-dev rsync unzip git qemu-utils libssl-dev
 
-      - name: Prepare Environment (diy-part1)
+      - name: Prepare (diy-part1)
         run: |
           chmod +x diy-part1.sh
           ./diy-part1.sh
 
-      - name: Build and Package (diy-part2)
+      - name: Build (diy-part2)
         run: |
           chmod +x diy-part2.sh
-          # 物理隔离执行
           ./diy-part2.sh
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sl3000-rescue-bundle
+          name: SL3000-1G-Rescue-Bundle
           path: output/
