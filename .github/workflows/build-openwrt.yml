@@ -1,4 +1,4 @@
-name: SL3000-Rescue-Physical-Fix
+name: SL3000-Rescue-Final-V19
 
 on:
   workflow_dispatch:
@@ -11,8 +11,6 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       TERM: xterm
-      # 物理补丁：禁止一切 Kconfig 交互，锁定配置覆盖模式
-      KCONFIG_OVERWRITECONFIG: 1
       FORCE_UNSAFE_CONFIGURE: 1
       DEBIAN_FRONTEND: noninteractive
     
@@ -37,11 +35,10 @@ jobs:
       - name: Physical Build and Sync (Part 2)
         run: |
           chmod +x diy-part2.sh
-          # 显式传递工作空间，确保脚本物理路径自适应
-          GITHUB_WORKSPACE=$GITHUB_WORKSPACE ./diy-part2.sh
+          ./diy-part2.sh
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: SL3000-Rescue-Final
+          name: SL3000-32MB-Rescue-Image
           path: output/
