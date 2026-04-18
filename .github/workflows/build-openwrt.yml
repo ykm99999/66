@@ -1,44 +1,42 @@
-name: SL3000-Rescue-Final-V19
+name: SL3000-Rescue-Physical-PowerFix
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - 'v*'
 
 jobs:
   build:
     runs-on: ubuntu-22.04
     env:
       TERM: xterm
+      # 物理补丁：禁止一切配置检查过程中的回话请求
+      KCONFIG_NOSILENTUPDATE: 1
       FORCE_UNSAFE_CONFIGURE: 1
       DEBIAN_FRONTEND: noninteractive
     
     steps:
-      - name: Checkout Repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: main
 
-      - name: Install System Dependencies
+      - name: Install Tools
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu build-essential device-tree-compiler \
           bison flex m4 gawk gettext libncursesw5-dev libncurses5-dev zlib1g-dev \
           python3-setuptools swig python3-dev rsync unzip git qemu-utils libssl-dev
 
-      - name: Prepare Environment (Part 1)
-        run: |
-          chmod +x diy-part1.sh
-          ./diy-part1.sh
+      - name: Prepare
+        run: chmod +x diy-part1.sh && ./diy-part1.sh
 
-      - name: Physical Build and Sync (Part 2)
+      - name: Build
         run: |
           chmod +x diy-part2.sh
+          # 物理隔离执行，防止任何环境变量污染
           ./diy-part2.sh
 
-      - name: Upload Artifacts
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: SL3000-32MB-Rescue-Image
+          name: SL3000-Image
           path: output/
