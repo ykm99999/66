@@ -1,59 +1,90 @@
-name: SL3000-Rescue-Physical-PowerFix
+name: SL3000-Auto-Physical-Build
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # 手动触发总闸
 
 jobs:
   build:
     runs-on: ubuntu-22.04
     env:
-      TERM: xterm
-      # 物理补丁：核心三变量，彻底锁死 Kconfig 交互
-      KCONFIG_NOSILENTUPDATE: 1
-      CONF_DEFAULT: 1
-      KCONFIG_ALLCONFIG: 1
-      FORCE_UNSAFE_CONFIGURE: 1
       DEBIAN_FRONTEND: noninteractive
-    
+      KCONFIG_NOSILENTUPDATE: 1
+      CONF_DEFAULT: 1 # 物理锁定：遇到新配置自动选默认，禁止弹窗
+      FORCE_UNSAFE_CONFIGURE: 1
+
     steps:
-      - name: Checkout Primary Repo
+      - name: 1. 物理检出 (Checkout)
         uses: actions/checkout@v4
         with:
-          # 确保拉取当前脚本所在仓库，包含 888/ 目录和 diy 脚本
-          ref: main
-          path: .
+          path: main-repo # 将你的脚本和 888 配置拉取到此目录
 
-      - name: Clone ImmortalWrt Source
+      - name: 2. 源码注入 (Clone ImmortalWrt)
         run: |
-          # 物理隔离：将源码拉取到子目录，防止污染 888 配置目录
-          git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git immortalwrt
+          git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git openwrt
 
-      - name: Install Tools (Minimal & Clean)
+      - name: 3. 环境初始化
         run: |
           sudo apt-get update
-          # 增加时区补丁防止交互挂起
-          sudo ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
           sudo apt-get install -y gcc-aarch64-linux-gnu build-essential device-tree-compiler \
           bison flex m4 gawk gettext libncursesw5-dev libncurses5-dev zlib1g-dev \
           python3-setuptools swig python3-dev rsync unzip git qemu-utils libssl-dev
 
-      - name: Execute DIY-Part1 (Gene Injection)
+      - name: 4. 物理对齐：注入 888 三件套
         run: |
-          # 注入 888 三件套到 immortalwrt 基因层
-          chmod +x diy-part1.sh
-          ./diy-part1.sh
+          cd openwrt
+          
+          # [A] 注入设备定义 (MK) - 物理追加，不破坏原有结构
+          FILOGIC_MK="target/linux/mediatek/image/filogic.mk"
+          cat ../main-repo/888/mt7981_sl3000.mk >> "$FILOGIC_MK"
+          
+          # [B] 注入设备树 (DTS) - 强行映射到架构目录
+          cp -f ../main-repo/888/mt7981b-sl3000-emmc.dts target/linux/mediatek/dts/mt7981b-sl-3000-emmc.dts
+          
+          # [C] 注入配置母本 (.config)
+          cp -f ../main-repo/888/sl3000.config .config
+          
+          # [D] 物理致盲：封印 menuconfig 弹窗
+          echo "exit 1" > scripts/config/mconf-cfg.sh
+          chmod +x scripts/config/mconf-cfg.sh
+          
+          echo "✅ 三件套已在构建空间完成物理闭合"
 
-      - name: Execute DIY-Part2 (Silent Build)
+      - name: 5. 自动配置补全 (Silent Defconfig)
         run: |
-          # 执行静默配置、编译与 32M 救砖包合成
-          chmod +x diy-part2.sh
-          # 使用 script 命令模拟伪终端，进一步骗过编译检测逻辑
-          ./diy-part2.sh
+          cd openwrt
+          ./scripts/feeds update -a && ./scripts/feeds install -a
+          # 使用 /dev/null 彻底堵死交互可能
+          make oldconfig </dev/null
+          make defconfig
 
-      - name: Physical Audit & Upload
-        if: success()
+      - name: 6. 物理编译 (Kernel & Image)
+        run: |
+          cd openwrt
+          # 仅编译内核与必要镜像，确保 32M SPI 物理限制
+          make target/linux/compile -j$(nproc) V=s
+
+      - name: 7. 救砖包物理合成
+        run: |
+          mkdir -p output
+          cd openwrt
+          # 自动寻找编译出的内核 FIT 镜像
+          KERNEL_SRC=$(find bin/targets -name "*sysupgrade.itb" | head -n 1)
+          RESCUE_BIN="../output/rescue-32.bin"
+          REPO_888="../main-repo/888"
+          
+          # 物理合成 32MB 镜像 (0xFF 填充空白)
+          dd if=/dev/zero bs=1M count=32 | tr '\000' '\377' > "$RESCUE_BIN"
+          
+          # 像素级偏移写入
+          dd if="$REPO_888/bl2_orig.bin" of="$RESCUE_BIN" bs=1 conv=notrunc status=none
+          dd if="$REPO_888/fip_orig.bin" of="$RESCUE_BIN" bs=1 seek=$((0x100000)) conv=notrunc status=none
+          dd if="$REPO_888/factory_orig.bin" of="$RESCUE_BIN" bs=1 seek=$((0x200000)) conv=notrunc status=none
+          dd if="$KERNEL_SRC" of="$RESCUE_BIN" bs=1 seek=$((0x300000)) conv=notrunc status=none
+          
+          echo "✅ rescue-32.bin 合成完毕"
+
+      - name: 8. 上传固件
         uses: actions/upload-artifact@v4
         with:
-          name: SL3000-Rescue-Image
+          name: SL3000-Rescue-32M
           path: output/
-          if-no-files-found: error
