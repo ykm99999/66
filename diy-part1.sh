@@ -1,35 +1,36 @@
 #!/bin/bash
 set -euo pipefail
 
-# 获取当前工作空间绝对路径，实现全链路定位
 WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
 IMMORTAL_DIR="$WORKSPACE/immortalwrt"
-RESOURCE_DIR="$WORKSPACE/888"
 
-echo "=== 1. 物理审计：验证核心资源 ==="
-if [ ! -d "$RESOURCE_DIR" ]; then
-    echo "❌ 严重错误：未发现 888 资源文件夹，物理链路中断！"
-    exit 1
-fi
-
-if [ ! -d "$IMMORTAL_DIR" ]; then
-    echo "❌ 严重错误：未发现 immortalwrt 源码目录！"
-    exit 1
-fi
-
-echo "=== 2. 执行 Feeds 物理同步与清洗 ==="
 cd "$IMMORTAL_DIR"
 
-# 清理可能残留的 feeds 索引锁
-rm -rf ./feeds.conf.default.index 2>/dev/null
+echo "=== 1. 底层物理手术：强行修改默认架构 ==="
+# 修复：直接修改 OpenWrt 的默认配置文件，将默认值从 x86 改为 mediatek
+# 这样即便配置解析出错，它默认也是进入 mediatek 分支，绝不跳 x86
+sed -i 's/CONFIG_TARGET_x86=y/# CONFIG_TARGET_x86 is not set/' Config-build.in
+sed -i 's/default "x86"/default "mediatek"/' config/Config-build.in 2>/dev/null || true
 
-chmod +x scripts/feeds
+echo "=== 2. 底层物理注入：将 SL3000 设备定义写入底层 Makefile ==="
+# 如果底层 filogic.mk 缺少定义，我们直接物理追加
+FILOGIC_MK="target/linux/mediatek/image/filogic.mk"
+if ! grep -q "sl_3000-emmc" "$FILOGIC_MK"; then
+    cat <<EOF >> "$FILOGIC_MK"
+
+define Device/sl_3000-emmc
+  DEVICE_VENDOR := SL
+  DEVICE_MODEL := 3000 eMMC
+  DEVICE_DTS := mt7981b-sl-3000-emmc
+  DEVICE_DRAM_SIZE := 1024M
+  SUPPORTED_DEVICES := sl,3000-emmc
+endef
+TARGET_DEVICES += sl_3000-emmc
+EOF
+fi
+
+echo "=== 3. Feeds 物理同步 ==="
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-echo "=== 3. 物理环境自愈：补齐依赖项 ==="
-# 强制修补 Feeds 链接可能存在的死链（针对 MT7981 常用插件）
-# 可以在此处通过 sed 或 git clone 额外拉取你需要的插件仓
-# 例如：git clone https://github.com/messense/miyoo-autoupdate.git package/new-app
-
-echo "✅ [Part 1] 物理环境预检完成，所有路径已闭合。"
+echo "✅ 底层仓库源物理加固完成。"
