@@ -1,4 +1,4 @@
-name: SL3000 Rescue Bundle Build
+name: SL3000 Rescue Build Final
 
 on:
   workflow_dispatch:
@@ -9,11 +9,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    # 设置全局环境变量，防止所有步骤中可能出现的终端交互报错
     env:
       TERM: xterm
       FORCE_UNSAFE_CONFIGURE: 1
-
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -23,20 +21,22 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          # 物理环境补全：确保 m4, flex, bison, ncurses 和构建环境必备工具
           sudo apt-get install -y gcc-aarch64-linux-gnu build-essential device-tree-compiler \
           bison flex m4 gawk gettext libncursesw5-dev libncurses5-dev zlib1g-dev \
           python3-setuptools swig python3-dev rsync unzip git qemu-utils
 
       - name: Prepare Environment (diy-part1)
         run: |
-          # 修复：确保脚本具有执行权限并物理对齐路径
           chmod +x diy-part1.sh
           ./diy-part1.sh
 
       - name: Build and Package (diy-part2)
         run: |
-          # 修复：传递物理工作空间变量，触发编译与合成逻辑
+          # 物理补丁：强制映射系统 m4 到 OpenWrt 内部路径，彻底解决 flex 调用失败
+          mkdir -p immortalwrt/staging_dir/host/bin
+          ln -sf $(which m4) immortalwrt/staging_dir/host/bin/m4
+          ln -sf $(which flex) immortalwrt/staging_dir/host/bin/flex
+          
           chmod +x diy-part2.sh
           export GITHUB_WORKSPACE=$GITHUB_WORKSPACE
           ./diy-part2.sh
@@ -45,19 +45,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sl3000-rescue-bundle
-          # 收集所有输出产物，包括生成的 rescue-32.bin
           path: output/
-
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: "SL3000 Rescue Bundle ${{ github.ref_name }}"
-          # 自动匹配生成的救砖镜像和压缩包
-          files: |
-            output/rescue-32.bin
-            output/*.bin
-            output/*.tar.gz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
