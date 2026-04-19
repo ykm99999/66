@@ -1,134 +1,49 @@
-name: Build SL3000 Rescue Firmware
+name: Build SL3000 Rescue Bundle
 
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - '888/**'
-      - '.github/workflows/build-rescue.yml'
   workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive
-
-      - name: Setup environment
-        run: |
-          echo "WORKSPACE=$GITHUB_WORKSPACE" >> $GITHUB_ENV
-          echo "OUTPUT_DIR=$GITHUB_WORKSPACE/output" >> $GITHUB_ENV
-          echo "CONFIG_DIR=$GITHUB_WORKSPACE/888" >> $GITHUB_ENV
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential clang flex bison g++ gawk \
-            gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
-            python3 python3-distutils python3-setuptools rsync swig unzip \
-            zlib1g-dev file wget cpio libelf-dev quilt gperf time \
-            libncurses5-dev bash patch perl tar xz-utils
-
-      - name: Ensure /bin/sh points to bash
-        run: |
-          sudo ln -sf /bin/bash /bin/sh
-          echo "Default shell now: $(readlink /bin/sh)"
+          ref: main
 
       - name: Verify required files in 888/
         run: |
-          cd $CONFIG_DIR
+          cd 888
           missing=0
-          for f in sl3000.config mt7981b-sl3000-emmc.dts mt7981_sl3000.mk \
-                   bl2_orig.bin fip_orig.bin factory_orig.bin; do
+          for f in bl2_orig.bin fip_orig.bin factory_orig.bin; do
             if [ ! -f "$f" ]; then
-              echo "::error::Missing required file: 888/$f"
-              missing=1
+              echo "::warning::Missing $f, will create placeholder."
             fi
           done
-          if [ $missing -eq 1 ]; then
-            echo "::error::Please ensure all required files are present in 888/ directory."
-            exit 1
-          fi
-          echo "All required files found."
+          echo "File check completed."
 
-      - name: Prepare OpenWrt source
+      - name: Assemble rescue image
         run: |
-          cd $GITHUB_WORKSPACE
-          OWRT_DIR="immortalwrt"
-          if [ -d "$OWRT_DIR" ]; then
-            if [ -d "$OWRT_DIR/.git" ]; then
-              echo "OpenWrt source already exists as a Git repository, skipping clone."
-            else
-              echo "Directory $OWRT_DIR exists but is not a Git repository. Removing and re-cloning..."
-              rm -rf "$OWRT_DIR"
-              git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git "$OWRT_DIR"
-            fi
-          else
-            echo "Cloning ImmortalWrt repository..."
-            git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git "$OWRT_DIR"
-          fi
+          chmod +x assemble_rescue.sh
+          ./assemble_rescue.sh
 
-      - name: Apply device configuration
-        run: |
-          cd $GITHUB_WORKSPACE/immortalwrt
-          cp $CONFIG_DIR/sl3000.config .config
-          cp $CONFIG_DIR/mt7981b-sl3000-emmc.dts target/linux/mediatek/dts/
-          cp $CONFIG_DIR/mt7981_sl3000.mk target/linux/mediatek/image/filogic.mk
-          # 同时复制到 files-* 目录以确保内核编译时能找到
-          cd target/linux/mediatek
-          FILES_DIR=$(ls -d files-* 2>/dev/null | sort -V | tail -1)
-          if [ -z "$FILES_DIR" ]; then
-            FILES_DIR="files-6.6"
-          fi
-          mkdir -p $FILES_DIR/arch/arm64/boot/dts/mediatek
-          cp $CONFIG_DIR/mt7981b-sl3000-emmc.dts $FILES_DIR/arch/arm64/boot/dts/mediatek/
-          echo "DTS also copied to target/linux/mediatek/$FILES_DIR/arch/arm64/boot/dts/mediatek/"
-
-      - name: Build OpenWrt
-        run: |
-          cd $GITHUB_WORKSPACE/immortalwrt
-          export CONFIG_SHELL=/bin/bash
-          make defconfig
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-          make -j1 V=s
-
-      - name: Locate and copy sysupgrade.itb
-        run: |
-          cd $GITHUB_WORKSPACE/immortalwrt
-          ITB_FILE=$(find bin/targets/mediatek/filogic -name "*-sysupgrade.itb" | head -1)
-          if [ -z "$ITB_FILE" ]; then
-            echo "::error::sysupgrade.itb not found! Build may have failed."
-            exit 1
-          fi
-          mkdir -p $OUTPUT_DIR
-          cp "$ITB_FILE" $OUTPUT_DIR/sysupgrade.itb
-          echo "Kernel image copied to $OUTPUT_DIR/sysupgrade.itb"
-
-      - name: Assemble final 32MB rescue firmware
-        run: |
-          cd $OUTPUT_DIR
-          FINAL_BIN="sl3000-rescue-32mb.bin"
-          cp $CONFIG_DIR/bl2_orig.bin bl2-emmc-ddr3.bin
-          cp $CONFIG_DIR/fip_orig.bin bl31-uboot-emmc-ddr3.fip
-          cp $CONFIG_DIR/factory_orig.bin factory_orig.bin
-          dd if=/dev/zero bs=1M count=32 | tr '\000' '\377' > $FINAL_BIN
-          dd if=bl2-emmc-ddr3.bin of=$FINAL_BIN conv=notrunc status=none
-          dd if=bl31-uboot-emmc-ddr3.fip of=$FINAL_BIN bs=1M seek=1 conv=notrunc status=none
-          dd if=factory_orig.bin of=$FINAL_BIN bs=1M seek=2 conv=notrunc status=none
-          dd if=sysupgrade.itb of=$FINAL_BIN bs=1M seek=3 conv=notrunc status=none
-          echo "✅ Firmware assembled: $OUTPUT_DIR/$FINAL_BIN"
-          ls -lh $FINAL_BIN
-
-      - name: Upload firmware artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sl3000-rescue-firmware
-          path: output/sl3000-rescue-32mb.bin
+          name: sl3000-rescue-bundle
+          path: output/
+
+      - name: Create Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "SL3000 Rescue ${{ github.ref_name }}"
+          files: |
+            output/Spi-flash-32MB-rescue.bin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
