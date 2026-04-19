@@ -1,4 +1,4 @@
-// 888/mt7981b-sl3000-emmc.dts
+// SPDX-License-Identifier: GPL-2.0-or-later
 /dts-v1/;
 #include "mt7981.dtsi"
 #include <dt-bindings/gpio/gpio.h>
@@ -91,28 +91,40 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 
+			// BL2: 0x000000 - 0x040000 (256KB)
 			partition@0 {
 				label = "bl2";
 				reg = <0x000000 0x040000>;
 				read-only;
 			};
-			partition@40000 {
+
+			// 未使用空间：0x040000 - 0x100000 (768KB) 预留
+			// 与 Makefile 中 seek=1 (1MB) 对齐
+
+			// FIP: 0x100000 - 0x180000 (512KB)
+			partition@100000 {
 				label = "fip";
-				reg = <0x040000 0x080000>;
+				reg = <0x100000 0x080000>;
 				read-only;
 			};
-			partition@180000 {
+
+			// Factory: 0x200000 - 0x400000 (2MB)
+			partition@200000 {
 				label = "factory";
-				reg = <0x180000 0x200000>;  /* 修正为 2MB */
+				reg = <0x200000 0x200000>;
 				read-only;
 			};
-			partition@380000 {
+
+			// Kernel (FIT image): 0x300000 - 0x700000 (4MB)
+			partition@300000 {
 				label = "kernel";
-				reg = <0x380000 0x400000>;
+				reg = <0x300000 0x400000>;
 			};
-			partition@780000 {
+
+			// Root filesystem: 0x700000 - 0x2000000 (25MB)
+			partition@700000 {
 				label = "rootfs";
-				reg = <0x780000 0x1880000>;  /* 剩余空间 ~24.5MB */
+				reg = <0x700000 0x1900000>;
 			};
 		};
 	};
