@@ -33,50 +33,51 @@ jobs:
         run: |
           cd openwrt
           
-          # [a] 物理对齐官方 MK 格式 (防御性操作)
-          # 即使还原了官方版，也强制进行一次 Tab 纠偏，防止 Git 检出导致的空格污染
+          # [a] 物理纠偏官方 MK 格式
           sed -i 's/^    /\t/g' target/linux/mediatek/image/filogic.mk
           
-          # [b] 注入设备树 (dts) - 保持官方架构路径映射
+          # [b] 注入设备树 (dts)
           cp -f ../main-repo/888/mt7981b-sl3000-emmc.dts target/linux/mediatek/dts/mt7981b-sl-3000-emmc.dts
           
-          # [c] 注入配置母本 (.config) - 核心驱动逻辑
+          # [c] 注入配置母本 (.config) 并物理刷新时间戳
           cp -f ../main-repo/888/sl3000.config .config
+          touch .config
           
           # [d] 物理致盲：封印交互
           mkdir -p scripts/config
           echo "exit 1" > scripts/config/mconf-cfg.sh
           chmod +x scripts/config/mconf-cfg.sh
 
-      - name: 5. 自动配置补全 (物理封印交互)
+      - name: 5. 自动配置补全 (物理封锁 Broken Pipe)
         run: |
           cd openwrt
           ./scripts/feeds update -a && ./scripts/feeds install -a
-          # 使用 olddefconfig 自动闭合所有 SSL Library 等 choice 选项
-          make olddefconfig
+          
+          # 物理修复：移除所有管道输入，直接执行 olddefconfig
+          # 增加 V=s 暴露可能的底层文件锁冲突
+          make olddefconfig V=s || (rm -f .config.gz && make olddefconfig V=s)
           make defconfig
 
       - name: 6. 物理编译 (toolchain & kernel)
         run: |
           cd openwrt
-          # 物理执行：先工具链，后内核
+          # 物理执行工具链编译
           make tools/install -j$(nproc) || make tools/install -j1 V=s
           make toolchain/install -j$(nproc) || make toolchain/install -j1 V=s
+          
+          # 物理执行内核编译
           make target/linux/compile -j$(nproc) V=s
 
-      - name: 7. 救砖包物理合成 (外部逻辑)
+      - name: 7. 救砖包物理合成
         run: |
           mkdir -p output
           cd openwrt
-          # 物理溯源：在官方 bin 目录下寻找由 sl3000.config 编译出的内核镜像
           KERNEL_SRC=$(find bin/targets -name "*sysupgrade.itb" | head -n 1)
           RESCUE_BIN="../output/rescue-32.bin"
           REPO_888="../main-repo/888"
           
-          # 物理合成 32MB 镜像 (0xFF 填充)
           dd if=/dev/zero bs=1M count=32 | tr '\000' '\377' > "$RESCUE_BIN"
           
-          # 像素级偏移写入 (基于 3MB 偏移对齐)
           [ -f "$REPO_888/bl2_orig.bin" ] && dd if="$REPO_888/bl2_orig.bin" of="$RESCUE_BIN" conv=notrunc status=none
           [ -f "$REPO_888/fip_orig.bin" ] && dd if="$REPO_888/fip_orig.bin" of="$RESCUE_BIN" bs=1M seek=1 conv=notrunc status=none
           [ -f "$REPO_888/factory_orig.bin" ] && dd if="$REPO_888/factory_orig.bin" of="$RESCUE_BIN" bs=1M seek=2 conv=notrunc status=none
