@@ -53,11 +53,18 @@ jobs:
       - name: Prepare OpenWrt source
         run: |
           cd $GITHUB_WORKSPACE
-          if [ ! -d "immortalwrt/.git" ]; then
-            echo "Cloning ImmortalWrt repository..."
-            git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git immortalwrt
+          OWRT_DIR="immortalwrt"
+          if [ -d "$OWRT_DIR" ]; then
+            if [ -d "$OWRT_DIR/.git" ]; then
+              echo "OpenWrt source already exists as a Git repository, skipping clone."
+            else
+              echo "Directory $OWRT_DIR exists but is not a Git repository. Removing and re-cloning..."
+              rm -rf "$OWRT_DIR"
+              git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git "$OWRT_DIR"
+            fi
           else
-            echo "ImmortalWrt source already present."
+            echo "Cloning ImmortalWrt repository..."
+            git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git "$OWRT_DIR"
           fi
 
       - name: Apply device configuration
