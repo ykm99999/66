@@ -100,9 +100,7 @@
 /*
  * Generic platform constants
  */
-#ifndef FIRMWARE_WELCOME_STR
 #define FIRMWARE_WELCOME_STR		"Booting Trusted Firmware\n"
-#endif
 
 #define BL2_IMAGE_DESC {				\
 	.image_id = BL2_IMAGE_ID,			\

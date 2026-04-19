@@ -34,7 +34,7 @@
 #define PLATFORM_STACK_SIZE		0x440
 #endif
 
-#define FIRMWARE_WELCOME_STR "Booting Trusted Firmware (SL3000 1GB)\n"
+#define FIRMWARE_WELCOME_STR		"Booting Trusted Firmware\n"
 
 #define PLATFORM_MAX_AFFLVL		MPIDR_AFFLVL2
 #define PLAT_MAX_PWR_LVL		U(2)
@@ -100,7 +100,7 @@
 #define BL32_LIMIT		(TZRAM2_BASE + TZRAM2_SIZE)
 #define BL32_HEADER_SIZE	(0x1c)
 
-#define BL33_BASE (0x41e00000)
+#define BL33_BASE		(0x41e00000)
 
 #define TRNG_BASE		(0x1020f000)
 #define TRNG_SIZE		(0x1000)
