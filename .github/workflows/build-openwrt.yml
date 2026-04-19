@@ -1,4 +1,4 @@
-name: Build SL3000 Rescue Firmware (Full)
+name: Build SL3000 Rescue Firmware
 
 on:
   push:
