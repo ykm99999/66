@@ -72,15 +72,24 @@ jobs:
           cd $GITHUB_WORKSPACE/immortalwrt
           cp $CONFIG_DIR/sl3000.config .config
           cp $CONFIG_DIR/mt7981b-sl3000-emmc.dts target/linux/mediatek/dts/
-          cp $CONFIG_DIR/mt7981_sl3000.mk target/linux/mediatek/image/
-          echo "Device configuration applied."
+          # 用精简版覆盖 filogic.mk，只保留 SL3000 设备
+          cp $CONFIG_DIR/mt7981_sl3000.mk target/linux/mediatek/image/filogic.mk
 
-      - name: Update feeds and expand config
+      - name: Verify only SL3000 device is selected
+        run: |
+          cd $GITHUB_WORKSPACE/immortalwrt
+          make defconfig
+          if grep -q "^CONFIG_TARGET_mediatek_filogic_DEVICE_.*=y" .config | grep -v "mt7981_sl3000_spi_rescue"; then
+            echo "::error::Other Filogic devices are still selected in .config!"
+            exit 1
+          fi
+          echo "✅ Only SL3000 device selected."
+
+      - name: Update feeds
         run: |
           cd $GITHUB_WORKSPACE/immortalwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
-          make defconfig
 
       - name: Build OpenWrt (kernel + rootfs)
         run: |
@@ -104,15 +113,12 @@ jobs:
           cd $OUTPUT_DIR
           FINAL_BIN="sl3000-rescue-32mb.bin"
 
-          # 复制三个原始 bin 文件到 output
           cp $CONFIG_DIR/bl2_orig.bin bl2-emmc-ddr3.bin
           cp $CONFIG_DIR/fip_orig.bin bl31-uboot-emmc-ddr3.fip
           cp $CONFIG_DIR/factory_orig.bin factory_orig.bin
 
-          # 创建 32MB 全 0xFF 的空文件
           dd if=/dev/zero bs=1M count=32 | tr '\000' '\377' > $FINAL_BIN
 
-          # 按分区布局写入
           echo "Writing BL2 @ 0M"
           dd if=bl2-emmc-ddr3.bin of=$FINAL_BIN conv=notrunc status=none
 
