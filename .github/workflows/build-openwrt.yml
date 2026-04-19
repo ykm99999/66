@@ -85,7 +85,7 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/immortalwrt
           export CONFIG_SHELL=/bin/bash
-          make defconfig
+          make FORCE=1 defconfig
           if grep -q "^CONFIG_TARGET_mediatek_filogic_DEVICE_.*=y" .config | grep -v "mt7981_sl3000_spi_rescue"; then
             echo "::error::Other Filogic devices are still selected in .config!"
             exit 1
@@ -103,7 +103,7 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/immortalwrt
           export CONFIG_SHELL=/bin/bash
-          make -j$(nproc) V=s
+          make FORCE=1 -j$(nproc) V=s
 
       - name: Locate and copy sysupgrade.itb
         run: |
