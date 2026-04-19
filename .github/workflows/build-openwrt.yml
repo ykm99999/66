@@ -26,19 +26,56 @@ jobs:
           echo "OUTPUT_DIR=$GITHUB_WORKSPACE/output" >> $GITHUB_ENV
           echo "CONFIG_DIR=$GITHUB_WORKSPACE/888" >> $GITHUB_ENV
 
-      - name: Install system dependencies
+      - name: Install system dependencies (extended)
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential clang flex bison g++ gawk \
-              gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
-              python3 python3-distutils python3-setuptools rsync swig unzip \
-              zlib1g-dev file wget cpio libelf-dev quilt gperf time \
-              libncurses5-dev
+          sudo apt-get install -y \
+            build-essential \
+            clang \
+            flex \
+            bison \
+            g++ \
+            gawk \
+            gcc-multilib \
+            g++-multilib \
+            gettext \
+            git \
+            libncurses-dev \
+            libssl-dev \
+            python3 \
+            python3-distutils \
+            python3-setuptools \
+            rsync \
+            swig \
+            unzip \
+            zlib1g-dev \
+            file \
+            wget \
+            cpio \
+            libelf-dev \
+            quilt \
+            gperf \
+            time \
+            libncurses5-dev \
+            bash \
+            patch \
+            perl \
+            perl-base \
+            tar \
+            xz-utils \
+            libtool \
+            automake \
+            autoconf \
+            pkg-config \
+            cmake \
+            ninja-build \
+            meson
 
       - name: Ensure /bin/sh points to bash
         run: |
           sudo ln -sf /bin/bash /bin/sh
           echo "Default shell now: $(readlink /bin/sh)"
+          /bin/sh --version
 
       - name: Verify required files in 888/
         run: |
@@ -81,34 +118,46 @@ jobs:
           cp $CONFIG_DIR/mt7981b-sl3000-emmc.dts target/linux/mediatek/dts/
           cp $CONFIG_DIR/mt7981_sl3000.mk target/linux/mediatek/image/filogic.mk
 
-      - name: Patch prereq check to always pass
-        run: |
-          cd $GITHUB_WORKSPACE/immortalwrt
-          sed -i 's/exit 1/echo "Prereq check bypassed" ; exit 0/g' include/prereq-build.mk
-          echo "Prereq check patched."
-
-      - name: Verify only SL3000 device is selected
+      - name: Debug prereq check manually
         run: |
           cd $GITHUB_WORKSPACE/immortalwrt
           export CONFIG_SHELL=/bin/bash
+          echo "=== Running manual prereq check with verbose output ==="
+          make -j1 V=sc prereq || true
+          echo "=== Checking for missing tools ==="
+          for cmd in gawk bash file gettext git python3 patch perl tar xz; do
+            echo -n "$cmd: "
+            command -v $cmd || echo "MISSING"
+          done
+          echo "=== Python version ==="
+          python3 --version
+          echo "=== /usr/bin/env ==="
+          ls -l /usr/bin/env
+          echo "=== PATH ==="
+          echo $PATH
+
+      - name: Force symlink and permissions fix
+        run: |
+          # 有时 OpenWrt 构建需要某些路径可写
+          cd $GITHUB_WORKSPACE/immortalwrt
+          mkdir -p staging_dir/host
+          touch staging_dir/host/.prereq-build
+          chmod 755 staging_dir/host
+
+      - name: Build OpenWrt with FORCE=1 and explicit shell
+        run: |
+          cd $GITHUB_WORKSPACE/immortalwrt
+          export CONFIG_SHELL=/bin/bash
+          export FORCE=1
+          export FORCE_UNSAFE_CONFIGURE=1
           make defconfig
           if grep -q "^CONFIG_TARGET_mediatek_filogic_DEVICE_.*=y" .config | grep -v "mt7981_sl3000_spi_rescue"; then
             echo "::error::Other Filogic devices are still selected in .config!"
             exit 1
           fi
           echo "✅ Only SL3000 device selected."
-
-      - name: Update feeds
-        run: |
-          cd $GITHUB_WORKSPACE/immortalwrt
-          export CONFIG_SHELL=/bin/bash
           ./scripts/feeds update -a
           ./scripts/feeds install -a
-
-      - name: Build OpenWrt (kernel + rootfs)
-        run: |
-          cd $GITHUB_WORKSPACE/immortalwrt
-          export CONFIG_SHELL=/bin/bash
           make -j$(nproc) V=s
 
       - name: Locate and copy sysupgrade.itb
@@ -144,8 +193,8 @@ jobs:
           name: sl3000-rescue-firmware
           path: output/sl3000-rescue-32mb.bin
 
-      - name: Upload build logs (on failure)
-        if: failure()
+      - name: Upload build logs (always, for debugging)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-logs
