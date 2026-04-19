@@ -29,9 +29,10 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
-                                  device-tree-compiler flex bison libncurses-dev libssl-dev \
-                                  python3 python3-pip swig cpio unzip rsync file
+          sudo apt-get install -y build-essential clang flex bison g++ gawk \
+              gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
+              python3 python3-distutils python3-setuptools rsync swig unzip \
+              zlib1g-dev file wget cpio libelf-dev
 
       - name: Verify required files in 888/
         run: |
@@ -72,7 +73,6 @@ jobs:
           cd $GITHUB_WORKSPACE/immortalwrt
           cp $CONFIG_DIR/sl3000.config .config
           cp $CONFIG_DIR/mt7981b-sl3000-emmc.dts target/linux/mediatek/dts/
-          # 用精简版覆盖 filogic.mk，只保留 SL3000 设备
           cp $CONFIG_DIR/mt7981_sl3000.mk target/linux/mediatek/image/filogic.mk
 
       - name: Verify only SL3000 device is selected
