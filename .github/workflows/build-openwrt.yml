@@ -29,22 +29,21 @@ jobs:
           bison flex m4 gawk gettext libncursesw5-dev libncurses5-dev zlib1g-dev \
           python3-setuptools swig python3-dev rsync unzip git qemu-utils libssl-dev
 
-      - name: 4. 物理对齐：注入 888 三件套
+      - name: 4. 物理对齐：注入配置与设备树
         run: |
           cd openwrt
           
-          # [a] 注入设备定义 (mk)
-          FILOGIC_MK="target/linux/mediatek/image/filogic.mk"
-          cat ../main-repo/888/mt7981_sl3000.mk >> "$FILOGIC_MK"
-          sed -i 's/^    /\t/g' "$FILOGIC_MK"
+          # [a] 物理对齐官方 MK 格式 (防御性操作)
+          # 即使还原了官方版，也强制进行一次 Tab 纠偏，防止 Git 检出导致的空格污染
+          sed -i 's/^    /\t/g' target/linux/mediatek/image/filogic.mk
           
-          # [b] 注入设备树 (dts)
+          # [b] 注入设备树 (dts) - 保持官方架构路径映射
           cp -f ../main-repo/888/mt7981b-sl3000-emmc.dts target/linux/mediatek/dts/mt7981b-sl-3000-emmc.dts
           
-          # [c] 注入配置母本 (.config)
+          # [c] 注入配置母本 (.config) - 核心驱动逻辑
           cp -f ../main-repo/888/sl3000.config .config
           
-          # [d] 物理致盲
+          # [d] 物理致盲：封印交互
           mkdir -p scripts/config
           echo "exit 1" > scripts/config/mconf-cfg.sh
           chmod +x scripts/config/mconf-cfg.sh
@@ -53,32 +52,31 @@ jobs:
         run: |
           cd openwrt
           ./scripts/feeds update -a && ./scripts/feeds install -a
-          
-          # 溯源修复：针对 choice 选项死循环，使用 olddefconfig 替代 oldconfig
-          # 这会物理强制所有 NEW 选项使用默认值，彻底解决 SSL Library 这里的卡死
+          # 使用 olddefconfig 自动闭合所有 SSL Library 等 choice 选项
           make olddefconfig
           make defconfig
 
       - name: 6. 物理编译 (toolchain & kernel)
         run: |
           cd openwrt
-          # 先编译工具链，确保 aarch64-openwrt-linux-musl-gcc 物理存在
+          # 物理执行：先工具链，后内核
           make tools/install -j$(nproc) || make tools/install -j1 V=s
           make toolchain/install -j$(nproc) || make toolchain/install -j1 V=s
-          
-          # 执行内核与镜像编译
           make target/linux/compile -j$(nproc) V=s
 
-      - name: 7. 救砖包物理合成
+      - name: 7. 救砖包物理合成 (外部逻辑)
         run: |
           mkdir -p output
           cd openwrt
+          # 物理溯源：在官方 bin 目录下寻找由 sl3000.config 编译出的内核镜像
           KERNEL_SRC=$(find bin/targets -name "*sysupgrade.itb" | head -n 1)
           RESCUE_BIN="../output/rescue-32.bin"
           REPO_888="../main-repo/888"
           
+          # 物理合成 32MB 镜像 (0xFF 填充)
           dd if=/dev/zero bs=1M count=32 | tr '\000' '\377' > "$RESCUE_BIN"
           
+          # 像素级偏移写入 (基于 3MB 偏移对齐)
           [ -f "$REPO_888/bl2_orig.bin" ] && dd if="$REPO_888/bl2_orig.bin" of="$RESCUE_BIN" conv=notrunc status=none
           [ -f "$REPO_888/fip_orig.bin" ] && dd if="$REPO_888/fip_orig.bin" of="$RESCUE_BIN" bs=1M seek=1 conv=notrunc status=none
           [ -f "$REPO_888/factory_orig.bin" ] && dd if="$REPO_888/factory_orig.bin" of="$RESCUE_BIN" bs=1M seek=2 conv=notrunc status=none
