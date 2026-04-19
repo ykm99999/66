@@ -53,18 +53,20 @@ jobs:
         run: |
           cd openwrt
           ./scripts/feeds update -a && ./scripts/feeds install -a
-          yes n | make oldconfig
+          
+          # 溯源修复：针对 choice 选项死循环，使用 olddefconfig 替代 oldconfig
+          # 这会物理强制所有 NEW 选项使用默认值，彻底解决 SSL Library 这里的卡死
+          make olddefconfig
           make defconfig
 
       - name: 6. 物理编译 (toolchain & kernel)
         run: |
           cd openwrt
-          # 溯源修复：由于内核编译依赖 staging_dir 中的工具链，必须先编译工具链
-          # 物理执行最小修补：先编译完工具链，再进行内核编译
+          # 先编译工具链，确保 aarch64-openwrt-linux-musl-gcc 物理存在
           make tools/install -j$(nproc) || make tools/install -j1 V=s
           make toolchain/install -j$(nproc) || make toolchain/install -j1 V=s
           
-          # 物理对齐：再次确认执行内核与镜像编译
+          # 执行内核与镜像编译
           make target/linux/compile -j$(nproc) V=s
 
       - name: 7. 救砖包物理合成
