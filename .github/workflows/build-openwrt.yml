@@ -1,4 +1,4 @@
-name: sl3000-firmware-stable
+name: sl3000-firmware-stable-v20
 
 on:
   workflow_dispatch:
@@ -21,7 +21,7 @@ jobs:
       - name: 2. 源码克隆 (ImmortalWrt)
         run: git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git openwrt
 
-      - name: 3. 环境初始化 (物理旁路准备)
+      - name: 3. 环境初始化
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu build-essential device-tree-compiler \
@@ -29,14 +29,14 @@ jobs:
           python3-setuptools swig python3-dev rsync unzip git qemu-utils libssl-dev \
           u-boot-tools
 
-      - name: 4. Feeds 处理 (执行 diy-part1)
+      - name: 4. 执行 diy-part1
         run: |
           cd openwrt
           [ -f ../main-repo/diy-part1.sh ] && chmod +x ../main-repo/diy-part1.sh && ../main-repo/diy-part1.sh
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: 5. 像素级修复 (执行 diy-part2)
+      - name: 5. 执行 diy-part2 (像素级修复)
         run: |
           cd openwrt
           cp -r ../main-repo/888 ../888
@@ -48,7 +48,7 @@ jobs:
           cd openwrt
           make defconfig
 
-      - name: 7. 物理编译 (执行最小旁路修补)
+      - name: 7. 物理编译 (全链路闭环)
         run: |
           cd openwrt
           # 最小修补：针对 mkimage 报错做物理占位，强制跳过源码编译
@@ -58,11 +58,12 @@ jobs:
           mkdir -p staging_dir/host/stamp
           touch staging_dir/host/stamp/.mkimage_installed
           
+          # 正式执行物理构建
           make tools/install -j$(nproc) || make tools/install -j1 V=s
           make toolchain/install -j$(nproc) || make toolchain/install -j1 V=s
           make target/linux/compile -j$(nproc) V=s
 
-      - name: 8. 救砖包物理合成 (原文复刻逻辑)
+      - name: 8. 救砖包合成与整理 (原文复刻)
         run: |
           mkdir -p publish_dir
           cd openwrt
@@ -83,5 +84,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: SL3000-STABLE-${{ github.run_id }}
+          tag_name: SL3000-FINAL-${{ github.run_id }}
           files: publish_dir/*
