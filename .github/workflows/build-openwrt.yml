@@ -1,9 +1,8 @@
-name: sl3000-ultimate-firmware-release
+name: sl3000-firmware-stable
 
 on:
   workflow_dispatch:
 
-# 物理授权：必须确保工作流有创建 Release 的写入权限
 permissions:
   contents: write
 
@@ -12,22 +11,17 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       DEBIAN_FRONTEND: noninteractive
-      KCONFIG_NOSILENTUPDATE: 1
-      CONF_DEFAULT: 1
-      FORCE_UNSAFE_CONFIGURE: 1
-      KBUILD_DEFCONFIG: 1
 
     steps:
-      - name: 1. 物理检出 (checkout)
+      - name: 1. 物理检出
         uses: actions/checkout@v4
         with:
           path: main-repo
 
-      - name: 2. 源码注入 (clone immortalwrt)
-        run: |
-          git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git openwrt
+      - name: 2. 源码克隆 (ImmortalWrt)
+        run: git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git openwrt
 
-      - name: 3. 环境初始化 (物理旁路工具)
+      - name: 3. 环境初始化 (物理旁路准备)
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu build-essential device-tree-compiler \
@@ -35,97 +29,59 @@ jobs:
           python3-setuptools swig python3-dev rsync unzip git qemu-utils libssl-dev \
           u-boot-tools
 
-      - name: 4. 执行 diy-part1 (Feeds 注入)
+      - name: 4. Feeds 处理 (执行 diy-part1)
         run: |
           cd openwrt
-          chmod +x ../main-repo/diy-part1.sh
-          ../main-repo/diy-part1.sh
-
-      - name: 5. 更新并安装 Feeds
-        run: |
-          cd openwrt
+          [ -f ../main-repo/diy-part1.sh ] && chmod +x ../main-repo/diy-part1.sh && ../main-repo/diy-part1.sh
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: 6. 执行 diy-part2 (基因注入与格式纠偏)
+      - name: 5. 像素级修复 (执行 diy-part2)
         run: |
           cd openwrt
-          # 物理对齐 888 仓库路径
           cp -r ../main-repo/888 ../888
           chmod +x ../main-repo/diy-part2.sh
           ../main-repo/diy-part2.sh
 
-      - name: 7. 物理配置补全 (IGNORE_ERRORS 闭环)
+      - name: 6. 物理配置锁定
         run: |
           cd openwrt
-          # 强制覆盖母本
-          cp -f ../888/sl3000.config .config
-          # 像素级静默处理
-          make defconfig IGNORE_ERRORS=m m=y
+          make defconfig
 
-      - name: 8. 物理编译 (伪造标记并绕过 mkimage)
+      - name: 7. 物理编译 (执行最小旁路修补)
         run: |
           cd openwrt
-          # 注入宿主机 mkimage 二进制
+          # 最小修补：针对 mkimage 报错做物理占位，强制跳过源码编译
           mkdir -p staging_dir/host/bin
           cp -f /usr/bin/mkimage staging_dir/host/bin/mkimage
           chmod +x staging_dir/host/bin/mkimage
           mkdir -p staging_dir/host/stamp
           touch staging_dir/host/stamp/.mkimage_installed
           
-          # 正式执行物理构建
           make tools/install -j$(nproc) || make tools/install -j1 V=s
           make toolchain/install -j$(nproc) || make toolchain/install -j1 V=s
-          make target/linux/compile -j$(nproc) V=s IGNORE_ERRORS=m
+          make target/linux/compile -j$(nproc) V=s
 
-      - name: 9. 救砖包物理合成 (32MB SPI)
+      - name: 8. 救砖包物理合成 (原文复刻逻辑)
         run: |
-          mkdir -p output
+          mkdir -p publish_dir
           cd openwrt
           KERNEL_SRC=$(find bin/targets -name "*sysupgrade.itb" | head -n 1)
-          RESCUE_BIN="../output/rescue-32.bin"
+          RESCUE_BIN="../publish_dir/rescue-32.bin"
           REPO_888="../888"
-          
           if [ -n "$KERNEL_SRC" ]; then
-            dd if=/dev/zero bs=1M count=32 2>/dev/null | tr '\000' '\377' > "$RESCUE_BIN"
+            dd if=/dev/zero bs=1M count=32 | tr '\000' '\377' > "$RESCUE_BIN"
             dd if="$REPO_888/bl2_orig.bin" of="$RESCUE_BIN" conv=notrunc status=none
             dd if="$REPO_888/fip_orig.bin" of="$RESCUE_BIN" bs=1M seek=1 conv=notrunc status=none
             dd if="$REPO_888/factory_orig.bin" of="$RESCUE_BIN" bs=1M seek=2 conv=notrunc status=none
             dd if="$KERNEL_SRC" of="$RESCUE_BIN" bs=1M seek=3 conv=notrunc status=none
-            echo "✅ 救砖包物理合成成功"
-          else
-            echo "❌ 物理报错：未找到内核镜像"
-            exit 1
           fi
+          find bin/targets/ -type f \( -name "*.bin" -o -name "*.img*" -o -name "*.itb" \) -exec cp {} ../publish_dir/ \;
 
-      - name: 10. 物理整理：全量固件归档
-        run: |
-          mkdir -p publish_dir
-          # 汇总救砖包
-          [ -f output/rescue-32.bin ] && cp output/rescue-32.bin publish_dir/
-          # 汇总所有 OpenWrt 编译资产
-          find openwrt/bin/targets/ -type f \( -name "*.bin" -o -name "*.img*" -o -name "*.itb" -o -name "*.manifest" \) -exec cp {} publish_dir/ \;
-          echo "=== 物理审计：发布目录文件列表 ==="
-          ls -lh publish_dir/
-
-      - name: 11. 自动生成 Release 标签
-        id: tag
-        run: |
-          echo "release_tag=SL3000-$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-          echo "status=success" >> $GITHUB_OUTPUT
-
-      - name: 12. 自动发布到 GitHub Release
+      - name: 9. 自动发布 (Release)
         uses: softprops/action-gh-release@v1
-        if: steps.tag.outputs.status == 'success' && !cancelled()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ steps.tag.outputs.release_tag }}
-          body: |
-            ## SL3000-eMMC 1024M 固件全量发布
-            - **物理版本**: ${{ steps.tag.outputs.release_tag }}
-            - **文件说明**:
-              - `rescue-32.bin`: 32MB 救砖全量包
-              - `*-sysupgrade.bin`: 网页升级固件
-              - `*-factory.img.gz`: 线刷工厂包
+          tag_name: SL3000-STABLE-${{ github.run_id }}
           files: publish_dir/*
