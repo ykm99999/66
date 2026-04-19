@@ -1,4 +1,4 @@
-name: sl3000-auto-physical-build
+name: sl3000-ultimate-physical-build
 
 on:
   workflow_dispatch:
@@ -11,7 +11,6 @@ jobs:
       KCONFIG_NOSILENTUPDATE: 1
       CONF_DEFAULT: 1
       FORCE_UNSAFE_CONFIGURE: 1
-      # 物理新增：强制所有 Kconfig 询问自动选择默认值，禁止任何形式的交互
       KBUILD_DEFCONFIG: 1
 
     steps:
@@ -22,75 +21,50 @@ jobs:
 
       - name: 2. 源码注入 (clone immortalwrt)
         run: |
+          # 像素级对齐：使用深度为 1 的克隆减少物理链路损耗
           git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git openwrt
 
-      - name: 3. 环境初始化
+      - name: 3. 环境初始化 (物理旁路准备)
         run: |
           sudo apt-get update
+          # 核心修复：安装宿主机 u-boot-tools 以旁路 mkimage 源码编译报错
           sudo apt-get install -y gcc-aarch64-linux-gnu build-essential device-tree-compiler \
           bison flex m4 gawk gettext libncursesw5-dev libncurses5-dev zlib1g-dev \
-          python3-setuptools swig python3-dev rsync unzip git qemu-utils libssl-dev
+          python3-setuptools swig python3-dev rsync unzip git qemu-utils libssl-dev \
+          u-boot-tools
 
-      - name: 4. 物理对齐：注入三件套
+      - name: 4. 执行 diy-part1 (Feeds 与 基础物理切断)
         run: |
           cd openwrt
-          # [a] 物理对齐官方 MK 格式
-          sed -i 's/^    /\t/g' target/linux/mediatek/image/filogic.mk
-          
-          # [b] 注入设备树 (dts)
-          cp -f ../main-repo/888/mt7981b-sl3000-emmc.dts target/linux/mediatek/dts/mt7981b-sl-3000-emmc.dts
-          
-          # [c] 注入配置母本 (.config)
-          cp -f ../main-repo/888/sl3000.config .config
-          
-          # [d] 物理致盲：封印 menuconfig 核心
-          mkdir -p scripts/config
-          echo "exit 1" > scripts/config/mconf-cfg.sh
-          chmod +x scripts/config/mconf-cfg.sh
+          chmod +x ../main-repo/diy-part1.sh
+          ../main-repo/diy-part1.sh
 
-      - name: 5. 自动配置补全 (彻底消除交互)
+      - name: 5. 更新并安装 Feeds
         run: |
           cd openwrt
-          ./scripts/feeds update -a && ./scripts/feeds install -a
-          
-          # 物理终极修补：
-          # 1. 强制将你的配置注入
-          cp -f ../main-repo/888/sl3000.config .config
-          # 2. 使用 IGNORE_ERRORS 配合全静默 defconfig
-          # 这会物理强制系统跳过所有无法识别的新选项，不询问，不报错
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: 6. 执行 diy-part2 (基因注入与格式纠偏)
+        run: |
+          cd openwrt
+          # 物理同步：确保 888 仓库处于 openwrt 同级目录以便脚本索引
+          cp -r ../main-repo/888 ../888
+          chmod +x ../main-repo/diy-part2.sh
+          ../main-repo/diy-part2.sh
+
+      - name: 7. 物理强制配置同步
+        run: |
+          cd openwrt
+          # 二次物理对齐：确保配置母本绝对覆盖
+          cp -f ../888/sl3000.config .config
+          # 终极静默：使用 IGNORE_ERRORS 强制跳过所有 Kconfig 询问
           make defconfig IGNORE_ERRORS=m m=y
 
-      - name: 6. 物理编译 (toolchain & kernel)
+      - name: 8. 物理编译 (全链路闭环)
         run: |
           cd openwrt
-          # 物理执行：先工具链，后内核
-          make tools/install -j$(nproc) || make tools/install -j1 V=s
-          make toolchain/install -j$(nproc) || make toolchain/install -j1 V=s
-          
-          # 核心修复：编译阶段也带上静默参数，防止编译中途弹出配置询问
-          make target/linux/compile -j$(nproc) V=s IGNORE_ERRORS=m
-
-      - name: 7. 救砖包物理合成
-        run: |
-          mkdir -p output
-          cd openwrt
-          KERNEL_SRC=$(find bin/targets -name "*sysupgrade.itb" | head -n 1)
-          RESCUE_BIN="../output/rescue-32.bin"
-          REPO_888="../main-repo/888"
-          
-          # 物理初始化 32MB (0xff 填充)
-          dd if=/dev/zero bs=1M count=32 | tr '\000' '\377' > "$RESCUE_BIN"
-          
-          # 像素级偏移写入
-          [ -f "$REPO_888/bl2_orig.bin" ] && dd if="$REPO_888/bl2_orig.bin" of="$RESCUE_BIN" conv=notrunc status=none
-          [ -f "$REPO_888/fip_orig.bin" ] && dd if="$REPO_888/fip_orig.bin" of="$RESCUE_BIN" bs=1M seek=1 conv=notrunc status=none
-          [ -f "$REPO_888/factory_orig.bin" ] && dd if="$REPO_888/factory_orig.bin" of="$RESCUE_BIN" bs=1M seek=2 conv=notrunc status=none
-          [ -n "$KERNEL_SRC" ] && dd if="$KERNEL_SRC" of="$RESCUE_BIN" bs=1M seek=3 conv=notrunc status=none
-          
-          echo "✅ rescue-32.bin 合成完毕"
-
-      - name: 8. 上传固件
-        uses: actions/upload-artifact@v4
-        with:
-          name: sl3000-rescue-32m
-          path: output/
+          # 物理旁路：注入宿主机 mkimage 二进制文件并打桩
+          mkdir -p staging_dir/host/bin
+          cp -f /usr/bin/mkimage staging_dir/host/bin/mkimage
+          chmod +x staging_dir/host/bin/mkimage
