@@ -1,89 +1,138 @@
-name: sl3000-firmware-V18-FINAL
+name: Build SL3000 Rescue Firmware (Full)
 
 on:
+  push:
+    branches: [ main ]
+    paths:
+      - '888/**'
+      - '.github/workflows/build-rescue.yml'
   workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    env:
-      DEBIAN_FRONTEND: noninteractive
+    strategy:
+      fail-fast: false
 
     steps:
-      - name: 1. 物理检出
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          path: main-repo
+          submodules: recursive
 
-      - name: 2. 源码克隆 (ImmortalWrt)
-        run: git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git openwrt
+      - name: Setup environment
+        run: |
+          echo "WORKSPACE=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+          echo "OUTPUT_DIR=$GITHUB_WORKSPACE/output" >> $GITHUB_ENV
+          echo "CONFIG_DIR=$GITHUB_WORKSPACE/888" >> $GITHUB_ENV
 
-      - name: 3. 环境初始化 (物理旁路准备)
+      - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu build-essential device-tree-compiler \
-          bison flex m4 gawk gettext libncursesw5-dev libncurses5-dev zlib1g-dev \
-          python3-setuptools swig python3-dev rsync unzip git qemu-utils libssl-dev \
-          u-boot-tools
+          sudo apt-get install -y build-essential gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+                                  device-tree-compiler flex bison libncurses-dev libssl-dev \
+                                  python3 python3-pip swig cpio unzip rsync file
 
-      - name: 4. 执行 diy-part1
+      - name: Verify required files in 888/
         run: |
-          cd openwrt
-          [ -f ../main-repo/diy-part1.sh ] && chmod +x ../main-repo/diy-part1.sh && ../main-repo/diy-part1.sh
+          cd $CONFIG_DIR
+          missing=0
+          for f in sl3000.config mt7981b-sl3000-emmc.dts mt7981_sl3000.mk \
+                   bl2_orig.bin fip_orig.bin factory_orig.bin; do
+            if [ ! -f "$f" ]; then
+              echo "::error::Missing required file: 888/$f"
+              missing=1
+            fi
+          done
+          if [ $missing -eq 1 ]; then
+            echo "::error::Please ensure all required files are present in 888/ directory."
+            exit 1
+          fi
+          echo "All required files found."
+
+      - name: Prepare OpenWrt source
+        run: |
+          cd $GITHUB_WORKSPACE
+          if [ ! -d "immortalwrt/.git" ]; then
+            echo "Cloning ImmortalWrt repository..."
+            git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git immortalwrt
+          else
+            echo "ImmortalWrt source already present."
+          fi
+
+      - name: Apply device configuration
+        run: |
+          cd $GITHUB_WORKSPACE/immortalwrt
+          cp $CONFIG_DIR/sl3000.config .config
+          cp $CONFIG_DIR/mt7981b-sl3000-emmc.dts target/linux/mediatek/dts/
+          cp $CONFIG_DIR/mt7981_sl3000.mk target/linux/mediatek/image/
+          echo "Device configuration applied."
+
+      - name: Update feeds and expand config
+        run: |
+          cd $GITHUB_WORKSPACE/immortalwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
-
-      - name: 5. 执行 diy-part2 (像素级修复)
-        run: |
-          cd openwrt
-          cp -r ../main-repo/888 ../888
-          chmod +x ../main-repo/diy-part2.sh
-          ../main-repo/diy-part2.sh
-
-      - name: 6. 物理配置锁定
-        run: |
-          cd openwrt
           make defconfig
 
-      - name: 7. 物理编译 (伪造标记并绕过 mkimage)
+      - name: Build OpenWrt (kernel + rootfs)
         run: |
-          cd openwrt
-          # 物理旁路：手动注入宿主机 mkimage 并打桩，解决 Error 2
-          mkdir -p staging_dir/host/bin
-          cp -f /usr/bin/mkimage staging_dir/host/bin/mkimage
-          chmod +x staging_dir/host/bin/mkimage
-          mkdir -p staging_dir/host/stamp
-          touch staging_dir/host/stamp/.mkimage_installed
-          
-          # 正式物理构建
-          make tools/install -j$(nproc) || make tools/install -j1 V=s
-          make toolchain/install -j$(nproc) || make toolchain/install -j1 V=s
-          make target/linux/compile -j$(nproc) V=s
+          cd $GITHUB_WORKSPACE/immortalwrt
+          make -j$(nproc) V=s
 
-      - name: 8. 救砖包物理合成 (原文复刻逻辑)
+      - name: Locate and copy sysupgrade.itb
         run: |
-          mkdir -p publish_dir
-          cd openwrt
-          KERNEL_SRC=$(find bin/targets -name "*sysupgrade.itb" | head -n 1)
-          RESCUE_BIN="../publish_dir/rescue-32.bin"
-          REPO_888="../888"
-          if [ -n "$KERNEL_SRC" ]; then
-            dd if=/dev/zero bs=1M count=32 | tr '\000' '\377' > "$RESCUE_BIN"
-            dd if="$REPO_888/bl2_orig.bin" of="$RESCUE_BIN" conv=notrunc status=none
-            dd if="$REPO_888/fip_orig.bin" of="$RESCUE_BIN" bs=1M seek=1 conv=notrunc status=none
-            dd if="$REPO_888/factory_orig.bin" of="$RESCUE_BIN" bs=1M seek=2 conv=notrunc status=none
-            dd if="$KERNEL_SRC" of="$RESCUE_BIN" bs=1M seek=3 conv=notrunc status=none
+          cd $GITHUB_WORKSPACE/immortalwrt
+          ITB_FILE=$(find bin/targets/mediatek/filogic -name "*-sysupgrade.itb" | head -1)
+          if [ -z "$ITB_FILE" ]; then
+            echo "::error::sysupgrade.itb not found! Build may have failed."
+            exit 1
           fi
-          # 像素级全量收集
-          find bin/targets/ -type f \( -name "*.bin" -o -name "*.img*" -o -name "*.itb" -o -name "*.manifest" \) -exec cp {} ../publish_dir/ \;
+          mkdir -p $OUTPUT_DIR
+          cp "$ITB_FILE" $OUTPUT_DIR/sysupgrade.itb
+          echo "Kernel image copied to $OUTPUT_DIR/sysupgrade.itb"
 
-      - name: 9. 自动发布 (V18 全量归档逻辑)
-        uses: softprops/action-gh-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Assemble final 32MB rescue firmware
+        run: |
+          cd $OUTPUT_DIR
+          FINAL_BIN="sl3000-rescue-32mb.bin"
+
+          # 复制三个原始 bin 文件到 output
+          cp $CONFIG_DIR/bl2_orig.bin bl2-emmc-ddr3.bin
+          cp $CONFIG_DIR/fip_orig.bin bl31-uboot-emmc-ddr3.fip
+          cp $CONFIG_DIR/factory_orig.bin factory_orig.bin
+
+          # 创建 32MB 全 0xFF 的空文件
+          dd if=/dev/zero bs=1M count=32 | tr '\000' '\377' > $FINAL_BIN
+
+          # 按分区布局写入
+          echo "Writing BL2 @ 0M"
+          dd if=bl2-emmc-ddr3.bin of=$FINAL_BIN conv=notrunc status=none
+
+          echo "Writing FIP @ 1M"
+          dd if=bl31-uboot-emmc-ddr3.fip of=$FINAL_BIN bs=1M seek=1 conv=notrunc status=none
+
+          echo "Writing Factory @ 2M"
+          dd if=factory_orig.bin of=$FINAL_BIN bs=1M seek=2 conv=notrunc status=none
+
+          echo "Writing Kernel @ 3M"
+          dd if=sysupgrade.itb of=$FINAL_BIN bs=1M seek=3 conv=notrunc status=none
+
+          echo "✅ Firmware assembled: $OUTPUT_DIR/$FINAL_BIN"
+          ls -lh $FINAL_BIN
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: SL3000-V18-FINAL-${{ github.run_id }}
-          files: publish_dir/*
+          name: sl3000-rescue-firmware
+          path: output/sl3000-rescue-32mb.bin
+
+      - name: Upload build logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            immortalwrt/logs/
+            immortalwrt/build_dir/
+          if-no-files-found: ignore
