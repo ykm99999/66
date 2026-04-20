@@ -75,42 +75,35 @@ jobs:
             git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git "$OWRT_DIR"
           fi
 
-      - name: Auto-detect kernel version and place DTS
+      - name: Apply device configuration
         run: |
           cd $GITHUB_WORKSPACE/immortalwrt
-          
-          # 1. 复制基础配置和设备定义文件
           cp $CONFIG_DIR/sl3000.config .config
           cp $CONFIG_DIR/mt7981b-sl3000-emmc.dts target/linux/mediatek/dts/
           cp $CONFIG_DIR/mt7981_sl3000.mk target/linux/mediatek/image/filogic.mk
-          
-          # 2. 自动探测内核版本（从 target/linux/mediatek/Makefile 或已有 files-* 目录）
-          KERNEL_PATCHVER=$(sed -n 's/^KERNEL_PATCHVER:=\([0-9.]*\)/\1/p' target/linux/mediatek/Makefile)
-          if [ -z "$KERNEL_PATCHVER" ]; then
-            # 如果 Makefile 中未定义，则从 files-* 目录名提取
-            FILES_DIR=$(ls -d target/linux/mediatek/files-* 2>/dev/null | head -1)
-            KERNEL_PATCHVER=$(echo "$FILES_DIR" | sed 's/.*files-\([0-9.]*\).*/\1/')
-          fi
-          
-          if [ -n "$KERNEL_PATCHVER" ]; then
-            DTS_TARGET_DIR="target/linux/mediatek/files-${KERNEL_PATCHVER}/arch/arm64/boot/dts/mediatek"
-            mkdir -p "$DTS_TARGET_DIR"
-            cp $CONFIG_DIR/mt7981b-sl3000-emmc.dts "$DTS_TARGET_DIR/"
-            echo "✅ DTS automatically registered for kernel ${KERNEL_PATCHVER} at $DTS_TARGET_DIR"
-          else
-            # 回退：直接创建 files-6.6 目录（适用于大多数情况）
-            mkdir -p target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek
-            cp $CONFIG_DIR/mt7981b-sl3000-emmc.dts target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek/
-            echo "⚠️  Could not detect kernel version, fallback to files-6.6"
-          fi
 
-      - name: Build OpenWrt (kernel + rootfs)
+      - name: Prepare kernel source and force copy DTS
         run: |
           cd $GITHUB_WORKSPACE/immortalwrt
           export CONFIG_SHELL=/bin/bash
           make defconfig
           ./scripts/feeds update -a
           ./scripts/feeds install -a
+          make target/linux/prepare V=s
+          LINUX_DIR=$(find build_dir/target-aarch64_cortex-a53_musl/linux-mediatek_filogic -maxdepth 1 -type d -name "linux-*" | head -1)
+          if [ -z "$LINUX_DIR" ]; then
+            echo "::error::Kernel source directory not found!"
+            exit 1
+          fi
+          echo "Kernel source at: $LINUX_DIR"
+          mkdir -p $LINUX_DIR/arch/arm64/boot/dts
+          cp $CONFIG_DIR/mt7981b-sl3000-emmc.dts $LINUX_DIR/arch/arm64/boot/dts/
+          echo "✅ DTS forcefully copied to kernel build tree."
+
+      - name: Build OpenWrt (kernel + rootfs)
+        run: |
+          cd $GITHUB_WORKSPACE/immortalwrt
+          export CONFIG_SHELL=/bin/bash
           make -j1 V=s
 
       - name: Locate and copy sysupgrade.itb
