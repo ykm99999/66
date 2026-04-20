@@ -75,38 +75,35 @@ jobs:
             git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git "$OWRT_DIR"
           fi
 
-      - name: Apply device configuration
+      - name: Apply device configuration and place DTS
         run: |
           cd $GITHUB_WORKSPACE/immortalwrt
           cp $CONFIG_DIR/sl3000.config .config
           cp $CONFIG_DIR/mt7981b-sl3000-emmc.dts target/linux/mediatek/dts/
           cp $CONFIG_DIR/mt7981_sl3000.mk target/linux/mediatek/image/filogic.mk
+          
+          # 同时放入 files-* 目录以便内核编译时自动覆盖
+          cd target/linux/mediatek
+          if [ -d "files-6.6" ]; then
+            FILES_DIR="files-6.6"
+          else
+            FILES_DIR=$(ls -d files-* 2>/dev/null | head -1)
+          fi
+          if [ -n "$FILES_DIR" ]; then
+            mkdir -p $FILES_DIR/arch/arm64/boot/dts/mediatek
+            cp $CONFIG_DIR/mt7981b-sl3000-emmc.dts $FILES_DIR/arch/arm64/boot/dts/mediatek/
+            echo "DTS copied to target/linux/mediatek/$FILES_DIR/arch/arm64/boot/dts/mediatek/"
+          else
+            echo "No files-* directory found, skipping copy to files."
+          fi
 
-      - name: Prepare kernel source and copy DTS
+      - name: Build OpenWrt (kernel + rootfs)
         run: |
           cd $GITHUB_WORKSPACE/immortalwrt
           export CONFIG_SHELL=/bin/bash
           make defconfig
           ./scripts/feeds update -a
           ./scripts/feeds install -a
-          # 准备内核源码（下载、解压）
-          make target/linux/prepare V=s
-          # 定位内核构建目录
-          LINUX_DIR=$(find build_dir/target-aarch64_cortex-a53_musl/linux-mediatek_filogic -maxdepth 1 -type d -name "linux-*" | head -1)
-          if [ -z "$LINUX_DIR" ]; then
-            echo "::error::Kernel source directory not found!"
-            exit 1
-          fi
-          echo "Kernel source at: $LINUX_DIR"
-          # 复制 DTS 到内核的 dts 目录
-          cp $CONFIG_DIR/mt7981b-sl3000-emmc.dts $LINUX_DIR/arch/arm64/boot/dts/
-          # 验证文件存在
-          ls -l $LINUX_DIR/arch/arm64/boot/dts/mt7981b-sl3000-emmc.dts
-
-      - name: Build OpenWrt (kernel + rootfs)
-        run: |
-          cd $GITHUB_WORKSPACE/immortalwrt
-          export CONFIG_SHELL=/bin/bash
           make -j1 V=s
 
       - name: Locate and copy sysupgrade.itb
@@ -128,11 +125,11 @@ jobs:
           cp $CONFIG_DIR/bl2_orig.bin bl2-emmc-ddr3.bin
           cp $CONFIG_DIR/fip_orig.bin bl31-uboot-emmc-ddr3.fip
           cp $CONFIG_DIR/factory_orig.bin factory_orig.bin
-          dd if=/dev/zero bs=1M count=32 | tr '\000' '\377' > $FINAL_BIN
-          dd if=bl2-emmc-ddr3.bin of=$FINAL_BIN conv=notrunc status=none
-          dd if=bl31-uboot-emmc-ddr3.fip of=$FINAL_BIN bs=1M seek=1 conv=notrunc status=none
-          dd if=factory_orig.bin of=$FINAL_BIN bs=1M seek=2 conv=notrunc status=none
-          dd if=sysupgrade.itb of=$FINAL_BIN bs=1M seek=3 conv=notrunc status=none
+          dd if=/dev/zero bs=1M count=32 2>/dev/null | tr '\000' '\377' > "$FINAL_BIN"
+          dd if=bl2-emmc-ddr3.bin of="$FINAL_BIN" conv=notrunc status=none
+          dd if=bl31-uboot-emmc-ddr3.fip of="$FINAL_BIN" bs=1M seek=1 conv=notrunc status=none
+          dd if=factory_orig.bin of="$FINAL_BIN" bs=1M seek=2 conv=notrunc status=none
+          dd if=sysupgrade.itb of="$FINAL_BIN" bs=1M seek=3 conv=notrunc status=none
           echo "✅ Firmware assembled: $OUTPUT_DIR/$FINAL_BIN"
           ls -lh $FINAL_BIN
 
