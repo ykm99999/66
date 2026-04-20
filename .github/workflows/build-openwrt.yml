@@ -75,35 +75,31 @@ jobs:
             git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git "$OWRT_DIR"
           fi
 
-      - name: Apply device configuration
+      - name: Apply device configuration and place DTS
         run: |
           cd $GITHUB_WORKSPACE/immortalwrt
           cp $CONFIG_DIR/sl3000.config .config
           cp $CONFIG_DIR/mt7981b-sl3000-emmc.dts target/linux/mediatek/dts/
           cp $CONFIG_DIR/mt7981_sl3000.mk target/linux/mediatek/image/filogic.mk
+          
+          # 获取内核版本号
+          KERNEL_PATCHVER=$(sed -n 's/^KERNEL_PATCHVER:=\([0-9.]*\)/\1/p' target/linux/mediatek/Makefile)
+          if [ -z "$KERNEL_PATCHVER" ]; then
+            KERNEL_PATCHVER="6.6"
+          fi
+          # 关键修正：DTS 放在 files-<ver>/arch/arm64/boot/dts/ 下，不要 mediatek 子目录
+          DTS_TARGET="target/linux/mediatek/files-${KERNEL_PATCHVER}/arch/arm64/boot/dts"
+          mkdir -p "$DTS_TARGET"
+          cp $CONFIG_DIR/mt7981b-sl3000-emmc.dts "$DTS_TARGET/"
+          echo "✅ DTS placed in $DTS_TARGET"
 
-      - name: Prepare kernel source and force copy DTS
+      - name: Build OpenWrt (kernel + rootfs)
         run: |
           cd $GITHUB_WORKSPACE/immortalwrt
           export CONFIG_SHELL=/bin/bash
           make defconfig
           ./scripts/feeds update -a
           ./scripts/feeds install -a
-          make target/linux/prepare V=s
-          LINUX_DIR=$(find build_dir/target-aarch64_cortex-a53_musl/linux-mediatek_filogic -maxdepth 1 -type d -name "linux-*" | head -1)
-          if [ -z "$LINUX_DIR" ]; then
-            echo "::error::Kernel source directory not found!"
-            exit 1
-          fi
-          echo "Kernel source at: $LINUX_DIR"
-          mkdir -p $LINUX_DIR/arch/arm64/boot/dts
-          cp $CONFIG_DIR/mt7981b-sl3000-emmc.dts $LINUX_DIR/arch/arm64/boot/dts/
-          echo "✅ DTS forcefully copied to kernel build tree."
-
-      - name: Build OpenWrt (kernel + rootfs)
-        run: |
-          cd $GITHUB_WORKSPACE/immortalwrt
-          export CONFIG_SHELL=/bin/bash
           make -j1 V=s
 
       - name: Locate and copy sysupgrade.itb
