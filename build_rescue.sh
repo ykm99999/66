@@ -1,11 +1,7 @@
 #!/bin/bash
-set -euo pipefail
+# build_rescue.sh - SL3000 救砖固件本地全自动构建脚本
 
-# ==============================================
-# SL3000 救砖全家桶合成脚本（无需编译，仅打包）
-# 使用方法：将 bl2_orig.bin, fip_orig.bin, factory_orig.bin 放入 888/ 目录
-#          运行此脚本，生成 output/Spi-flash-32MB-rescue.bin
-# ==============================================
+set -e
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -18,64 +14,124 @@ log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step()  { echo -e "${BLUE}[STEP]${NC} $1"; }
 
+# 基础路径
 ROOT_DIR=$(pwd)
 CONFIG_DIR="$ROOT_DIR/888"
 OUTPUT_DIR="$ROOT_DIR/output"
-PARTS_DIR="$OUTPUT_DIR/parts"
+OWRT_DIR="$ROOT_DIR/immortalwrt"
 
-mkdir -p "$OUTPUT_DIR" "$PARTS_DIR"
+mkdir -p "$OUTPUT_DIR"
 
-# ---------- 检查必需文件 ----------
-log_step "检查原厂引导文件..."
-missing=0
-for file in bl2_orig.bin fip_orig.bin factory_orig.bin; do
-    if [ ! -f "$CONFIG_DIR/$file" ]; then
-        log_error "缺失文件: $CONFIG_DIR/$file"
-        missing=1
-    fi
-done
-if [ $missing -eq 1 ]; then
-    log_error "请将 bl2_orig.bin, fip_orig.bin, factory_orig.bin 放入 888/ 目录"
+# ========== 环境检查 ==========
+log_step "检查构建环境..."
+if ! command -v aarch64-linux-gnu-gcc &> /dev/null; then
+    log_error "未找到 aarch64-linux-gnu-gcc，请安装交叉编译工具链。"
     exit 1
 fi
-log_info "所有必需文件已就绪"
 
-# ---------- 复制文件到工作目录 ----------
-log_step "准备分区文件..."
-cp -v "$CONFIG_DIR/bl2_orig.bin" "$PARTS_DIR/bl2.bin"
-cp -v "$CONFIG_DIR/fip_orig.bin" "$PARTS_DIR/fip.bin"
-cp -v "$CONFIG_DIR/factory_orig.bin" "$PARTS_DIR/factory.bin"
+if [ "$(readlink /bin/sh)" != "bash" ]; then
+    log_warn "/bin/sh 未指向 bash，OpenWrt 预检查可能失败。"
+    log_warn "请执行: sudo ln -sf /bin/bash /bin/sh"
+    read -p "是否继续？(y/N) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+fi
 
-# ---------- 合成 32MB 救砖镜像 ----------
-log_step "合成 Spi-flash-32MB-rescue.bin (严格遵循原厂偏移)..."
-RESCUE_BIN="$OUTPUT_DIR/Spi-flash-32MB-rescue.bin"
+export CONFIG_SHELL=/bin/bash
 
-# 创建 32MB 空文件，全部填充 0xFF（Flash 擦除态）
-dd if=/dev/zero bs=1M count=32 2>/dev/null | tr '\000' '\377' > "$RESCUE_BIN"
+# 检查 888/ 目录及必需文件
+if [ ! -d "$CONFIG_DIR" ]; then
+    log_error "未找到 888/ 配置目录！"
+    exit 1
+fi
 
-# 1. BL2 @ 0x0
-dd if="$PARTS_DIR/bl2.bin" of="$RESCUE_BIN" bs=1 conv=notrunc status=none
-echo "  -> BL2 written at 0x000000"
+for file in sl3000.config mt7981b-sl3000-emmc.dts mt7981_sl3000.mk \
+            bl2_orig.bin fip_orig.bin factory_orig.bin; do
+    if [ ! -f "$CONFIG_DIR/$file" ]; then
+        log_error "缺失文件: $CONFIG_DIR/$file"
+        exit 1
+    fi
+done
 
-# 2. Factory @ 0x180000 (1.5 MB) = 256KB * 6
-dd if="$PARTS_DIR/factory.bin" of="$RESCUE_BIN" bs=256k seek=6 conv=notrunc status=none
-echo "  -> Factory written at 0x180000"
+# ========== 准备 OpenWrt 源码 ==========
+log_step "检查 OpenWrt 源码..."
+if [ ! -d "$OWRT_DIR/.git" ]; then
+    log_warn "immortalwrt 源码不存在，正在克隆..."
+    git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git "$OWRT_DIR"
+else
+    log_info "immortalwrt 源码已存在，跳过克隆。"
+fi
 
-# 3. FIP @ 0x380000 (3.5 MB) = 256KB * 14
-dd if="$PARTS_DIR/fip.bin" of="$RESCUE_BIN" bs=256k seek=14 conv=notrunc status=none
-echo "  -> FIP written at 0x380000"
+# ========== 应用配置 ==========
+log_step "应用设备配置文件..."
+cd "$OWRT_DIR"
+cp "$CONFIG_DIR/sl3000.config" .config
+cp "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" target/linux/mediatek/dts/
+cp "$CONFIG_DIR/mt7981_sl3000.mk" target/linux/mediatek/image/filogic.mk
 
-log_info "✅ 救砖镜像已生成: $RESCUE_BIN"
-ls -lh "$RESCUE_BIN"
+# ========== 更新 feeds ==========
+log_step "更新 feeds..."
+./scripts/feeds update -a
+./scripts/feeds install -a
 
-# ---------- 输出校验信息 ----------
-log_step "镜像前 64 字节预览 (BL2 头部):"
-hexdump -C -n 64 "$RESCUE_BIN" | head -5
+# ========== 准备内核源码并复制 DTS ==========
+log_step "准备内核源码..."
+make defconfig
+make target/linux/prepare V=s
 
-log_step "FIP 头部魔数校验 (偏移 0x380000):"
-dd if="$RESCUE_BIN" bs=1 skip=$((0x380000)) count=16 2>/dev/null | hexdump -C
+# 定位内核构建目录
+LINUX_DIR=$(find build_dir/target-aarch64_cortex-a53_musl/linux-mediatek_filogic -maxdepth 1 -type d -name "linux-*" | head -1)
+if [ -z "$LINUX_DIR" ]; then
+    log_error "未找到内核源码目录！"
+    exit 1
+fi
+log_info "内核源码位于: $LINUX_DIR"
 
-echo ""
-log_info "🎉 救砖全家桶构建完成！"
-echo "输出目录: $OUTPUT_DIR"
-echo "烧录文件: $RESCUE_BIN"
+# 复制 DTS 到内核树
+cp "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" "$LINUX_DIR/arch/arm64/boot/dts/"
+log_info "DTS 已复制到内核源码树。"
+
+# ========== 编译 ==========
+log_step "开始编译 OpenWrt (单线程，耗时较长)..."
+make -j1 V=s
+
+# ========== 提取 sysupgrade.itb ==========
+log_step "提取 sysupgrade.itb..."
+ITB_FILE=$(find bin/targets/mediatek/filogic -name "*-sysupgrade.itb" | head -1)
+if [ -z "$ITB_FILE" ]; then
+    log_error "未找到 sysupgrade.itb，编译可能失败。"
+    exit 1
+fi
+cp "$ITB_FILE" "$OUTPUT_DIR/sysupgrade.itb"
+log_info "内核镜像已复制到 $OUTPUT_DIR/sysupgrade.itb"
+
+# ========== 合成 32MB 烧录包 ==========
+log_step "合成最终 32MB 救砖固件..."
+cd "$OUTPUT_DIR"
+FINAL_BIN="sl3000-rescue-32mb.bin"
+
+# 复制原始 bin 文件
+cp "$CONFIG_DIR/bl2_orig.bin" bl2-emmc-ddr3.bin
+cp "$CONFIG_DIR/fip_orig.bin" bl31-uboot-emmc-ddr3.fip
+cp "$CONFIG_DIR/factory_orig.bin" factory_orig.bin
+
+# 创建 32MB 全 0xFF 文件（修复 dd 语法）
+dd if=/dev/zero bs=1M count=32 2>/dev/null | tr '\000' '\377' > "$FINAL_BIN"
+
+# 写入各分区
+echo "写入 BL2 @ 0M"
+dd if=bl2-emmc-ddr3.bin of="$FINAL_BIN" conv=notrunc status=none
+
+echo "写入 FIP @ 1M"
+dd if=bl31-uboot-emmc-ddr3.fip of="$FINAL_BIN" bs=1M seek=1 conv=notrunc status=none
+
+echo "写入 Factory @ 2M"
+dd if=factory_orig.bin of="$FINAL_BIN" bs=1M seek=2 conv=notrunc status=none
+
+echo "写入 Kernel @ 3M"
+dd if=sysupgrade.itb of="$FINAL_BIN" bs=1M seek=3 conv=notrunc status=none
+
+log_info "✅ 构建完成！输出文件：$OUTPUT_DIR/$FINAL_BIN"
+log_info "文件大小：$(du -h "$FINAL_BIN" | cut -f1)"
