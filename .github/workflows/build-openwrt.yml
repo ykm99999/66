@@ -1,55 +1,58 @@
-name: Build SL3000 Rescue Bundle (32MB)
+name: Build Rescue Package
 
+# 来自知识库[3][7]：在 .github/workflows/ 目录下创建
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:  # 允许手动触发
+    # 只有当关键文件变化时才触发，避免不必要的构建
+    paths:
+      - 'mtk_uartboot/**'
+      - 'immortalwrt/**'
+      - 'u-boot/**'
+      - 'arm-trusted-firmware/**'
+      - '888/**'
+      - 'build_rescue.sh'
+  workflow_dispatch: # 允许手动触发，方便调试
 
 jobs:
-  build:
-    runs-on: ubuntu-22.04
-    timeout-minutes: 60
+  build-rescue:
+    runs-on: ubuntu-latest
+    name: Generate Rescue Bin
 
     steps:
-      - name: 📥 Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          submodules: recursive  # 如果你的子模块是 git submodule
+          submodules: recursive
+          fetch-depth: 0  # 确保获取完整的 git history，对某些构建可能有用
 
-      - name: 🛠️ Install System Dependencies
+      - name: Setup Environment
         run: |
-          sudo apt update
-          sudo apt install -y \
-            build-essential flex bison gawk gettext git \
-            libncurses5-dev libssl-dev python3 python3-distutils \
-            rsync unzip zlib1g-dev device-tree-compiler bc jq
+          # 安装构建所需的基本工具
+          sudo apt-get update
+          sudo apt-get install -y python3 build-essential device-tree-compiler libssl-dev wget git xz-utils rsync bc
 
-      - name: 🔧 Prepare Prebuilt Files
+      - name: Run Build Script
+        # 来自知识库[1][8]：设置Python环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+        # 然后运行我们的主脚本
         run: |
-          # 确保 prebuilt 目录存在（你需提前提交 bl2 和 factory）
-          if [ ! -d "prebuilt" ]; then
-            echo "❌ prebuilt/ 目录不存在，请提交 bl2-emmc-ddr4.bin 和 factory_orig.bin"
-            exit 1
-          fi
-          if [ ! -f "prebuilt/bl2-emmc-ddr4.bin" ] || [ ! -f "prebuilt/factory_orig.bin" ]; then
-            echo "❌ 缺少必需的 prebuilt 文件"
-            exit 1
-          fi
+          chmod +x build_rescue.sh
+          ./build_rescue.sh
 
-      - name: ▶️ Run Build Script
-        run: |
-          chmod +x build_kernel.sh
-          ./build_kernel.sh
-
-      - name: 📤 Upload Rescue Image as Artifact
+      - name: Upload Artifact
+        # 来自知识库[1][8]：上传构建产物
         uses: actions/upload-artifact@v4
         with:
-          name: sl3000-rescue-32m
-          path: output/sl3000-rescue-32m.bin
-          retention-days: 30
+          name: rescue-package-${{ github.run_number }}
+          path: output/
+          retention-days: 7
 
-      - name: 📊 Show Build Summary
-        run: |
-          echo "✅ 构建完成！"
-          ls -lh output/
-          sha256sum output/sl3000-rescue-32m.bin
+      - name: Create Release (Optional)
+        # 可选：如果想为每次成功构建创建一个Release，可以取消注释以下代码
+        # uses: ncipollo/release-action@v1
+        # with:
+        #   artifacts: "output/*"
+        #   token: ${{ secrets.GITHUB_TOKEN }}
