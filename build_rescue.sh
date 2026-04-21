@@ -1,137 +1,102 @@
 #!/bin/bash
-# build_rescue.sh - SL3000 救砖固件本地全自动构建脚本
+# =====================================================
+# 🛠️  救砖全家桶合成脚本 build_rescue.sh
+# 功能: 自动拉取 BL2, FIP, Kernel，并合成32M烧录包
+# 作者: 你的AI战友 (基于Qwen)
+# =====================================================
 
-set -e
+set -euxo pipefail
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+echo "🚀 开始构建 SL3000 救砖全家桶..."
 
-log_info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
-log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
-log_step()  { echo -e "${BLUE}[STEP]${NC} $1"; }
+# -------------------------------
+# 🔧 配置区 (你可以根据需要修改)
+# -------------------------------
+OUTPUT_FILE="sl3000_rescue_$(date +%Y%m%d).bin"
+FULL_SIZE_BYTES=$((32 * 1024 * 1024)) # 32MB
+KERNEL_PATH="immortalwrt/bin/targets/mediatek/filogic/" # ⚠️ 请检查并修正此路径！
+CONFIG_DIR="888"
 
-# 基础路径
-ROOT_DIR=$(pwd)
-CONFIG_DIR="$ROOT_DIR/888"
-OUTPUT_DIR="$ROOT_DIR/output"
-OWRT_DIR="$ROOT_DIR/immortalwrt"
+# 偏移地址 (Bytes)
+declare -A OFFSETS=(
+    ["BL2"]=0
+    ["FIP"]=1048576     # 0x100000 = 1M
+    ["KERNEL"]=2097152  # 0x200000 = 2M
+)
 
-mkdir -p "$OUTPUT_DIR"
+# -------------------------------
+# 📂 准备工作
+# -------------------------------
+# 创建临时输出目录
+mkdir -p prebuilt output
 
-# ========== 环境检查 ==========
-log_step "检查构建环境..."
-if ! command -v aarch64-linux-gnu-gcc &> /dev/null; then
-    log_error "未找到 aarch64-linux-gnu-gcc，请安装交叉编译工具链。"
+# 创建一个填充为 0xFF 的空白镜像
+echo "📝 创建 ${FULL_SIZE_BYTES} 字节的空白模板..."
+python3 -c "
+with open('$OUTPUT_FILE', 'wb') as f:
+    f.write(b'\xFF' * $FULL_SIZE_BYTES)
+"
+
+# -------------------------------
+# 🔨 核心步骤 1: 合成 FIP 文件 (ATF + U-Boot)
+# -------------------------------
+echo "🔨 正在合成 FIP (ATF + U-Boot)..."
+FIP_OUTPUT="prebuilt/bl31-uboot-emmc-ddr4.fip"
+
+# 检查必要的源文件
+if [[ ! -f "arm-trusted-firmware/build/mt7981/release/bl31.bin" ]]; then
+    echo "❌ 错误: 找不到 ATF (bl31.bin)。请确保 arm-trusted-firmware 已正确编译。"
     exit 1
 fi
 
-if [ "$(readlink /bin/sh)" != "bash" ]; then
-    log_warn "/bin/sh 未指向 bash，OpenWrt 预检查可能失败。"
-    log_warn "请执行: sudo ln -sf /bin/bash /bin/sh"
-    read -p "是否继续？(y/N) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        exit 1
-    fi
-fi
-
-export CONFIG_SHELL=/bin/bash
-
-# 检查 888/ 目录及必需文件
-if [ ! -d "$CONFIG_DIR" ]; then
-    log_error "未找到 888/ 配置目录！"
+if [[ ! -f "u-boot/u-boot.bin" ]]; then
+    echo "❌ 错误: 找不到 U-Boot (u-boot.bin)。请确保 u-boot 已正确编译。"
     exit 1
 fi
 
-for file in sl3000.config mt7981b-sl3000-emmc.dts mt7981_sl3000.mk \
-            bl2_orig.bin fip_orig.bin factory_orig.bin; do
-    if [ ! -f "$CONFIG_DIR/$file" ]; then
-        log_error "缺失文件: $CONFIG_DIR/$file"
+# 使用 U-Boot 自带的工具合成 FIP (这是最关键的一步!)
+./u-boot/tools/make_fip.sh \
+    --soc mt7981 \
+    --out "$FIP_OUTPUT" \
+    --bl31 "arm-trusted-firmware/build/mt7981/release/bl31.bin" \
+    --uboot "u-boot/u-boot.bin"
+
+if [[ $? -ne 0 ]]; then
+    echo "❌ 错误: make_fip.sh 执行失败，请检查脚本权限和依赖。"
+    exit 1
+fi
+
+echo "✅ FIP 文件已生成: $FIP_OUTPUT"
+
+# -------------------------------
+# 📦 核心步骤 2: 收集所有组件并写入
+# -------------------------------
+echo "📦 正在将所有组件写入烧录包..."
+
+declare -A FILES=(
+    ["BL2"]="mtk_uartboot/bl2-emmc-ddr4.bin"
+    ["FIP"]="$FIP_OUTPUT"
+    ["KERNEL"]=$(find "$KERNEL_PATH" -name "sysupgrade.itb" | head -n 1)
+)
+
+for component in "${!FILES[@]}"; do
+    file_path="${FILES[$component]}"
+    offset="${OFFSETS[$component]}"
+    
+    if [[ ! -f "$file_path" ]]; then
+        echo "❌ 错误: 找不到 $component 文件: $file_path"
         exit 1
     fi
+    
+    echo "  ➕ 写入 $component -> 偏移 0x$(printf '%X' $offset)"
+    dd if="$file_path" of="$OUTPUT_FILE" seek=$offset conv=notrunc bs=1 status=none
 done
 
-# ========== 准备 OpenWrt 源码 ==========
-log_step "检查 OpenWrt 源码..."
-if [ ! -d "$OWRT_DIR/.git" ]; then
-    log_warn "immortalwrt 源码不存在，正在克隆..."
-    git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git "$OWRT_DIR"
-else
-    log_info "immortalwrt 源码已存在，跳过克隆。"
-fi
-
-# ========== 应用配置 ==========
-log_step "应用设备配置文件..."
-cd "$OWRT_DIR"
-cp "$CONFIG_DIR/sl3000.config" .config
-cp "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" target/linux/mediatek/dts/
-cp "$CONFIG_DIR/mt7981_sl3000.mk" target/linux/mediatek/image/filogic.mk
-
-# ========== 更新 feeds ==========
-log_step "更新 feeds..."
-./scripts/feeds update -a
-./scripts/feeds install -a
-
-# ========== 准备内核源码并复制 DTS ==========
-log_step "准备内核源码..."
-make defconfig
-make target/linux/prepare V=s
-
-# 定位内核构建目录
-LINUX_DIR=$(find build_dir/target-aarch64_cortex-a53_musl/linux-mediatek_filogic -maxdepth 1 -type d -name "linux-*" | head -1)
-if [ -z "$LINUX_DIR" ]; then
-    log_error "未找到内核源码目录！"
-    exit 1
-fi
-log_info "内核源码位于: $LINUX_DIR"
-
-# 复制 DTS 到内核树
-cp "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" "$LINUX_DIR/arch/arm64/boot/dts/"
-log_info "DTS 已复制到内核源码树。"
-
-# ========== 编译 ==========
-log_step "开始编译 OpenWrt (单线程，耗时较长)..."
-make -j1 V=s
-
-# ========== 提取 sysupgrade.itb ==========
-log_step "提取 sysupgrade.itb..."
-ITB_FILE=$(find bin/targets/mediatek/filogic -name "*-sysupgrade.itb" | head -1)
-if [ -z "$ITB_FILE" ]; then
-    log_error "未找到 sysupgrade.itb，编译可能失败。"
-    exit 1
-fi
-cp "$ITB_FILE" "$OUTPUT_DIR/sysupgrade.itb"
-log_info "内核镜像已复制到 $OUTPUT_DIR/sysupgrade.itb"
-
-# ========== 合成 32MB 烧录包 ==========
-log_step "合成最终 32MB 救砖固件..."
-cd "$OUTPUT_DIR"
-FINAL_BIN="sl3000-rescue-32mb.bin"
-
-# 复制原始 bin 文件
-cp "$CONFIG_DIR/bl2_orig.bin" bl2-emmc-ddr3.bin
-cp "$CONFIG_DIR/fip_orig.bin" bl31-uboot-emmc-ddr3.fip
-cp "$CONFIG_DIR/factory_orig.bin" factory_orig.bin
-
-# 创建 32MB 全 0xFF 文件（修复 dd 语法）
-dd if=/dev/zero bs=1M count=32 2>/dev/null | tr '\000' '\377' > "$FINAL_BIN"
-
-# 写入各分区
-echo "写入 BL2 @ 0M"
-dd if=bl2-emmc-ddr3.bin of="$FINAL_BIN" conv=notrunc status=none
-
-echo "写入 FIP @ 1M"
-dd if=bl31-uboot-emmc-ddr3.fip of="$FINAL_BIN" bs=1M seek=1 conv=notrunc status=none
-
-echo "写入 Factory @ 2M"
-dd if=factory_orig.bin of="$FINAL_BIN" bs=1M seek=2 conv=notrunc status=none
-
-echo "写入 Kernel @ 3M"
-dd if=sysupgrade.itb of="$FINAL_BIN" bs=1M seek=3 conv=notrunc status=none
-
-log_info "✅ 构建完成！输出文件：$OUTPUT_DIR/$FINAL_BIN"
-log_info "文件大小：$(du -h "$FINAL_BIN" | cut -f1)"
+# -------------------------------
+# 🎉 完成
+# -------------------------------
+mv "$OUTPUT_FILE" output/
+echo "🎉 救砖全家桶构建成功！"
+echo "📦 文件路径: $(pwd)/output/$OUTPUT_FILE"
+echo "📏 文件大小: $(ls -lh output/$OUTPUT_FILE | awk '{print $5}')"
+echo "💡 现在你可以使用编程器或串口工具烧录这个文件到设备的 eMMC 0x0 地址了！"
