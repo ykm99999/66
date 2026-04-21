@@ -1,136 +1,55 @@
-name: Build SL3000 Rescue Firmware
+name: Build SL3000 Rescue Bundle (32MB)
 
 on:
   push:
     branches: [ main ]
-    paths:
-      - '888/**'
-      - '.github/workflows/build-rescue.yml'
-  workflow_dispatch:
+  workflow_dispatch:  # 允许手动触发
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
+    timeout-minutes: 60
 
     steps:
-      - name: Checkout repository
+      - name: 📥 Checkout Repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: recursive  # 如果你的子模块是 git submodule
 
-      - name: Setup environment
+      - name: 🛠️ Install System Dependencies
         run: |
-          echo "WORKSPACE=$GITHUB_WORKSPACE" >> $GITHUB_ENV
-          echo "OUTPUT_DIR=$GITHUB_WORKSPACE/output" >> $GITHUB_ENV
-          echo "CONFIG_DIR=$GITHUB_WORKSPACE/888" >> $GITHUB_ENV
+          sudo apt update
+          sudo apt install -y \
+            build-essential flex bison gawk gettext git \
+            libncurses5-dev libssl-dev python3 python3-distutils \
+            rsync unzip zlib1g-dev device-tree-compiler bc jq
 
-      - name: Install system dependencies
+      - name: 🔧 Prepare Prebuilt Files
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential clang flex bison g++ gawk \
-            gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
-            python3 python3-distutils python3-setuptools rsync swig unzip \
-            zlib1g-dev file wget cpio libelf-dev quilt gperf time \
-            libncurses5-dev bash patch perl tar xz-utils
-
-      - name: Ensure /bin/sh points to bash
-        run: |
-          sudo ln -sf /bin/bash /bin/sh
-          echo "Default shell now: $(readlink /bin/sh)"
-
-      - name: Verify required files in 888/
-        run: |
-          cd $CONFIG_DIR
-          missing=0
-          for f in sl3000.config mt7981b-sl3000-emmc.dts mt7981_sl3000.mk \
-                   bl2_orig.bin fip_orig.bin factory_orig.bin; do
-            if [ ! -f "$f" ]; then
-              echo "::error::Missing required file: 888/$f"
-              missing=1
-            fi
-          done
-          if [ $missing -eq 1 ]; then
-            echo "::error::Please ensure all required files are present in 888/ directory."
+          # 确保 prebuilt 目录存在（你需提前提交 bl2 和 factory）
+          if [ ! -d "prebuilt" ]; then
+            echo "❌ prebuilt/ 目录不存在，请提交 bl2-emmc-ddr4.bin 和 factory_orig.bin"
             exit 1
           fi
-          echo "All required files found."
-
-      - name: Prepare OpenWrt source
-        run: |
-          cd $GITHUB_WORKSPACE
-          OWRT_DIR="immortalwrt"
-          if [ -d "$OWRT_DIR" ]; then
-            if [ -d "$OWRT_DIR/.git" ]; then
-              echo "OpenWrt source already exists as a Git repository, skipping clone."
-            else
-              echo "Directory $OWRT_DIR exists but is not a Git repository. Removing and re-cloning..."
-              rm -rf "$OWRT_DIR"
-              git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git "$OWRT_DIR"
-            fi
-          else
-            echo "Cloning ImmortalWrt repository..."
-            git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git "$OWRT_DIR"
-          fi
-
-      - name: Apply device configuration and place DTS
-        run: |
-          cd $GITHUB_WORKSPACE/immortalwrt
-          cp $CONFIG_DIR/sl3000.config .config
-          cp $CONFIG_DIR/mt7981b-sl3000-emmc.dts target/linux/mediatek/dts/
-          cp $CONFIG_DIR/mt7981_sl3000.mk target/linux/mediatek/image/filogic.mk
-          
-          # 获取内核版本号
-          KERNEL_PATCHVER=$(sed -n 's/^KERNEL_PATCHVER:=\([0-9.]*\)/\1/p' target/linux/mediatek/Makefile)
-          if [ -z "$KERNEL_PATCHVER" ]; then
-            KERNEL_PATCHVER="6.6"
-          fi
-          # 关键修正：DTS 放在 files-<ver>/arch/arm64/boot/dts/ 下，不要 mediatek 子目录
-          DTS_TARGET="target/linux/mediatek/files-${KERNEL_PATCHVER}/arch/arm64/boot/dts"
-          mkdir -p "$DTS_TARGET"
-          cp $CONFIG_DIR/mt7981b-sl3000-emmc.dts "$DTS_TARGET/"
-          echo "✅ DTS placed in $DTS_TARGET"
-
-      - name: Build OpenWrt (kernel + rootfs)
-        run: |
-          cd $GITHUB_WORKSPACE/immortalwrt
-          export CONFIG_SHELL=/bin/bash
-          make defconfig
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-          make -j1 V=s
-
-      - name: Locate and copy sysupgrade.itb
-        run: |
-          cd $GITHUB_WORKSPACE/immortalwrt
-          ITB_FILE=$(find bin/targets/mediatek/filogic -name "*-sysupgrade.itb" | head -1)
-          if [ -z "$ITB_FILE" ]; then
-            echo "::error::sysupgrade.itb not found! Build may have failed."
+          if [ ! -f "prebuilt/bl2-emmc-ddr4.bin" ] || [ ! -f "prebuilt/factory_orig.bin" ]; then
+            echo "❌ 缺少必需的 prebuilt 文件"
             exit 1
           fi
-          mkdir -p $OUTPUT_DIR
-          cp "$ITB_FILE" $OUTPUT_DIR/sysupgrade.itb
-          echo "Kernel image copied to $OUTPUT_DIR/sysupgrade.itb"
 
-      - name: Assemble final 32MB rescue firmware
+      - name: ▶️ Run Build Script
         run: |
-          cd $OUTPUT_DIR
-          FINAL_BIN="sl3000-rescue-32mb.bin"
-          cp $CONFIG_DIR/bl2_orig.bin bl2-emmc-ddr3.bin
-          cp $CONFIG_DIR/fip_orig.bin bl31-uboot-emmc-ddr3.fip
-          cp $CONFIG_DIR/factory_orig.bin factory_orig.bin
-          dd if=/dev/zero bs=1M count=32 2>/dev/null | tr '\000' '\377' > "$FINAL_BIN"
-          dd if=bl2-emmc-ddr3.bin of="$FINAL_BIN" conv=notrunc status=none
-          dd if=bl31-uboot-emmc-ddr3.fip of="$FINAL_BIN" bs=1M seek=1 conv=notrunc status=none
-          dd if=factory_orig.bin of="$FINAL_BIN" bs=1M seek=2 conv=notrunc status=none
-          dd if=sysupgrade.itb of="$FINAL_BIN" bs=1M seek=3 conv=notrunc status=none
-          echo "✅ Firmware assembled: $OUTPUT_DIR/$FINAL_BIN"
-          ls -lh $FINAL_BIN
+          chmod +x build_kernel.sh
+          ./build_kernel.sh
 
-      - name: Upload firmware artifact
+      - name: 📤 Upload Rescue Image as Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sl3000-rescue-firmware
-          path: output/sl3000-rescue-32mb.bin
+          name: sl3000-rescue-32m
+          path: output/sl3000-rescue-32m.bin
+          retention-days: 30
+
+      - name: 📊 Show Build Summary
+        run: |
+          echo "✅ 构建完成！"
+          ls -lh output/
+          sha256sum output/sl3000-rescue-32m.bin
