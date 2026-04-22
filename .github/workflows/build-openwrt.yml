@@ -1,12 +1,12 @@
-name: Build Rescue Image and Release
+name: Build SL3000 Rescue Full Kit
 
 on:
   workflow_dispatch:
     inputs:
-      release_name:
-        description: 'Release title (leave empty for auto)'
+      version_number:
+        description: '固件版本号'
         required: false
-        default: ''
+        default: '1.0.0'
 
 permissions:
   contents: write
@@ -14,54 +14,96 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+
     steps:
-      - name: Checkout repository
+      - name: Checkout main repository (脚本与配置)
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          path: main-repo
+
+      - name: Checkout source repositories (底层源码)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: main
+          path: source-repo
+          sparse-checkout: |
+            immortalwrt
+            u-boot
+            arm-trusted-firmware
+            mtk_uartboot
+          sparse-checkout-cone-mode: false
 
       - name: Install build dependencies
         run: |
           sudo apt update
           sudo apt install -y build-essential flex bison libncurses-dev \
             libssl-dev libelf-dev bc u-boot-tools device-tree-compiler \
-            gcc-aarch64-linux-gnu python3 python3-pip wget unzip file tree
+            gcc-aarch64-linux-gnu python3 python3-pip wget unzip file tree \
+            cpio rsync
+
+      - name: Setup environment variables
+        run: |
+          echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE" >> $GITHUB_ENV
+          echo "VERSION_NUMBER=${{ github.event.inputs.version_number }}" >> $GITHUB_ENV
+          echo "VERSION_CODE=r$(date +%Y%m%d)" >> $GITHUB_ENV
 
       - name: Grant execute permission to scripts
+        working-directory: main-repo
         run: chmod +x diy-part1.sh diy-part2.sh
 
-      - name: Build components (diy-part1.sh)
+      - name: Run diy-part1.sh (配置 ImmortalWrt)
+        working-directory: main-repo
         run: ./diy-part1.sh
 
-      - name: Assemble 32M image and generate info (diy-part2.sh)
+      - name: Run diy-part2.sh (编译 ATF/U-Boot/固件)
+        working-directory: main-repo
         run: ./diy-part2.sh
 
-      - name: List all generated firmware files
+      - name: Generate 32M Rescue Image
         run: |
-          echo "=== Generated Firmware Files ==="
-          tree output/ -h
-          echo "================================="
+          mkdir -p output
+          cd output
+          # 从编译输出收集所需文件
+          cp $GITHUB_WORKSPACE/main-repo/output/atf/bl2-ram-1g.bin bl2-emmc-ddr4.bin
+          cp $GITHUB_WORKSPACE/main-repo/output/uboot/fip-emmc.bin bl31-uboot-emmc-ddr4.fip
+          # 查找 sysupgrade 文件（可能是 .bin 或 .img.gz）
+          SYS=$(find $GITHUB_WORKSPACE/main-repo/output/firmware -name "*sysupgrade*" | head -1)
+          cp "$SYS" sysupgrade.itb 2>/dev/null || true
+          # 合成 32M 镜像
+          IMAGE_SIZE=$((32 * 1024 * 1024))
+          dd if=/dev/zero bs=1M count=32 | tr '\000' '\377' > rescue-32M.bin
+          dd if=bl2-emmc-ddr4.bin of=rescue-32M.bin bs=1K seek=0 conv=notrunc
+          dd if=bl31-uboot-emmc-ddr4.fip of=rescue-32M.bin bs=1K seek=1024 conv=notrunc
+          dd if=bl31-uboot-emmc-ddr4.fip of=rescue-32M.bin bs=1K seek=2048 conv=notrunc
+          dd if=sysupgrade.itb of=rescue-32M.bin bs=1K seek=3072 conv=notrunc
+          md5sum rescue-32M.bin > rescue-32M.bin.md5
+          ls -lh
 
-      - name: Set release tag and name
-        id: release_info
-        run: |
-          TAG="v$(date +%Y%m%d-%H%M%S)-$(git rev-parse --short HEAD)"
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          if [ -z "${{ github.event.inputs.release_name }}" ]; then
-            echo "name=SL3000 Rescue Build $TAG" >> $GITHUB_OUTPUT
-          else
-            echo "name=${{ github.event.inputs.release_name }}" >> $GITHUB_OUTPUT
-          fi
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: SL3000-Rescue-Kit
+          path: |
+            main-repo/output/atf/*.bin
+            main-repo/output/uboot/*.bin
+            main-repo/output/firmware/*.bin
+            main-repo/output/firmware/*.img.gz
+            main-repo/output/mtk_uartboot.tar.gz
+            output/rescue-32M.bin
+            output/rescue-32M.bin.md5
 
-      - name: Create GitHub Release and Upload Assets
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.release_info.outputs.tag }}
-          name: ${{ steps.release_info.outputs.name }}
-          body_path: output/release_notes.md
+          tag_name: v${{ env.VERSION_NUMBER }}-${{ github.run_number }}
+          name: SL3000 Firmware ${{ env.VERSION_NUMBER }}
+          body_path: main-repo/output/firmware/build.log
           files: |
-            output/*.bin
-            output/*.md5
-            output/*.txt
+            output/rescue-32M.bin
+            output/rescue-32M.bin.md5
+            main-repo/output/mtk_uartboot.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
