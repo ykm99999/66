@@ -1,9 +1,15 @@
-name: Build Rescue Image
+name: Build Rescue Image and Release
 
 on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
+  workflow_dispatch:               # 仅手动触发
+    inputs:
+      release_name:
+        description: 'Release title (leave empty for auto)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write                  # 允许创建 Release
 
 jobs:
   build:
@@ -19,7 +25,7 @@ jobs:
           sudo apt update
           sudo apt install -y build-essential flex bison libncurses-dev \
             libssl-dev libelf-dev bc u-boot-tools device-tree-compiler \
-            gcc-aarch64-linux-gnu python3 python3-pip wget unzip file
+            gcc-aarch64-linux-gnu python3 python3-pip wget unzip file tree
 
       - name: Grant execute permission to scripts
         run: chmod +x diy-part1 diy-part2
@@ -27,11 +33,35 @@ jobs:
       - name: Build components (diy-part1)
         run: ./diy-part1
 
-      - name: Assemble 32M image (diy-part2)
+      - name: Assemble 32M image and generate info (diy-part2)
         run: ./diy-part2
 
-      - name: Upload rescue image
-        uses: actions/upload-artifact@v4
+      - name: List all generated firmware files
+        run: |
+          echo "=== Generated Firmware Files ==="
+          tree output/ -h
+          echo "================================="
+
+      - name: Set release tag and name
+        id: release_info
+        run: |
+          TAG="v$(date +%Y%m%d-%H%M%S)-$(git rev-parse --short HEAD)"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          if [ -z "${{ github.event.inputs.release_name }}" ]; then
+            echo "name=SL3000 Rescue Build $TAG" >> $GITHUB_OUTPUT
+          else
+            echo "name=${{ github.event.inputs.release_name }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create GitHub Release and Upload Assets
+        uses: softprops/action-gh-release@v2
         with:
-          name: sl3000-rescue-32M
-          path: output/*.bin*
+          tag_name: ${{ steps.release_info.outputs.tag }}
+          name: ${{ steps.release_info.outputs.name }}
+          body_path: output/release_notes.md
+          files: |
+            output/*.bin
+            output/*.md5
+            output/*.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
