@@ -123,9 +123,12 @@ echo "✅ bl2-ram-1g.bin 生成成功"
 cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin" || exit 1
 cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin" || exit 1
 
-# 编译 fiptool
+# 编译 fiptool（修复权限错误）
 echo "=== Compiling fiptool ==="
-make -C tools/fiptool CROSS_COMPILE=
+cd tools/fiptool
+make clean
+make CC=gcc
+cd ../..
 FIPTOOL="$PWD/tools/fiptool/fiptool"
 
 # ========== 编译 U-Boot (eMMC) ==========
