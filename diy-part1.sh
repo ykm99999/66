@@ -14,19 +14,20 @@ echo "=========================================="
 cd "$ROOT_DIR/arm-trusted-firmware"
 make PLAT=mt7981 CROSS_COMPILE=$CROSS_COMPILE bl31
 cp build/mt7981/release/bl31.bin "$OUTPUT_DIR/"
+echo "BL31 built and copied."
 
 echo "=========================================="
 echo "Step 2: Build U-Boot (BL2 + FIP)"
 echo "=========================================="
 cd "$ROOT_DIR/u-boot"
 
-# 复制 SL3000 设备树
+# 复制设备树
 cp "$ROOT_DIR/888/mt7981b-sl3000-emmc.dts" arch/arm/dts/
 
 # 使用参考板 defconfig
 make mt7981_nor_emmc_rfb_defconfig
 
-# 更改设备树名称
+# 修改设备树名称
 sed -i 's/CONFIG_DEFAULT_DEVICE_TREE=.*/CONFIG_DEFAULT_DEVICE_TREE="mt7981b-sl3000-emmc"/' .config
 
 # 应用配置
@@ -35,8 +36,29 @@ make olddefconfig
 # 编译
 make -j$(nproc) BL31="$OUTPUT_DIR/bl31.bin"
 
-cp bl2-emmc-ddr4.bin "$OUTPUT_DIR/"
-cp bl31-uboot-emmc-ddr4.fip "$OUTPUT_DIR/"
+echo "=========================================="
+echo "Listing generated U-Boot binaries:"
+ls -la *.bin || true
+ls -la *fip* || true
+echo "=========================================="
+
+# 查找并复制 BL2 文件（常见命名：bl2.bin, bl2-emmc.bin, bl2-emmc-ddr4.bin 等）
+BL2_FILE=$(find . -maxdepth 1 -name "bl2*.bin" | head -1)
+if [ -z "$BL2_FILE" ]; then
+    echo "ERROR: BL2 binary not found!"
+    exit 1
+fi
+cp "$BL2_FILE" "$OUTPUT_DIR/bl2-emmc-ddr4.bin"
+echo "BL2 copied from $BL2_FILE"
+
+# 查找并复制 FIP 文件（常见命名：fip.bin, bl31-uboot.fip, bl31-uboot-emmc-ddr4.fip 等）
+FIP_FILE=$(find . -maxdepth 1 \( -name "fip.bin" -o -name "*fip*" -o -name "bl31-uboot*.fip" \) | head -1)
+if [ -z "$FIP_FILE" ]; then
+    echo "ERROR: FIP binary not found!"
+    exit 1
+fi
+cp "$FIP_FILE" "$OUTPUT_DIR/bl31-uboot-emmc-ddr4.fip"
+echo "FIP copied from $FIP_FILE"
 
 echo "=========================================="
 echo "Step 3: Build ImmortalWrt Kernel"
