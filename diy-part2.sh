@@ -42,11 +42,47 @@ echo "Generating version info..."
     echo "Git Branch: $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown')"
     echo "Image Size:  $ACTUAL_SIZE bytes (32 MiB)"
     echo "Components:"
-    echo "  BL2:        $(du -h "$INPUT_DIR/bl2-emmc-ddr4.bin" | cut -f1)"
-    echo "  FIP:        $(du -h "$INPUT_DIR/bl31-uboot-emmc-ddr4.fip" | cut -f1)"
-    echo "  Kernel:     $(du -h "$INPUT_DIR/sysupgrade.itb" | cut -f1)"
+    echo "  BL2:        $(du -h "$INPUT_DIR/bl2-emmc-ddr4.bin" 2>/dev/null | cut -f1 || echo 'missing')"
+    echo "  FIP:        $(du -h "$INPUT_DIR/bl31-uboot-emmc-ddr4.fip" 2>/dev/null | cut -f1 || echo 'missing')"
+    echo "  Kernel:     $(du -h "$INPUT_DIR/sysupgrade.itb" 2>/dev/null | cut -f1 || echo 'missing')"
 } > "$VERSION_FILE"
 
 # ---------- 生成 Release Notes ----------
-{
-    echo "## SL3000 Rescue Firm
+cat > "$RELEASE_NOTES" << EOF
+## SL3000 Rescue Firmware (32MB)
+
+### Build Information
+- **Date:** $(date '+%Y-%m-%d %H:%M:%S')
+- **Git Commit:** $(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')
+- **Branch:** $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown')
+
+### Flashing Instructions
+1. Use **mtk_uartboot** to load BL2 and FIP via UART.
+2. Then flash the combined \`rescue-32M.bin\` using U-Boot:
+   \`\`\`
+   mmc dev 0
+   mmc write \$loadaddr 0x0 0x10000
+   \`\`\`
+   Or use \`mmc part\` and \`mmc write\` for specific partitions.
+
+### Partition Layout
+| Offset | Size | Component |
+|--------|------|-----------|
+| 0x000000 | 1M | BL2 (Preloader) |
+| 0x100000 | 1M | FIP (ATF+U-Boot) |
+| 0x200000 | 1M | FIP Backup |
+| 0x300000 | ~29M | Kernel (sysupgrade.itb) |
+
+### Included Files
+- \`rescue-32M.bin\` – Full 32MB image
+- \`rescue-32M.bin.md5\` – MD5 checksum
+- \`bl2-emmc-ddr4.bin\` – Standalone BL2
+- \`bl31-uboot-emmc-ddr4.fip\` – Standalone FIP
+- \`sysupgrade.itb\` – Kernel image
+
+### Notes
+- This build is automatically generated via GitHub Actions.
+- Ensure your device matches the SL3000 hardware configuration.
+EOF
+
+echo "Release notes generated."
