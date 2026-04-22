@@ -1,36 +1,52 @@
 #!/bin/bash
-# [物理审计] 锁定 V18 稳态：仅针对 3806 行做物理隔断修复
+set -e
 
-set -euo pipefail
+ROOT_DIR=$(pwd)
+INPUT_DIR="$ROOT_DIR/output"
+OUTPUT_IMAGE="$INPUT_DIR/rescue-32M.bin"
+VERSION_FILE="$INPUT_DIR/version.txt"
+RELEASE_NOTES="$INPUT_DIR/release_notes.md"
 
-FILOGIC_MK="target/linux/mediatek/image/filogic.mk"
-REPO_888="../888"
+IMAGE_SIZE=$((32 * 1024 * 1024))
 
-echo "=== 1. 物理基因纠偏：修复 Makefile 粘连 ==="
-if [ -f "$FILOGIC_MK" ]; then
-    # [原文照抄] 精准清理旧定义，确保构建幂等
-    sed -i '/Device\/sl_3000-emmc/,/endef/d' "$FILOGIC_MK"
-    
-    # [原子级修复] 在文件末尾强制添加两个绝对换行，彻底消除物理粘连导致的语法报错
-    echo -e "\n\n" >> "$FILOGIC_MK"
-    
-    # [原文照抄] 必须物理引用仓库中的原文进行追加，严禁脚本内硬编码
-    cat "$REPO_888/mt7981_sl3000.mk" >> "$FILOGIC_MK"
-    
-    # [原文照抄] 像素级校准：确保缩进为标准 Tab (\t)
-    sed -i 's/^    /\t/g' "$FILOGIC_MK"
-    echo "✅ filogic.mk 物理对齐完成"
+echo "Creating empty 32MB image filled with 0xFF..."
+dd if=/dev/zero bs=1M count=32 2>/dev/null | tr '\000' '\377' > "$OUTPUT_IMAGE"
+
+echo "Writing BL2 at offset 0x0..."
+dd if="$INPUT_DIR/bl2-emmc-ddr4.bin" of="$OUTPUT_IMAGE" bs=1K seek=0 conv=notrunc 2>/dev/null
+
+echo "Writing FIP (primary) at offset 0x100000 (1M)..."
+dd if="$INPUT_DIR/bl31-uboot-emmc-ddr4.fip" of="$OUTPUT_IMAGE" bs=1K seek=1024 conv=notrunc 2>/dev/null
+
+echo "Writing FIP (backup) at offset 0x200000 (2M)..."
+dd if="$INPUT_DIR/bl31-uboot-emmc-ddr4.fip" of="$OUTPUT_IMAGE" bs=1K seek=2048 conv=notrunc 2>/dev/null
+
+echo "Writing Kernel (sysupgrade.itb) at offset 0x300000 (3M)..."
+dd if="$INPUT_DIR/sysupgrade.itb" of="$OUTPUT_IMAGE" bs=1K seek=3072 conv=notrunc 2>/dev/null
+
+ACTUAL_SIZE=$(stat -c%s "$OUTPUT_IMAGE")
+echo "Rescue image created: $OUTPUT_IMAGE ($ACTUAL_SIZE bytes)"
+
+if [ $ACTUAL_SIZE -ne $IMAGE_SIZE ]; then
+    echo "Warning: Expected size $IMAGE_SIZE bytes, got $ACTUAL_SIZE bytes"
 fi
 
-echo "=== 2. 物理链路闭合：DTS 双向注入 ==="
-DTS_NAME="mt7981b-sl3000-emmc.dts"
-if [ -f "$REPO_888/$DTS_NAME" ]; then
-    cp -f "$REPO_888/$DTS_NAME" "target/linux/mediatek/dts/mt7981b-sl-3000-emmc.dts"
-    mkdir -p "target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek"
-    cp -f "$REPO_888/$DTS_NAME" "target/linux/mediatek/files-6.6/arch/arm64/boot/dts/mediatek/mt7981b-sl-3000-emmc.dts"
-fi
+md5sum "$OUTPUT_IMAGE" > "$OUTPUT_IMAGE.md5"
+echo "Checksum saved to $OUTPUT_IMAGE.md5"
 
-echo "=== 3. 物理覆盖：Config 母本 ==="
-if [ -f "$REPO_888/sl3000.config" ]; then
-    cp -f "$REPO_888/sl3000.config" .config
-fi
+# ---------- 生成版本信息 ----------
+echo "Generating version info..."
+{
+    echo "Build Date: $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "Git Commit: $(git rev-parse HEAD 2>/dev/null || echo 'unknown')"
+    echo "Git Branch: $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown')"
+    echo "Image Size:  $ACTUAL_SIZE bytes (32 MiB)"
+    echo "Components:"
+    echo "  BL2:        $(du -h "$INPUT_DIR/bl2-emmc-ddr4.bin" | cut -f1)"
+    echo "  FIP:        $(du -h "$INPUT_DIR/bl31-uboot-emmc-ddr4.fip" | cut -f1)"
+    echo "  Kernel:     $(du -h "$INPUT_DIR/sysupgrade.itb" | cut -f1)"
+} > "$VERSION_FILE"
+
+# ---------- 生成 Release Notes ----------
+{
+    echo "## SL3000 Rescue Firm
