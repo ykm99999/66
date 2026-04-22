@@ -1,7 +1,7 @@
 name: Build Rescue Image and Release
 
 on:
-  workflow_dispatch:               # 仅手动触发
+  workflow_dispatch:
     inputs:
       release_name:
         description: 'Release title (leave empty for auto)'
@@ -9,7 +9,7 @@ on:
         default: ''
 
 permissions:
-  contents: write                  # 允许创建 Release
+  contents: write
 
 jobs:
   build:
@@ -28,13 +28,13 @@ jobs:
             gcc-aarch64-linux-gnu python3 python3-pip wget unzip file tree
 
       - name: Grant execute permission to scripts
-        run: chmod +x diy-part1 diy-part2
+        run: chmod +x diy-part1.sh diy-part2.sh
 
-      - name: Build components (diy-part1)
-        run: ./diy-part1
+      - name: Build components (diy-part1.sh)
+        run: ./diy-part1.sh
 
-      - name: Assemble 32M image and generate info (diy-part2)
-        run: ./diy-part2
+      - name: Assemble 32M image and generate info (diy-part2.sh)
+        run: ./diy-part2.sh
 
       - name: List all generated firmware files
         run: |
