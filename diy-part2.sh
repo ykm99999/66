@@ -13,7 +13,7 @@ cd "$IMMORTALWRT_BUILD_DIR"
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# ========== 修补 ATF 强制使用 DDR4 ==========
+# ========== 修补 ATF 强制 DDR4 ==========
 echo "=== Patching ATF source for DDR4 ==="
 cd "$WORKSPACE/arm-trusted-firmware"
 mkdir -p plat/mediatek/mt7981/drivers/dram
@@ -174,8 +174,23 @@ cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-nor.bin"
 # ========== 编译 ImmortalWrt 固件 ==========
 echo "=== Building ImmortalWrt Firmware ==="
 cd "$IMMORTALWRT_BUILD_DIR"
-grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" .config || { echo "❌ 设备未启用"; exit 1; }
+grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" .config || {
+    echo "❌ 设备未启用"
+    exit 1
+}
 
+# 预先解压内核并做 olddefconfig，避免交互
+echo "=== Preparing kernel config (silent) ==="
+make target/linux/prepare V=s 2>&1 | tail -20
+KERNEL_BUILD_DIR=$(find build_dir/target-aarch64_cortex-a53_musl/linux-mediatek_filogic -maxdepth 1 -type d -name "linux-*" | head -1)
+if [ -n "$KERNEL_BUILD_DIR" ] && [ -f "$KERNEL_BUILD_DIR/Makefile" ]; then
+    echo "Running kernel olddefconfig in $KERNEL_BUILD_DIR"
+    make -C "$KERNEL_BUILD_DIR" olddefconfig ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu-
+else
+    echo "WARNING: Kernel build directory not found, build may prompt for input."
+fi
+
+echo "=== Starting full firmware build ==="
 make VERSION_NUMBER="${VERSION_NUMBER:-1.0.0}" VERSION_CODE="${VERSION_CODE:-r1}" -j$(nproc) V=s 2>&1 | tee build.log
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
     echo "❌ 固件编译失败，最后 100 行："
