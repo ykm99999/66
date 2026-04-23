@@ -14,27 +14,11 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-
     steps:
-      - name: Checkout main repository (脚本与配置)
+      - name: Checkout repository (包含所有源码)
         uses: actions/checkout@v4
         with:
-          path: main-repo
-
-      - name: Checkout source repositories (底层源码)
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository }}
-          ref: main
-          path: source-repo
-          sparse-checkout: |
-            immortalwrt
-            u-boot
-            arm-trusted-firmware
-            mtk_uartboot
-          sparse-checkout-cone-mode: false
+          submodules: recursive   # 如果使用子模块则自动拉取
 
       - name: Install build dependencies
         run: |
@@ -51,28 +35,22 @@ jobs:
           echo "VERSION_CODE=r$(date +%Y%m%d)" >> $GITHUB_ENV
 
       - name: Grant execute permission to scripts
-        working-directory: main-repo
         run: chmod +x diy-part1.sh diy-part2.sh
 
       - name: Run diy-part1.sh (配置 ImmortalWrt)
-        working-directory: main-repo
         run: ./diy-part1.sh
 
       - name: Run diy-part2.sh (编译 ATF/U-Boot/固件)
-        working-directory: main-repo
         run: ./diy-part2.sh
 
       - name: Generate 32M Rescue Image
         run: |
           mkdir -p output
           cd output
-          # 从编译输出收集所需文件
-          cp $GITHUB_WORKSPACE/main-repo/output/atf/bl2-ram-1g.bin bl2-emmc-ddr4.bin
-          cp $GITHUB_WORKSPACE/main-repo/output/uboot/fip-emmc.bin bl31-uboot-emmc-ddr4.fip
-          # 查找 sysupgrade 文件（可能是 .bin 或 .img.gz）
-          SYS=$(find $GITHUB_WORKSPACE/main-repo/output/firmware -name "*sysupgrade*" | head -1)
-          cp "$SYS" sysupgrade.itb 2>/dev/null || true
-          # 合成 32M 镜像
+          cp $GITHUB_WORKSPACE/output/atf/bl2-ram-1g.bin bl2-emmc-ddr4.bin
+          cp $GITHUB_WORKSPACE/output/uboot/fip-emmc.bin bl31-uboot-emmc-ddr4.fip
+          SYS=$(find $GITHUB_WORKSPACE/output/firmware -name "*sysupgrade*" | head -1)
+          cp "$SYS" sysupgrade.itb
           IMAGE_SIZE=$((32 * 1024 * 1024))
           dd if=/dev/zero bs=1M count=32 | tr '\000' '\377' > rescue-32M.bin
           dd if=bl2-emmc-ddr4.bin of=rescue-32M.bin bs=1K seek=0 conv=notrunc
@@ -87,11 +65,11 @@ jobs:
         with:
           name: SL3000-Rescue-Kit
           path: |
-            main-repo/output/atf/*.bin
-            main-repo/output/uboot/*.bin
-            main-repo/output/firmware/*.bin
-            main-repo/output/firmware/*.img.gz
-            main-repo/output/mtk_uartboot.tar.gz
+            output/atf/*.bin
+            output/uboot/*.bin
+            output/firmware/*.bin
+            output/firmware/*.img.gz
+            output/mtk_uartboot.tar.gz
             output/rescue-32M.bin
             output/rescue-32M.bin.md5
 
@@ -100,10 +78,10 @@ jobs:
         with:
           tag_name: v${{ env.VERSION_NUMBER }}-${{ github.run_number }}
           name: SL3000 Firmware ${{ env.VERSION_NUMBER }}
-          body_path: main-repo/output/firmware/build.log
+          body_path: output/firmware/build.log
           files: |
             output/rescue-32M.bin
             output/rescue-32M.bin.md5
-            main-repo/output/mtk_uartboot.tar.gz
+            output/mtk_uartboot.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
