@@ -101,15 +101,52 @@ echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
 
 make defconfig || { echo "❌ make defconfig failed"; exit 1; }
-echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
 
-make -j1 V=s oldconfig 2>&1 | tee oldconfig.log
-if [ ${PIPESTATUS[0]} -ne 0 ]; then
-    echo "❌ oldconfig 失败"
-    tail -50 oldconfig.log
-    exit 1
-fi
+# ========== 预先写入内核关键选项，防止交互 ==========
+cat >> .config << 'KERNEL_OPTIONS'
+# 内核页面大小默认 4KB
+CONFIG_ARM64_4K_PAGES=y
+# CONFIG_ARM64_16K_PAGES is not set
+# CONFIG_ARM64_64K_PAGES is not set
 
+# 解决 NVMEM_MTK_EFUSE 依赖警告
+CONFIG_NVMEM=y
+CONFIG_NVMEM_MTK_EFUSE=m
+
+# 启用必要的文件系统支持
+CONFIG_F2FS_FS=y
+CONFIG_FUSE_FS=y
+
+# 启用 Docker 所需内核特性
+CONFIG_NAMESPACES=y
+CONFIG_NET_NS=y
+CONFIG_PID_NS=y
+CONFIG_IPC_NS=y
+CONFIG_UTS_NS=y
+CONFIG_CGROUPS=y
+CONFIG_CGROUP_CPUACCT=y
+CONFIG_CGROUP_DEVICE=y
+CONFIG_CGROUP_FREEZER=y
+CONFIG_CGROUP_SCHED=y
+CONFIG_CPUSETS=y
+CONFIG_MEMCG=y
+CONFIG_KEYS=y
+CONFIG_VETH=y
+CONFIG_BRIDGE=y
+CONFIG_BRIDGE_NETFILTER=y
+CONFIG_IP_NF_FILTER=y
+CONFIG_IP_NF_TARGET_MASQUERADE=y
+CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
+CONFIG_NETFILTER_XT_MATCH_IPVS=y
+CONFIG_IP_NF_NAT=y
+CONFIG_NF_NAT=y
+CONFIG_NF_NAT_NEEDED=y
+KERNEL_OPTIONS
+
+# 强制再次同步配置，使用 olddefconfig 自动接受新符号的默认值
+make olddefconfig
+
+# 最终确认设备是否启用
 grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" .config || {
     echo "❌ 设备未在 .config 中启用"
     exit 1
