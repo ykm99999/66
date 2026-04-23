@@ -44,7 +44,7 @@ if [ ! -d "feeds/passwall2" ]; then
     exit 1
 fi
 
-# 清理问题包（注意：仅删除包目录，保留 LuCI 应用本身）
+# 清理问题包
 PROBLEM_PKGS="aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen gst1-plugins-base gst1-plugins-good gst1-plugins-ugly gst1-plugins-bad gst1-libav dmapd gmediarender gnunet gnunet-fuse gnunet-fs grilo-plugins lcdgrilo libdmapsharing kamailio smartdns pymysql python-orjson python-paramiko python-pyopenssl python-rpds-py python-service-identity python-twisted python-docker python-jsonschema python-jsonschema-specifications python-referencing onionshare-cli onionshare weston wpewebkit libextractor python-bcrypt python-cryptography python-maturin podman ruby-yaml"
 
 for pkg in $PROBLEM_PKGS; do
@@ -94,27 +94,15 @@ EOF
 
 grep -q "sl_3000-emmc" "$FILOGIC_MK" || { echo "❌ 设备定义未写入"; exit 1; }
 
-# ========== 生成配置 ==========
+# ========== 生成配置（仅 defconfig，不调用 olddefconfig） ==========
 cp "$CONFIG_DIR/sl3000.config" .config
-
-# 仅保留必要的目标设置，避免 override 警告
 echo "CONFIG_TARGET_mediatek=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
 
-# 第一次 defconfig 生成基础配置
 make defconfig || { echo "❌ make defconfig failed"; exit 1; }
 
-# 第二次 olddefconfig 使用详细输出，便于诊断
-echo "=== Running olddefconfig ==="
-make -j1 V=sc olddefconfig 2>&1 | tee oldconfig.log
-if [ ${PIPESTATUS[0]} -ne 0 ]; then
-    echo "❌ olddefconfig 失败，错误日志如下（最后50行）："
-    tail -50 oldconfig.log
-    exit 1
-fi
-
-# 验证设备是否成功启用
+# 再次确认设备启用
 grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" .config || {
     echo "❌ 设备未在 .config 中启用"
     exit 1
