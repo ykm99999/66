@@ -44,7 +44,7 @@ if [ ! -d "feeds/passwall2" ]; then
     exit 1
 fi
 
-# 清理问题包
+# 清理问题包（注意：仅删除包目录，保留 LuCI 应用本身）
 PROBLEM_PKGS="aardvark-dns arp-whisper bottom cargo-c clamav dufs eza fish lsd netavark pdns-recursor procs python-setuptools-rust ripgrep ruby rust-bindgen gst1-plugins-base gst1-plugins-good gst1-plugins-ugly gst1-plugins-bad gst1-libav dmapd gmediarender gnunet gnunet-fuse gnunet-fs grilo-plugins lcdgrilo libdmapsharing kamailio smartdns pymysql python-orjson python-paramiko python-pyopenssl python-rpds-py python-service-identity python-twisted python-docker python-jsonschema python-jsonschema-specifications python-referencing onionshare-cli onionshare weston wpewebkit libextractor python-bcrypt python-cryptography python-maturin podman ruby-yaml"
 
 for pkg in $PROBLEM_PKGS; do
@@ -94,64 +94,32 @@ EOF
 
 grep -q "sl_3000-emmc" "$FILOGIC_MK" || { echo "❌ 设备定义未写入"; exit 1; }
 
-# ========== 生成基础配置 ==========
+# ========== 生成配置 ==========
 cp "$CONFIG_DIR/sl3000.config" .config
+
+# 仅保留必要的目标设置，避免 override 警告
 echo "CONFIG_TARGET_mediatek=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic=y" >> .config
 echo "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" >> .config
 
+# 第一次 defconfig 生成基础配置
 make defconfig || { echo "❌ make defconfig failed"; exit 1; }
 
-# ========== 预先写入内核关键选项，防止交互 ==========
-cat >> .config << 'KERNEL_OPTIONS'
-# 内核页面大小默认 4KB
-CONFIG_ARM64_4K_PAGES=y
-# CONFIG_ARM64_16K_PAGES is not set
-# CONFIG_ARM64_64K_PAGES is not set
+# 第二次 olddefconfig 使用详细输出，便于诊断
+echo "=== Running olddefconfig ==="
+make -j1 V=sc olddefconfig 2>&1 | tee oldconfig.log
+if [ ${PIPESTATUS[0]} -ne 0 ]; then
+    echo "❌ olddefconfig 失败，错误日志如下（最后50行）："
+    tail -50 oldconfig.log
+    exit 1
+fi
 
-# 解决 NVMEM_MTK_EFUSE 依赖警告
-CONFIG_NVMEM=y
-CONFIG_NVMEM_MTK_EFUSE=m
-
-# 启用必要的文件系统支持
-CONFIG_F2FS_FS=y
-CONFIG_FUSE_FS=y
-
-# 启用 Docker 所需内核特性
-CONFIG_NAMESPACES=y
-CONFIG_NET_NS=y
-CONFIG_PID_NS=y
-CONFIG_IPC_NS=y
-CONFIG_UTS_NS=y
-CONFIG_CGROUPS=y
-CONFIG_CGROUP_CPUACCT=y
-CONFIG_CGROUP_DEVICE=y
-CONFIG_CGROUP_FREEZER=y
-CONFIG_CGROUP_SCHED=y
-CONFIG_CPUSETS=y
-CONFIG_MEMCG=y
-CONFIG_KEYS=y
-CONFIG_VETH=y
-CONFIG_BRIDGE=y
-CONFIG_BRIDGE_NETFILTER=y
-CONFIG_IP_NF_FILTER=y
-CONFIG_IP_NF_TARGET_MASQUERADE=y
-CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
-CONFIG_NETFILTER_XT_MATCH_IPVS=y
-CONFIG_IP_NF_NAT=y
-CONFIG_NF_NAT=y
-CONFIG_NF_NAT_NEEDED=y
-KERNEL_OPTIONS
-
-# 强制再次同步配置，使用 olddefconfig 自动接受新符号的默认值
-make olddefconfig
-
-# 最终确认设备是否启用
+# 验证设备是否成功启用
 grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" .config || {
     echo "❌ 设备未在 .config 中启用"
     exit 1
 }
 echo "✅ 设备已启用"
 
-# 保存构建目录路径供 part2 使用
+# 保存构建目录路径
 echo "$PWD" > "$WORKSPACE/build-dir.txt"
