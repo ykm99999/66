@@ -115,7 +115,7 @@ if [ ! -f "$OUTPUT_DIR/atf/bl2-ram-1g.bin" ]; then
 fi
 echo "✅ bl2-ram-1g.bin 生成成功"
 
-# 复制 bl31.bin 到 staging_dir
+# 复制 bl31.bin
 cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-emmc-ddr4-bl31.bin"
 cp -v build/mt7981/release/bl31.bin "$STAGING_DIR_IMAGE/mt7981-nor-ddr4-bl31.bin"
 
@@ -179,12 +179,24 @@ grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_sl_3000-emmc=y" .config || {
     exit 1
 }
 
-# 预先解压内核并做 olddefconfig，避免交互
+# 预先解压内核并修复交互选项
 echo "=== Preparing kernel config (silent) ==="
 make target/linux/prepare V=s 2>&1 | tail -20
 KERNEL_BUILD_DIR=$(find build_dir/target-aarch64_cortex-a53_musl/linux-mediatek_filogic -maxdepth 1 -type d -name "linux-*" | head -1)
 if [ -n "$KERNEL_BUILD_DIR" ] && [ -f "$KERNEL_BUILD_DIR/Makefile" ]; then
-    echo "Running kernel olddefconfig in $KERNEL_BUILD_DIR"
+    echo "Setting kernel options in $KERNEL_BUILD_DIR"
+    SCRIPTS_CONFIG="$KERNEL_BUILD_DIR/scripts/config"
+    if [ ! -f "$SCRIPTS_CONFIG" ]; then
+        echo "❌ $SCRIPTS_CONFIG not found"
+        exit 1
+    fi
+    # 设置页面大小
+    "$SCRIPTS_CONFIG" --file "$KERNEL_BUILD_DIR/.config" --enable ARM64_4K_PAGES
+    "$SCRIPTS_CONFIG" --file "$KERNEL_BUILD_DIR/.config" --disable ARM64_16K_PAGES
+    "$SCRIPTS_CONFIG" --file "$KERNEL_BUILD_DIR/.config" --disable ARM64_64K_PAGES
+    # 修复 NVMEM 依赖
+    "$SCRIPTS_CONFIG" --file "$KERNEL_BUILD_DIR/.config" --enable NVMEM
+    # 应用配置
     make -C "$KERNEL_BUILD_DIR" olddefconfig ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu-
 else
     echo "WARNING: Kernel build directory not found, build may prompt for input."
