@@ -62,8 +62,14 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE
           OWRT_DIR="immortalwrt"
-          if [ -d "$OWRT_DIR/.git" ]; then
-            echo "OpenWrt source already exists as a Git repository, skipping clone."
+          if [ -d "$OWRT_DIR" ]; then
+            if [ -d "$OWRT_DIR/.git" ]; then
+              echo "OpenWrt source already exists as a Git repository, skipping clone."
+            else
+              echo "Directory $OWRT_DIR exists but is not a Git repo. Removing and re-cloning..."
+              rm -rf "$OWRT_DIR"
+              git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git "$OWRT_DIR"
+            fi
           else
             echo "Cloning ImmortalWrt repository..."
             git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git "$OWRT_DIR"
@@ -80,13 +86,10 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/immortalwrt
           export CONFIG_SHELL=/bin/bash
-          # 用 olddefconfig 避免交互
           make olddefconfig
           ./scripts/feeds update -a
           ./scripts/feeds install -a
-          # 准备内核源码
           make target/linux/prepare V=s
-          # 强制复制 DTS 到内核构建树
           LINUX_DIR=$(find build_dir/target-aarch64_cortex-a53_musl/linux-mediatek_filogic -maxdepth 1 -type d -name "linux-*" | head -1)
           if [ -z "$LINUX_DIR" ]; then
             echo "::error::Kernel source directory not found!"
@@ -94,7 +97,6 @@ jobs:
           fi
           mkdir -p $LINUX_DIR/arch/arm64/boot/dts
           cp $CONFIG_DIR/mt7981b-sl3000-emmc.dts $LINUX_DIR/arch/arm64/boot/dts/
-          # 追加缺失的内核配置（不使用 EOF）
           echo "CONFIG_NVMEM=y" >> $LINUX_DIR/.config
           echo "CONFIG_ARM64_4K_PAGES=y" >> $LINUX_DIR/.config
           make -C $LINUX_DIR olddefconfig ARCH=arm64
