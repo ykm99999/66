@@ -86,7 +86,9 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/immortalwrt
           export CONFIG_SHELL=/bin/bash
-          make olddefconfig
+          export TERM=dumb
+          # 用 conf 直接更新配置，避免终端问题
+          scripts/config/conf --olddefconfig Config.in
           ./scripts/feeds update -a
           ./scripts/feeds install -a
           make target/linux/prepare V=s
@@ -105,6 +107,7 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/immortalwrt
           export CONFIG_SHELL=/bin/bash
+          export TERM=dumb
           make -j1 V=s
 
       - name: Locate and copy sysupgrade.itb
