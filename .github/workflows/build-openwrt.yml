@@ -1,144 +1,90 @@
-name: Build SL3000 Rescue Firmware
+name: SL3000 Rescue Firmware Build
 
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - '888/**'
-      - '.github/workflows/build-rescue.yml'
   workflow_dispatch:
+  push:
+    tags: [ 'v*' ]
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      - name: Checkout repository
+      - name: Checkout main repository (scripts & configs)
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          ref: main
+          path: main-repo
 
-      - name: Setup environment
+      - name: Checkout source repository (submodules: immortalwrt, ATF, U-Boot, mtk_uartboot)
+        uses: actions/checkout@v4
+        with:
+          repository: ykm99999/66
+          ref: sl3000-full-sync
+          path: source-repo
+          submodules: recursive   # 关键：拉取所有子模块
+
+      - name: Generate release tag
+        id: release_tag
         run: |
-          echo "WORKSPACE=$GITHUB_WORKSPACE" >> $GITHUB_ENV
-          echo "OUTPUT_DIR=$GITHUB_WORKSPACE/output" >> $GITHUB_ENV
-          echo "CONFIG_DIR=$GITHUB_WORKSPACE/888" >> $GITHUB_ENV
+          TAG_NAME="v$(date -u +'%Y%m%d-%H%M%S')"
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "Release tag: $TAG_NAME"
 
-      - name: Install system dependencies
+      - name: Install host dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential clang flex bison g++ gawk \
-            gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
-            python3 python3-distutils python3-setuptools rsync swig unzip \
-            zlib1g-dev file wget cpio libelf-dev quilt gperf time \
-            libncurses5-dev bash patch perl tar xz-utils
+          sudo apt update
+          sudo apt install -y build-essential clang flex bison gawk \
+            gettext git libncurses-dev libssl-dev \
+            python3-distutils python3-setuptools rsync unzip zlib1g-dev file wget \
+            gcc-aarch64-linux-gnu device-tree-compiler
 
-      - name: Ensure /bin/sh points to bash
+      - name: Optimize disk space
         run: |
-          sudo ln -sf /bin/bash /bin/sh
-          echo "Default shell now: $(readlink /bin/sh)"
+          sudo apt clean
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
+          df -h
 
-      - name: Verify required files in 888/
+      - name: Run diy-part1.sh (Prepare OpenWrt source & inject custom files)
+        working-directory: main-repo
         run: |
-          cd $CONFIG_DIR
-          missing=0
-          for f in sl3000.config mt7981b-sl3000-emmc.dts mt7981_sl3000.mk \
-                   bl2_orig.bin fip_orig.bin factory_orig.bin; do
-            if [ ! -f "$f" ]; then
-              echo "::error::Missing required file: 888/$f"
-              missing=1
-            fi
-          done
-          if [ $missing -eq 1 ]; then
-            echo "::error::Please ensure all required files are present in 888/ directory."
-            exit 1
-          fi
-          echo "All required files found."
+          chmod +x diy-part1.sh
+          ./diy-part1.sh
 
-      - name: Prepare OpenWrt source
+      - name: Run diy-part2.sh (Build ATF, U-Boot, FIP, Firmware, mtk_uartboot)
+        working-directory: main-repo
         run: |
-          cd $GITHUB_WORKSPACE
-          OWRT_DIR="immortalwrt"
-          if [ -d "$OWRT_DIR" ]; then
-            if [ -d "$OWRT_DIR/.git" ]; then
-              echo "OpenWrt source already exists as a Git repository, skipping clone."
-            else
-              echo "Directory $OWRT_DIR exists but is not a Git repo. Removing and re-cloning..."
-              rm -rf "$OWRT_DIR"
-              git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git "$OWRT_DIR"
-            fi
-          else
-            echo "Cloning ImmortalWrt repository..."
-            git clone --depth 1 https://github.com/immortalwrt/immortalwrt.git "$OWRT_DIR"
-          fi
+          chmod +x diy-part2.sh
+          ./diy-part2.sh
 
-      - name: Apply device configuration and place DTS
+      - name: List generated files
         run: |
-          cd $GITHUB_WORKSPACE/immortalwrt
-          cp $CONFIG_DIR/sl3000.config .config
-          cp $CONFIG_DIR/mt7981b-sl3000-emmc.dts target/linux/mediatek/dts/
-          cp $CONFIG_DIR/mt7981_sl3000.mk target/linux/mediatek/image/filogic.mk
+          echo "=== Rescue files ==="
+          find output/ -type f | sort
 
-      - name: Prepare kernel source and force copy DTS
-        run: |
-          cd $GITHUB_WORKSPACE/immortalwrt
-          export CONFIG_SHELL=/bin/bash
-          export TERM=dumb
-          # 用 conf 直接更新配置，避免终端问题
-          scripts/config/conf --olddefconfig Config.in
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-          make target/linux/prepare V=s
-          LINUX_DIR=$(find build_dir/target-aarch64_cortex-a53_musl/linux-mediatek_filogic -maxdepth 1 -type d -name "linux-*" | head -1)
-          if [ -z "$LINUX_DIR" ]; then
-            echo "::error::Kernel source directory not found!"
-            exit 1
-          fi
-          mkdir -p $LINUX_DIR/arch/arm64/boot/dts
-          cp $CONFIG_DIR/mt7981b-sl3000-emmc.dts $LINUX_DIR/arch/arm64/boot/dts/
-          echo "CONFIG_NVMEM=y" >> $LINUX_DIR/.config
-          echo "CONFIG_ARM64_4K_PAGES=y" >> $LINUX_DIR/.config
-          make -C $LINUX_DIR olddefconfig ARCH=arm64
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_tag.outputs.tag_name }}
+          name: "SL3000 Firmware ${{ steps.release_tag.outputs.tag_name }}"
+          body: |
+            ## 🚀 自动构建的 SL3000 救砖全家桶
+            - 构建时间: ${{ steps.release_tag.outputs.tag_name }}
+            - 包含 ATF/BL2 (eMMC/NOR/RAM)、U-Boot、FIP、完整 sysupgrade 固件、mtk_uartboot
 
-      - name: Build OpenWrt
-        run: |
-          cd $GITHUB_WORKSPACE/immortalwrt
-          export CONFIG_SHELL=/bin/bash
-          export TERM=dumb
-          make -j1 V=s
+            ### 📦 使用说明
+            - `firmware/` 目录包含 sysupgrade 固件，可直接刷入
+            - `atf/` 和 `uboot/` 目录提供救砖用 BL2/FIP
+            - `mtk_uartboot.tar.gz` 为串口刷机工具包
+          files: |
+            output/atf/*
+            output/uboot/*
+            output/firmware/*
+            output/mtk_uartboot.tar.gz
 
-      - name: Locate and copy sysupgrade.itb
-        run: |
-          cd $GITHUB_WORKSPACE/immortalwrt
-          ITB_FILE=$(find bin/targets/mediatek/filogic -name "*-sysupgrade.itb" | head -1)
-          if [ -z "$ITB_FILE" ]; then
-            echo "::error::sysupgrade.itb not found! Build may have failed."
-            exit 1
-          fi
-          mkdir -p $OUTPUT_DIR
-          cp "$ITB_FILE" $OUTPUT_DIR/sysupgrade.itb
-          echo "Kernel image copied to $OUTPUT_DIR/sysupgrade.itb"
-
-      - name: Assemble final 32MB rescue firmware
-        run: |
-          cd $OUTPUT_DIR
-          FINAL_BIN="sl3000-rescue-32mb.bin"
-          cp $CONFIG_DIR/bl2_orig.bin bl2-emmc-ddr3.bin
-          cp $CONFIG_DIR/fip_orig.bin bl31-uboot-emmc-ddr3.fip
-          cp $CONFIG_DIR/factory_orig.bin factory_orig.bin
-          dd if=/dev/zero bs=1M count=32 2>/dev/null | tr '\000' '\377' > "$FINAL_BIN"
-          dd if=bl2-emmc-ddr3.bin of="$FINAL_BIN" conv=notrunc status=none
-          dd if=bl31-uboot-emmc-ddr3.fip of="$FINAL_BIN" bs=1M seek=1 conv=notrunc status=none
-          dd if=factory_orig.bin of="$FINAL_BIN" bs=1M seek=2 conv=notrunc status=none
-          dd if=sysupgrade.itb of="$FINAL_BIN" bs=1M seek=3 conv=notrunc status=none
-          echo "✅ Firmware assembled: $OUTPUT_DIR/$FINAL_BIN"
-          ls -lh $FINAL_BIN
-
-      - name: Upload firmware artifact
+      - name: Upload artifacts (backup)
         uses: actions/upload-artifact@v4
         with:
-          name: sl3000-rescue-firmware
-          path: output/sl3000-rescue-32mb.bin
+          name: sl3000-rescue-${{ steps.release_tag.outputs.tag_name }}
+          path: output/
