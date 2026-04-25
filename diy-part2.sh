@@ -14,12 +14,17 @@ cd "$IMMORTALWRT_BUILD_DIR"
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# ========== 1. 编译 ATF（生成 BL2 和 BL31） ==========
+# ========== 1. 编译 ATF ==========
 ATF_DIR="$SOURCE_DIR/arm-trusted-firmware"
-cd "$ATF_DIR"
+cd "$ATF_DIR"   # 关键：先切换到 ATF 目录
 
 # 强制 DDR4
-sed -i '/mt7981_use_ddr4 = /c\mt7981_use_ddr4 = 1;' plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c
+if [ -f plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c ]; then
+    sed -i '/mt7981_use_ddr4 = /c\mt7981_use_ddr4 = 1;' plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c
+else
+    echo "❌ mtk_mem_init.c not found!"
+    exit 1
+fi
 
 build_atf() {
     local desc="$1" dram="$2" bootdev="$3" rammode="$4"
@@ -43,13 +48,12 @@ build_atf "1g-nor" 1024 nor ""
 build_atf "1g-emmc" 1024 emmc ""
 build_atf "ram-1g" 1024 ram "RAM_BOOT_UART_DL=1"
 
-# 主要使用 NOR 版本
 if [ ! -f "$STAGING_IMAGE/bl31-1g-nor.bin" ]; then
     echo "❌ Missing bl31 for NOR"
     exit 1
 fi
 
-# ========== 2. 编译 U-Boot 并生成 FIP（NOR 版） ==========
+# ========== 2. 编译 U-Boot 和 FIP ==========
 FIPTOOL=$(find "$ATF_DIR/tools/fiptool" -name fiptool -type f | head -1)
 if [ ! -x "$FIPTOOL" ]; then
     make -C "$ATF_DIR/tools/fiptool" CROSS_COMPILE=
@@ -57,7 +61,7 @@ if [ ! -x "$FIPTOOL" ]; then
 fi
 
 UBOOT_DIR="$SOURCE_DIR/u-boot"
-cd "$UBOOT_DIR"
+cd "$UBOOT_DIR"   # 切换到 U-Boot 目录
 
 build_uboot_fip() {
     local desc="$1" defconfig="$2" bl31_bin="$3"
@@ -72,7 +76,7 @@ build_uboot_fip() {
     make olddefconfig
     make -j$(nproc)
 
-   if [ -f fip.bin ]; then
+    if [ -f fip.bin ]; then
         cp fip.bin "$OUTPUT_DIR/uboot/fip-${desc}.bin"
     elif [ -f u-boot.fip ]; then
         cp u-boot.fip "$OUTPUT_DIR/uboot/fip-${desc}.bin"
@@ -85,12 +89,11 @@ build_uboot_fip() {
     cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-${desc}.bin"
 }
 
-# 构建 NOR 版本
 build_uboot_fip "nor" "mt7981_spim_nor_rfb_defconfig" "bl31-1g-nor.bin"
 
 # ========== 3. 编译 ImmortalWrt ==========
 echo "=== Building ImmortalWrt ==="
-cd "$IMMORTALWRT_BUILD_DIR"
+cd "$IMMORTALWRT_BUILD_DIR"   # 回到 OpenWrt 编译目录
 make VERSION_NUMBER="1.0.0" VERSION_CODE="r1" -j$(nproc) V=s 2>&1 | tee build.log
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
     echo "❌ Firmware build failed"
@@ -106,7 +109,7 @@ cp build.log "$OUTPUT_DIR/firmware/"
 cd "$SOURCE_DIR/mtk_uartboot"
 tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
 
-# ========== 5. 合成 32MB 救砖镜像（需要 factory 分区数据） ==========
+# ========== 5. 合成 32MB 救砖镜像 ==========
 echo "=== Assembling 32MB rescue image ==="
 BL2_NOR="$OUTPUT_DIR/atf/bl2-1g-nor.bin"
 FIP_NOR="$OUTPUT_DIR/uboot/fip-nor.bin"
@@ -115,17 +118,14 @@ if [ ! -f "$BL2_NOR" ] || [ ! -f "$FIP_NOR" ]; then
     exit 1
 fi
 
-# 寻找编译出的 OpenWrt sysupgrade 包（从中提取 kernel+rootfs）
 SYS_FILE=$(find "$OUTPUT_DIR/firmware" -name "*sysupgrade*" -type f | head -1)
 if [ -z "$SYS_FILE" ]; then
     echo "❌ No sysupgrade file found"
     exit 1
 fi
 
-# 临时解包 sysupgrade
 TMP_SYS="$(mktemp -d)"
 tar -xf "$SYS_FILE" -C "$TMP_SYS"
-# 内核 FIT 文件一般在 sysupgrade 中为 "kernel"
 KERNEL_FIT="$TMP_SYS/kernel"
 ROOTFS_SQ="$TMP_SYS/root"
 if [ ! -f "$KERNEL_FIT" ] || [ ! -f "$ROOTFS_SQ" ]; then
@@ -134,35 +134,29 @@ if [ ! -f "$KERNEL_FIT" ] || [ ! -f "$ROOTFS_SQ" ]; then
     exit 1
 fi
 
-# 创建 32MB 空文件（擦除态 FF）
+# 创建 32MB 救砖镜像
 dd if=/dev/zero bs=1M count=32 | tr '\000' '\377' > "$OUTPUT_DIR/rescue/sl3000-full-${GITHUB_RUN_ID:-0}.bin"
-
-# 写入 BL2 (0x0 ~ 0x100000)
 dd if="$BL2_NOR" of="$OUTPUT_DIR/rescue/sl3000-full-${GITHUB_RUN_ID:-0}.bin" bs=1 conv=notrunc status=none
-# 写入 FIP (0x380000 ~ 0x580000) 根据实际硬件
 dd if="$FIP_NOR" of="$OUTPUT_DIR/rescue/sl3000-full-${GITHUB_RUN_ID:-0}.bin" bs=1 seek=$((0x380000)) conv=notrunc status=none
 
-# 写入 Factory 分区（如果用户提供了 factory.bin）
+# 写入 Factory（如果存在）
 FACTORY_BIN="$WORKSPACE/main-repo/888/factory.bin"
 if [ -f "$FACTORY_BIN" ]; then
-    echo "✅ 已找到 factory.bin，将保留原厂校准数据"
+    echo "✅ 找到 factory.bin，恢复校准数据"
     dd if="$FACTORY_BIN" of="$OUTPUT_DIR/rescue/sl3000-full-${GITHUB_RUN_ID:-0}.bin" bs=1 seek=$((0x180000)) conv=notrunc status=none
 else
-    echo "⚠️ 未找到 factory.bin，生成的镜像 MAC/WiFi 校准将缺失，请自行写入！"
+    echo "⚠️ 缺少 factory.bin，MAC/WiFi 可能无效"
 fi
 
-# 写入 firmware 分区 (FIT + rootfs) 从 0x580000 开始
-# 先合并 kernel 和 rootfs 成 firmware 分区镜像
+# 合并 kernel + rootfs 并写入 firmware 分区
 FIRMWARE_PART="$OUTPUT_DIR/rescue/firmware_part.bin"
 cat "$KERNEL_FIT" "$ROOTFS_SQ" > "$FIRMWARE_PART"
-# 确保大小不超过 25MB (0x1900000)
 FIRMSIZE=$(stat -c%s "$FIRMWARE_PART")
 if [ "$FIRMSIZE" -gt 26214400 ]; then
-    echo "❌ firmware 分区超限: $FIRMSIZE bytes"
-    rm -rf "$TMP_SYS"
+    echo "❌ firmware 分区超限"
+    rm -rf "$TMP_SYS" "$FIRMWARE_PART"
     exit 1
 fi
-# 填充到 25MB
 dd if=/dev/zero bs=1 count=$((26214400 - FIRMSIZE)) >> "$FIRMWARE_PART"
 dd if="$FIRMWARE_PART" of="$OUTPUT_DIR/rescue/sl3000-full-${GITHUB_RUN_ID:-0}.bin" bs=1 seek=$((0x580000)) conv=notrunc status=none
 
