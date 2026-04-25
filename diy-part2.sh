@@ -45,13 +45,16 @@ if [ ! -f "$STAGING_IMAGE/bl31-1g-nor.bin" ]; then
     exit 1
 fi
 
-# ========== 2. 编译 U-Boot 和 FIP ==========
-FIPTOOL=$(find "$ATF_DIR/tools/fiptool" -name fiptool -type f | head -1)
+# ========== 2. 编译 fiptool（在 ATF 根目录） ==========
+cd "$ATF_DIR"
+make fiptool CROSS_COMPILE=
+FIPTOOL="$ATF_DIR/tools/fiptool/fiptool"
 if [ ! -x "$FIPTOOL" ]; then
-    make -C "$ATF_DIR/tools/fiptool" CROSS_COMPILE=
-    FIPTOOL="$ATF_DIR/tools/fiptool/fiptool"
+    echo "❌ fiptool not built at $FIPTOOL"
+    exit 1
 fi
 
+# ========== 3. 编译 U-Boot 和 FIP ==========
 UBOOT_DIR="$SOURCE_DIR/u-boot"
 cd "$UBOOT_DIR"
 
@@ -83,7 +86,7 @@ build_uboot_fip() {
 
 build_uboot_fip "nor" "mt7981_spim_nor_rfb_defconfig" "bl31-1g-nor.bin"
 
-# ========== 3. 编译 ImmortalWrt ==========
+# ========== 4. 编译 ImmortalWrt ==========
 echo "=== Building ImmortalWrt ==="
 cd "$IMMORTALWRT_BUILD_DIR"
 make VERSION_NUMBER="1.0.0" VERSION_CODE="r1" -j$(nproc) V=s 2>&1 | tee build.log
@@ -97,11 +100,11 @@ mkdir -p "$OUTPUT_DIR/firmware"
 find bin/targets/ -type f \( -name "*.bin" -o -name "*sysupgrade*" \) -exec cp -v {} "$OUTPUT_DIR/firmware/" \;
 cp build.log "$OUTPUT_DIR/firmware/"
 
-# ========== 4. 打包 mtk_uartboot ==========
+# ========== 5. 打包 mtk_uartboot ==========
 cd "$SOURCE_DIR/mtk_uartboot"
 tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
 
-# ========== 5. 合成 32MB 救砖镜像 ==========
+# ========== 6. 合成 32MB 救砖镜像 ==========
 echo "=== Assembling 32MB rescue image ==="
 BL2_NOR="$OUTPUT_DIR/atf/bl2-1g-nor.bin"
 FIP_NOR="$OUTPUT_DIR/uboot/fip-nor.bin"
@@ -126,12 +129,12 @@ if [ ! -f "$KERNEL_FIT" ] || [ ! -f "$ROOTFS_SQ" ]; then
     exit 1
 fi
 
-# 创建 32MB 救砖镜像
+# 32MB 底包
 dd if=/dev/zero bs=1M count=32 | tr '\000' '\377' > "$OUTPUT_DIR/rescue/sl3000-full-${GITHUB_RUN_ID:-0}.bin"
 dd if="$BL2_NOR" of="$OUTPUT_DIR/rescue/sl3000-full-${GITHUB_RUN_ID:-0}.bin" bs=1 conv=notrunc status=none
 dd if="$FIP_NOR" of="$OUTPUT_DIR/rescue/sl3000-full-${GITHUB_RUN_ID:-0}.bin" bs=1 seek=$((0x380000)) conv=notrunc status=none
 
-# 写入 Factory（如果存在）
+# Factory 分区
 FACTORY_BIN="$SOURCE_DIR/888/factory.bin"
 if [ -f "$FACTORY_BIN" ]; then
     echo "✅ 找到 factory.bin，恢复校准数据"
@@ -140,7 +143,7 @@ else
     echo "⚠️ 缺少 factory.bin，MAC/WiFi 可能无效"
 fi
 
-# 合并 kernel + rootfs 并写入 firmware 分区
+# firmware 分区
 FIRMWARE_PART="$OUTPUT_DIR/rescue/firmware_part.bin"
 cat "$KERNEL_FIT" "$ROOTFS_SQ" > "$FIRMWARE_PART"
 FIRMSIZE=$(stat -c%s "$FIRMWARE_PART")
