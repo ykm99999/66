@@ -2,9 +2,10 @@
 set -euo pipefail
 
 WORKSPACE="$GITHUB_WORKSPACE"
-SOURCE_DIR="$WORKSPACE/source-repo"
-CONFIG_DIR="$WORKSPACE/main-repo/888"
-OUTPUT_DIR="$WORKSPACE/output"
+# 直接使用 main-repo 作为源码根目录
+SOURCE_DIR="$WORKSPACE/main-repo"
+CONFIG_DIR="$SOURCE_DIR/888"
+OUTPUT_DIR="$SOURCE_DIR/output"
 IMMORTALWRT_BUILD="$WORKSPACE/immortalwrt-build"
 
 rm -rf "$IMMORTALWRT_BUILD" "$OUTPUT_DIR"
@@ -13,7 +14,7 @@ mkdir -p "$OUTPUT_DIR/atf" "$OUTPUT_DIR/uboot" "$OUTPUT_DIR/firmware" "$OUTPUT_D
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# ========== 1. 验证三件套（使用实际文件名） ==========
+# ========== 1. 验证三件套 ==========
 echo "=== 验证配置文件 ==="
 for f in mt7981b-sl3000-emmc.dts sl3000.config mt7981_sl3000.mk; do
     if [ ! -f "$CONFIG_DIR/$f" ]; then
