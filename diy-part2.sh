@@ -14,7 +14,7 @@ cd "$IMMORTALWRT_BUILD_DIR"
 export CROSS_COMPILE=aarch64-linux-gnu-
 export ARCH=arm64
 
-# ========== 1. 编译 ARM Trusted Firmware (ATF) ==========
+# ========== 1. 编译 ATF（生成 BL2 和 BL31） ==========
 ATF_DIR="$SOURCE_DIR/arm-trusted-firmware"
 cd "$ATF_DIR"
 
@@ -33,24 +33,23 @@ build_atf() {
 
     if [ -f build/mt7981/release/bl2.bin ]; then
         cp build/mt7981/release/bl2.bin "$OUTPUT_DIR/atf/bl2-${desc}.bin"
-        strings build/mt7981/release/bl2.bin | grep -qi "DDR4" || echo "⚠️ BL2 (${desc}) may not be DDR4"
     fi
     if [ -f build/mt7981/release/bl31.bin ]; then
         cp build/mt7981/release/bl31.bin "$STAGING_IMAGE/bl31-${desc}.bin"
     fi
 }
 
-build_atf "512m-emmc" 512 emmc ""
-build_atf "1g-emmc" 1024 emmc ""
 build_atf "1g-nor" 1024 nor ""
+build_atf "1g-emmc" 1024 emmc ""
 build_atf "ram-1g" 1024 ram "RAM_BOOT_UART_DL=1"
 
-if [ ! -f "$STAGING_IMAGE/bl31-1g-emmc.bin" ]; then
-    echo "❌ Missing bl31-1g-emmc.bin"
+# 主要使用 NOR 版本
+if [ ! -f "$STAGING_IMAGE/bl31-1g-nor.bin" ]; then
+    echo "❌ Missing bl31 for NOR"
     exit 1
 fi
 
-# ========== 2. 编译 U-Boot 和生成 FIP ==========
+# ========== 2. 编译 U-Boot 并生成 FIP（NOR 版） ==========
 FIPTOOL=$(find "$ATF_DIR/tools/fiptool" -name fiptool -type f | head -1)
 if [ ! -x "$FIPTOOL" ]; then
     make -C "$ATF_DIR/tools/fiptool" CROSS_COMPILE=
@@ -61,43 +60,40 @@ UBOOT_DIR="$SOURCE_DIR/u-boot"
 cd "$UBOOT_DIR"
 
 build_uboot_fip() {
-    local desc="$1" defconfig="$2" bl31_name="$3"
+    local desc="$1" defconfig="$2" bl31_bin="$3"
     echo "=== Building U-Boot: $desc ==="
     make clean
     if [ ! -f "configs/${defconfig}" ]; then
-        if [ -f "$WORKSPACE/main-repo/888/${defconfig}" ]; then
-            cp "$WORKSPACE/main-repo/888/${defconfig}" configs/
-        else
-            echo "❌ defconfig $defconfig not found!"
-            exit 1
-        fi
+        echo "❌ defconfig $defconfig not found!"
+        exit 1
     fi
     make "$defconfig"
     echo "CONFIG_MTK_FIP_SUPPORT=y" >> .config
     make olddefconfig
     make -j$(nproc)
 
-    if [ -f fip.bin ] || [ -f u-boot.fip ]; then
-        cp fip.bin "$OUTPUT_DIR/uboot/fip-${desc}.bin" 2>/dev/null || cp u-boot.fip "$OUTPUT_DIR/uboot/fip-${desc}.bin"
+   if [ -f fip.bin ]; then
+        cp fip.bin "$OUTPUT_DIR/uboot/fip-${desc}.bin"
+    elif [ -f u-boot.fip ]; then
+        cp u-boot.fip "$OUTPUT_DIR/uboot/fip-${desc}.bin"
     else
         "$FIPTOOL" create \
-            --soc-fw "$STAGING_IMAGE/${bl31_name}" \
+            --soc-fw "$STAGING_IMAGE/${bl31_bin}" \
             --nt-fw u-boot.bin \
             "$OUTPUT_DIR/uboot/fip-${desc}.bin"
     fi
     cp u-boot.bin "$OUTPUT_DIR/uboot/u-boot-${desc}.bin"
 }
 
-build_uboot_fip "emmc" "mt7981_emmc_rfb_defconfig" "bl31-1g-emmc.bin"
+# 构建 NOR 版本
 build_uboot_fip "nor" "mt7981_spim_nor_rfb_defconfig" "bl31-1g-nor.bin"
 
-# ========== 3. 编译 ImmortalWrt 固件 ==========
-echo "=== Building ImmortalWrt Firmware ==="
+# ========== 3. 编译 ImmortalWrt ==========
+echo "=== Building ImmortalWrt ==="
 cd "$IMMORTALWRT_BUILD_DIR"
-
 make VERSION_NUMBER="1.0.0" VERSION_CODE="r1" -j$(nproc) V=s 2>&1 | tee build.log
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
-    echo "❌ Firmware build failed! Last 100 lines:"
+    echo "❌ Firmware build failed"
     tail -100 build.log
     exit 1
 fi
@@ -109,4 +105,67 @@ cp build.log "$OUTPUT_DIR/firmware/"
 # ========== 4. 打包 mtk_uartboot ==========
 cd "$SOURCE_DIR/mtk_uartboot"
 tar -czf "$OUTPUT_DIR/mtk_uartboot.tar.gz" .
-echo "✅ All tasks completed successfully"
+
+# ========== 5. 合成 32MB 救砖镜像（需要 factory 分区数据） ==========
+echo "=== Assembling 32MB rescue image ==="
+BL2_NOR="$OUTPUT_DIR/atf/bl2-1g-nor.bin"
+FIP_NOR="$OUTPUT_DIR/uboot/fip-nor.bin"
+if [ ! -f "$BL2_NOR" ] || [ ! -f "$FIP_NOR" ]; then
+    echo "❌ Missing BL2 or FIP for NOR"
+    exit 1
+fi
+
+# 寻找编译出的 OpenWrt sysupgrade 包（从中提取 kernel+rootfs）
+SYS_FILE=$(find "$OUTPUT_DIR/firmware" -name "*sysupgrade*" -type f | head -1)
+if [ -z "$SYS_FILE" ]; then
+    echo "❌ No sysupgrade file found"
+    exit 1
+fi
+
+# 临时解包 sysupgrade
+TMP_SYS="$(mktemp -d)"
+tar -xf "$SYS_FILE" -C "$TMP_SYS"
+# 内核 FIT 文件一般在 sysupgrade 中为 "kernel"
+KERNEL_FIT="$TMP_SYS/kernel"
+ROOTFS_SQ="$TMP_SYS/root"
+if [ ! -f "$KERNEL_FIT" ] || [ ! -f "$ROOTFS_SQ" ]; then
+    echo "❌ Missing kernel or root in sysupgrade"
+    rm -rf "$TMP_SYS"
+    exit 1
+fi
+
+# 创建 32MB 空文件（擦除态 FF）
+dd if=/dev/zero bs=1M count=32 | tr '\000' '\377' > "$OUTPUT_DIR/rescue/sl3000-full-${GITHUB_RUN_ID:-0}.bin"
+
+# 写入 BL2 (0x0 ~ 0x100000)
+dd if="$BL2_NOR" of="$OUTPUT_DIR/rescue/sl3000-full-${GITHUB_RUN_ID:-0}.bin" bs=1 conv=notrunc status=none
+# 写入 FIP (0x380000 ~ 0x580000) 根据实际硬件
+dd if="$FIP_NOR" of="$OUTPUT_DIR/rescue/sl3000-full-${GITHUB_RUN_ID:-0}.bin" bs=1 seek=$((0x380000)) conv=notrunc status=none
+
+# 写入 Factory 分区（如果用户提供了 factory.bin）
+FACTORY_BIN="$WORKSPACE/main-repo/888/factory.bin"
+if [ -f "$FACTORY_BIN" ]; then
+    echo "✅ 已找到 factory.bin，将保留原厂校准数据"
+    dd if="$FACTORY_BIN" of="$OUTPUT_DIR/rescue/sl3000-full-${GITHUB_RUN_ID:-0}.bin" bs=1 seek=$((0x180000)) conv=notrunc status=none
+else
+    echo "⚠️ 未找到 factory.bin，生成的镜像 MAC/WiFi 校准将缺失，请自行写入！"
+fi
+
+# 写入 firmware 分区 (FIT + rootfs) 从 0x580000 开始
+# 先合并 kernel 和 rootfs 成 firmware 分区镜像
+FIRMWARE_PART="$OUTPUT_DIR/rescue/firmware_part.bin"
+cat "$KERNEL_FIT" "$ROOTFS_SQ" > "$FIRMWARE_PART"
+# 确保大小不超过 25MB (0x1900000)
+FIRMSIZE=$(stat -c%s "$FIRMWARE_PART")
+if [ "$FIRMSIZE" -gt 26214400 ]; then
+    echo "❌ firmware 分区超限: $FIRMSIZE bytes"
+    rm -rf "$TMP_SYS"
+    exit 1
+fi
+# 填充到 25MB
+dd if=/dev/zero bs=1 count=$((26214400 - FIRMSIZE)) >> "$FIRMWARE_PART"
+dd if="$FIRMWARE_PART" of="$OUTPUT_DIR/rescue/sl3000-full-${GITHUB_RUN_ID:-0}.bin" bs=1 seek=$((0x580000)) conv=notrunc status=none
+
+rm -rf "$TMP_SYS" "$FIRMWARE_PART"
+
+echo "✅ Rescue image: $OUTPUT_DIR/rescue/sl3000-full-*.bin"
