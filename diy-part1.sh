@@ -33,14 +33,14 @@ echo "✅ 三件套完整"
 cp -r "$SOURCE_DIR/immortalwrt" "$IMMORTALWRT_BUILD"
 cd "$IMMORTALWRT_BUILD"
 
-# 修改 feeds 源（按需）
+# 禁用 telephony feed（可选）
 sed -i 's/^src-git telephony/#src-git telephony/' feeds.conf.default
-echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git" >> feeds.conf.default
-echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git" >> feeds.conf.default
+
+# 注意：不再添加 passwall 相关 feeds
 
 ./scripts/feeds update -a || { echo "❌ feeds update failed"; exit 1; }
 
-# 清理问题包（可选）
+# 清理问题包（可选，不影响科学/Docker）
 PROBLEM_PKGS="aardvark-dns clamav podman ruby-yaml"
 for pkg in $PROBLEM_PKGS; do
     find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
@@ -61,7 +61,7 @@ mkdir -p "$DTS_PATH_OLD" "$DTS_PATH_NEW"
 cp -v "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" "$DTS_PATH_OLD/"
 cp -v "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" "$DTS_PATH_NEW/"
 
-# ========== 4. 注入设备 mk 定义（直接追加到 filogic.mk） ==========
+# ========== 4. 注入设备 mk 定义（直接追加到 filogic.mk，不再包含科学/Docker） ==========
 echo "" >> "$FILOGIC_MK"
 cat "$CONFIG_DIR/mt7981_sl3000.mk" >> "$FILOGIC_MK"
 echo "✅ 设备定义已注入 filogic.mk"
@@ -69,7 +69,6 @@ echo "✅ 设备定义已注入 filogic.mk"
 # 检查设备名是否出现（用于确认）
 if ! grep -q "sl.3000" "$FILOGIC_MK"; then
     echo "⚠️ 设备名 'sl_3000-emmc' 未在 filogic.mk 中找到，请检查 mt7981_sl3000.mk 内容"
-    # 不退出，可能 mk 中使用的命名不同
 fi
 
 # ========== 5. 复制自定义 files（关键：将你的修改打入固件） ==========
