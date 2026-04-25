@@ -3,27 +3,28 @@ name: SL3000 Rescue Firmware Build
 on:
   workflow_dispatch:
   push:
-    tags: [ 'v*' ]
+    tags: ['v*']
 
 jobs:
   build:
     runs-on: ubuntu-22.04
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
     steps:
-      - name: Checkout main repository (scripts & configs)
+      - name: Checkout main repository
         uses: actions/checkout@v4
         with:
           ref: main
           path: main-repo
 
-      - name: Checkout source repository (submodules: immortalwrt, ATF, U-Boot, mtk_uartboot)
+      - name: Checkout source repository (submodules)
         uses: actions/checkout@v4
         with:
           repository: ykm99999/66
           ref: sl3000-full-sync
           path: source-repo
-          submodules: recursive   # 关键：拉取所有子模块
+          submodules: recursive
 
       - name: Generate release tag
         id: release_tag
@@ -46,13 +47,13 @@ jobs:
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android
           df -h
 
-      - name: Run diy-part1.sh (Prepare OpenWrt source & inject custom files)
+      - name: Run diy-part1.sh
         working-directory: main-repo
         run: |
           chmod +x diy-part1.sh
           ./diy-part1.sh
 
-      - name: Run diy-part2.sh (Build ATF, U-Boot, FIP, Firmware, mtk_uartboot)
+      - name: Run diy-part2.sh
         working-directory: main-repo
         run: |
           chmod +x diy-part2.sh
