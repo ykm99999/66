@@ -2,8 +2,8 @@
 set -euo pipefail
 
 WORKSPACE="$GITHUB_WORKSPACE"
-SOURCE_DIR="$WORKSPACE/source-repo"
-OUTPUT_DIR="$WORKSPACE/output"
+SOURCE_DIR="$WORKSPACE/main-repo"
+OUTPUT_DIR="$SOURCE_DIR/output"
 STAGING_IMAGE="$WORKSPACE/immortalwrt-build/staging_dir/image"
 
 mkdir -p "$STAGING_IMAGE"
@@ -16,15 +16,7 @@ export ARCH=arm64
 
 # ========== 1. 编译 ATF ==========
 ATF_DIR="$SOURCE_DIR/arm-trusted-firmware"
-cd "$ATF_DIR"   # 关键：先切换到 ATF 目录
-
-# 强制 DDR4
-if [ -f plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c ]; then
-    sed -i '/mt7981_use_ddr4 = /c\mt7981_use_ddr4 = 1;' plat/mediatek/mt7981/drivers/dram/mtk_mem_init.c
-else
-    echo "❌ mtk_mem_init.c not found!"
-    exit 1
-fi
+cd "$ATF_DIR"
 
 build_atf() {
     local desc="$1" dram="$2" bootdev="$3" rammode="$4"
@@ -61,7 +53,7 @@ if [ ! -x "$FIPTOOL" ]; then
 fi
 
 UBOOT_DIR="$SOURCE_DIR/u-boot"
-cd "$UBOOT_DIR"   # 切换到 U-Boot 目录
+cd "$UBOOT_DIR"
 
 build_uboot_fip() {
     local desc="$1" defconfig="$2" bl31_bin="$3"
@@ -93,7 +85,7 @@ build_uboot_fip "nor" "mt7981_spim_nor_rfb_defconfig" "bl31-1g-nor.bin"
 
 # ========== 3. 编译 ImmortalWrt ==========
 echo "=== Building ImmortalWrt ==="
-cd "$IMMORTALWRT_BUILD_DIR"   # 回到 OpenWrt 编译目录
+cd "$IMMORTALWRT_BUILD_DIR"
 make VERSION_NUMBER="1.0.0" VERSION_CODE="r1" -j$(nproc) V=s 2>&1 | tee build.log
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
     echo "❌ Firmware build failed"
@@ -140,7 +132,7 @@ dd if="$BL2_NOR" of="$OUTPUT_DIR/rescue/sl3000-full-${GITHUB_RUN_ID:-0}.bin" bs=
 dd if="$FIP_NOR" of="$OUTPUT_DIR/rescue/sl3000-full-${GITHUB_RUN_ID:-0}.bin" bs=1 seek=$((0x380000)) conv=notrunc status=none
 
 # 写入 Factory（如果存在）
-FACTORY_BIN="$WORKSPACE/main-repo/888/factory.bin"
+FACTORY_BIN="$SOURCE_DIR/888/factory.bin"
 if [ -f "$FACTORY_BIN" ]; then
     echo "✅ 找到 factory.bin，恢复校准数据"
     dd if="$FACTORY_BIN" of="$OUTPUT_DIR/rescue/sl3000-full-${GITHUB_RUN_ID:-0}.bin" bs=1 seek=$((0x180000)) conv=notrunc status=none
