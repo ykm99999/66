@@ -12,19 +12,12 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
-      - name: Checkout main repository (scripts & configs)
+      - name: Checkout main repository (includes all source dirs)
         uses: actions/checkout@v4
         with:
           ref: main
           path: main-repo
-
-      - name: Checkout source repository (submodules)
-        uses: actions/checkout@v4
-        with:
-          repository: ykm99999/66
-          ref: sl3000-full-sync
-          path: source-repo
-          submodules: recursive
+          submodules: recursive         # 如果 mtk_uartboot/ 等是子模块，需递归拉取
 
       - name: Generate release tag
         id: release_tag
@@ -62,7 +55,7 @@ jobs:
       - name: List generated files
         run: |
           echo "=== Rescue files ==="
-          find output/ -type f | sort
+          find main-repo/output/ -type f | sort
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -80,14 +73,14 @@ jobs:
             - `atf/` 和 `uboot/` 目录提供单独救砖文件
             - `mtk_uartboot.tar.gz` 为串口刷机工具
           files: |
-            output/firmware/*.bin
-            output/rescue/*.bin
-            output/atf/*.bin
-            output/uboot/*.bin
-            output/mtk_uartboot.tar.gz
+            main-repo/output/firmware/*.bin
+            main-repo/output/rescue/*.bin
+            main-repo/output/atf/*.bin
+            main-repo/output/uboot/*.bin
+            main-repo/output/mtk_uartboot.tar.gz
 
       - name: Upload artifacts (backup)
         uses: actions/upload-artifact@v4
         with:
           name: sl3000-rescue-${{ steps.release_tag.outputs.tag_name }}
-          path: output/
+          path: main-repo/output/
