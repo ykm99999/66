@@ -91,40 +91,49 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 
-			// BL2: 0x000000 - 0x040000 (256KB)
+			// BL2: 0x000000 - 0x100000 (1MB)
 			partition@0 {
-				label = "bl2";
-				reg = <0x000000 0x040000>;
+				label = "BL2";
+				reg = <0x000000 0x100000>;
 				read-only;
 			};
 
-			// 未使用空间：0x040000 - 0x100000 (768KB) 预留
-			// 与 Makefile 中 seek=1 (1MB) 对齐
-
-			// FIP: 0x100000 - 0x180000 (512KB)
+			// Config: 0x100000 - 0x180000 (512KB)
 			partition@100000 {
-				label = "fip";
+				label = "Config";
 				reg = <0x100000 0x080000>;
+			};
+
+			// Factory: 0x180000 - 0x380000 (2MB)
+			partition@180000 {
+				label = "Factory";
+				reg = <0x180000 0x200000>;
 				read-only;
 			};
 
-			// Factory: 0x200000 - 0x400000 (2MB)
-			partition@200000 {
-				label = "factory";
-				reg = <0x200000 0x200000>;
+			// FIP: 0x380000 - 0x580000 (2MB)
+			partition@380000 {
+				label = "FIP";
+				reg = <0x380000 0x200000>;
 				read-only;
 			};
 
-			// Kernel (FIT image): 0x300000 - 0x700000 (4MB)
-			partition@300000 {
-				label = "kernel";
-				reg = <0x300000 0x400000>;
+			// firmware (FIT): 0x580000 - 0x1e80000 (25MB)
+			partition@580000 {
+				label = "firmware";
+				reg = <0x580000 0x1900000>;
 			};
 
-			// Root filesystem: 0x700000 - 0x2000000 (25MB)
-			partition@700000 {
-				label = "rootfs";
-				reg = <0x700000 0x1900000>;
+			// Product: 0x1e80000 - 0x1ea0000 (128KB)
+			partition@1e80000 {
+				label = "Product";
+				reg = <0x1e80000 0x020000>;
+			};
+
+			// Custom: 0x1ea0000 - 0x2000000 (1.375MB)
+			partition@1ea0000 {
+				label = "Custom";
+				reg = <0x1ea0000 0x160000>;
 			};
 		};
 	};
