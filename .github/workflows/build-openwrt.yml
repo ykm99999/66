@@ -12,7 +12,7 @@ jobs:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
-      - name: Checkout main repository
+      - name: Checkout main repository (scripts & configs)
         uses: actions/checkout@v4
         with:
           ref: main
@@ -72,16 +72,18 @@ jobs:
           body: |
             ## 🚀 自动构建的 SL3000 救砖全家桶
             - 构建时间: ${{ steps.release_tag.outputs.tag_name }}
-            - 包含 ATF/BL2 (eMMC/NOR/RAM)、U-Boot、FIP、完整 sysupgrade 固件、mtk_uartboot
+            - 包含 ATF/BL2、U-Boot/FIP、完整 sysupgrade 固件、mtk_uartboot、32MB 编程器救砖镜像
 
             ### 📦 使用说明
-            - `firmware/` 目录包含 sysupgrade 固件，可直接刷入
-            - `atf/` 和 `uboot/` 目录提供救砖用 BL2/FIP
-            - `mtk_uartboot.tar.gz` 为串口刷机工具包
+            - `firmware/` 目录包含 sysupgrade 固件（标准升级包）
+            - `rescue/` 目录包含可直接编程器烧录的 `sl3000-full-*.bin`（已集成 BL2+FIP+固件+工厂数据）
+            - `atf/` 和 `uboot/` 目录提供单独救砖文件
+            - `mtk_uartboot.tar.gz` 为串口刷机工具
           files: |
-            output/atf/*
-            output/uboot/*
-            output/firmware/*
+            output/firmware/*.bin
+            output/rescue/*.bin
+            output/atf/*.bin
+            output/uboot/*.bin
             output/mtk_uartboot.tar.gz
 
       - name: Upload artifacts (backup)
