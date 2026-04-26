@@ -27,12 +27,12 @@ echo "✅ 三件套完整"
 cp -r "$SOURCE_DIR/immortalwrt" "$IMMORTALWRT_BUILD"
 cd "$IMMORTALWRT_BUILD"
 
-# 禁用 telephony feed（避免无关包干扰）
+# 禁用 telephony feed
 sed -i 's/^src-git telephony/#src-git telephony/' feeds.conf.default
 
 ./scripts/feeds update -a || { echo "❌ feeds update failed"; exit 1; }
 
-# 删除已知问题包（无科学上网 / Docker）
+# 删除已知问题包（无科学/Docker）
 PROBLEM_PKGS="aardvark-dns clamav luci-app-clamav podman ruby-yaml"
 for pkg in $PROBLEM_PKGS; do
     find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
@@ -93,16 +93,5 @@ if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_${DEVICE_NAME}=y" .config; t
     echo "CONFIG_TARGET_mediatek_filogic_DEVICE_${DEVICE_NAME}=y" >> .config
 fi
 
-# 不再修补 config-6.6 —— 已由仓库中的完整文件保证内核配置正确
-KERNEL_CFG="target/linux/mediatek/filogic/config-6.6"
-if [ -f "$KERNEL_CFG" ]; then
-    if ! grep -q "CONFIG_ARM64_4K_PAGES=y" "$KERNEL_CFG"; then
-        echo "⚠️ 内核配置缺少 CONFIG_ARM64_4K_PAGES=y，但将继续构建（可能会触发交互）"
-    fi
-else
-    echo "❌ 致命错误: $KERNEL_CFG 不存在，请确认 immortalwrt 子模块已完整拉取"
-    exit 1
-fi
-
-# 保存编译目录路径供 diy-part2.sh 使用
+# ========== 6. 保存编译目录路径 ==========
 echo "$PWD" > "$WORKSPACE/build-dir.txt"
