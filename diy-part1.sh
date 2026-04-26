@@ -27,12 +27,12 @@ echo "✅ 三件套完整"
 cp -r "$SOURCE_DIR/immortalwrt" "$IMMORTALWRT_BUILD"
 cd "$IMMORTALWRT_BUILD"
 
-# 禁用可能出问题的 feed
+# 禁用 telephony feed（避免无关包干扰）
 sed -i 's/^src-git telephony/#src-git telephony/' feeds.conf.default
 
 ./scripts/feeds update -a || { echo "❌ feeds update failed"; exit 1; }
 
-# 删除已知问题包（无科学/Docker）
+# 删除已知问题包（无科学上网 / Docker）
 PROBLEM_PKGS="aardvark-dns clamav luci-app-clamav podman ruby-yaml"
 for pkg in $PROBLEM_PKGS; do
     find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
@@ -55,7 +55,7 @@ cp -v "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" "$DTS_PATH_NEW/"
 echo "" >> "$FILOGIC_MK"
 cat "$CONFIG_DIR/mt7981_sl3000.mk" >> "$FILOGIC_MK"
 
-# 提取真实设备名（eg: mt7981_sl3000_spi_rescue）
+# 提取真实设备名（例：mt7981_sl3000_spi_rescue）
 DEVICE_NAME=$(grep -oP 'TARGET_DEVICES\s*\+=\s*\K\S+' "$FILOGIC_MK" | tail -1)
 if [ -z "$DEVICE_NAME" ]; then
     echo "❌ 无法提取设备名"
@@ -88,27 +88,19 @@ if [ ${PIPESTATUS[0]} -ne 0 ]; then
     exit 1
 fi
 
-# 二次确保设备选项已启用
+# 再次确保设备选项已启用
 if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_${DEVICE_NAME}=y" .config; then
     echo "CONFIG_TARGET_mediatek_filogic_DEVICE_${DEVICE_NAME}=y" >> .config
 fi
 
-# ========== 6. 修复内核关键配置（追加方式，不覆盖原文件） ==========
-echo "=== 修复内核 NVMEM 依赖 ==="
-KERNEL_CONFIG="target/linux/mediatek/filogic/config-6.6"
-if [ -f "$KERNEL_CONFIG" ]; then
-    # 确保 NVMEM 支持
-    if ! grep -q "^CONFIG_NVMEM=y" "$KERNEL_CONFIG"; then
-        echo "CONFIG_NVMEM=y" >> "$KERNEL_CONFIG"
+# 不再修补 config-6.6 —— 已由仓库中的完整文件保证内核配置正确
+KERNEL_CFG="target/linux/mediatek/filogic/config-6.6"
+if [ -f "$KERNEL_CFG" ]; then
+    if ! grep -q "CONFIG_ARM64_4K_PAGES=y" "$KERNEL_CFG"; then
+        echo "⚠️ 内核配置缺少 CONFIG_ARM64_4K_PAGES=y，但将继续构建（可能会触发交互）"
     fi
-    # 确保 NVMEM_MTK_EFUSE 被启用（否则 GE PHY 依赖失败）
-    if ! grep -q "^CONFIG_NVMEM_MTK_EFUSE=y" "$KERNEL_CONFIG"; then
-        echo "CONFIG_NVMEM_MTK_EFUSE=y" >> "$KERNEL_CONFIG"
-    fi
-    # 页面大小已是 4K 默认，无需额外添加
-    echo "✅ 内核配置修复完成"
 else
-    echo "❌ 未找到 $KERNEL_CONFIG，无法继续"
+    echo "❌ 致命错误: $KERNEL_CFG 不存在，请确认 immortalwrt 子模块已完整拉取"
     exit 1
 fi
 
