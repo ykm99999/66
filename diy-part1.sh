@@ -2,7 +2,6 @@
 set -euo pipefail
 
 WORKSPACE="$GITHUB_WORKSPACE"
-# 直接使用 main-repo 作为源码根目录
 SOURCE_DIR="$WORKSPACE/main-repo"
 CONFIG_DIR="$SOURCE_DIR/888"
 OUTPUT_DIR="$SOURCE_DIR/output"
@@ -33,7 +32,7 @@ sed -i 's/^src-git telephony/#src-git telephony/' feeds.conf.default
 
 ./scripts/feeds update -a || { echo "❌ feeds update failed"; exit 1; }
 
-# 删除已知问题包
+# 删除已知问题包（无科学/Docker）
 PROBLEM_PKGS="aardvark-dns clamav luci-app-clamav podman ruby-yaml"
 for pkg in $PROBLEM_PKGS; do
     find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
@@ -64,7 +63,7 @@ if [ -z "$DEVICE_NAME" ]; then
 fi
 echo "✅ 设备名: $DEVICE_NAME"
 
-# ========== 4. 复制自定义 files（preinit/shadow/network/...） ==========
+# ========== 4. 复制自定义 files（preinit/shadow/network/99-auto-firstboot） ==========
 if [ -d "$CONFIG_DIR/files" ]; then
     echo "=== 注入自定义 files ==="
     cp -rv "$CONFIG_DIR/files" "$IMMORTALWRT_BUILD/"
@@ -89,9 +88,15 @@ if [ ${PIPESTATUS[0]} -ne 0 ]; then
     exit 1
 fi
 
+# 二次确保设备选项已启用
 if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_${DEVICE_NAME}=y" .config; then
     echo "CONFIG_TARGET_mediatek_filogic_DEVICE_${DEVICE_NAME}=y" >> .config
-    make olddefconfig
 fi
 
+# ========== 6. 修复内核 NVMEM 依赖（防止 syncconfig 交互错误） ==========
+echo "=== 修复内核 NVMEM 依赖 ==="
+echo "CONFIG_NVMEM=y" >> .config
+make olddefconfig
+
+# 保存编译目录路径供 diy-part2.sh 使用
 echo "$PWD" > "$WORKSPACE/build-dir.txt"
