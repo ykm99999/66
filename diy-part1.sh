@@ -93,10 +93,17 @@ if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_${DEVICE_NAME}=y" .config; t
     echo "CONFIG_TARGET_mediatek_filogic_DEVICE_${DEVICE_NAME}=y" >> .config
 fi
 
-# ========== 6. 修复内核 NVMEM 依赖（防止 syncconfig 交互错误） ==========
+# ========== 6. 修复内核 NVMEM 依赖（写入内核配置片段，避免交互式错误） ==========
 echo "=== 修复内核 NVMEM 依赖 ==="
-echo "CONFIG_NVMEM=y" >> .config
-make olddefconfig
+KERNEL_CONFIG="target/linux/mediatek/filogic/config-6.6"
+if [ -f "$KERNEL_CONFIG" ]; then
+    if ! grep -q "CONFIG_NVMEM=y" "$KERNEL_CONFIG"; then
+        echo "CONFIG_NVMEM=y" >> "$KERNEL_CONFIG"
+    fi
+    echo "✅ 已添加 CONFIG_NVMEM=y 到 $KERNEL_CONFIG"
+else
+    echo "⚠️ 未找到 $KERNEL_CONFIG，跳过内核配置修复"
+fi
 
 # 保存编译目录路径供 diy-part2.sh 使用
 echo "$PWD" > "$WORKSPACE/build-dir.txt"
