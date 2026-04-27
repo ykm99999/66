@@ -90,9 +90,9 @@ if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_${DEVICE_NAME}=y" .config; t
     echo "CONFIG_TARGET_mediatek_filogic_DEVICE_${DEVICE_NAME}=y" >> .config
 fi
 
-# ========== 6. 自动生成完整内核配置（终极解决） ==========
-echo "=== 自动补全内核配置（消除所有交互） ==="
-make target/linux/prepare V=s 2>&1 | tail -20
+# ========== 6. 自动生成完整内核配置（彻底消除交互） ==========
+echo "=== 自动补全内核配置 ==="
+make target/linux/prepare V=s 2>&1 | tail -30
 
 # 定位内核构建目录
 KERNEL_DIR=$(find build_dir -maxdepth 5 -name "linux-6.6*" -type d | head -1)
@@ -101,12 +101,24 @@ if [ -z "$KERNEL_DIR" ]; then
     exit 1
 fi
 
+echo "内核目录: $KERNEL_DIR"
 cd "$KERNEL_DIR"
+
+# 复制当前 config-6.6 作为 .config
 cp ../../../../target/linux/mediatek/filogic/config-6.6 .config
-make ARCH=arm64 olddefconfig 2>&1
+
+# 运行 olddefconfig 自动接受所有新选项
+make ARCH=arm64 olddefconfig 2>&1 || {
+    echo "❌ olddefconfig 执行失败，尝试 yes 管道..."
+    yes "" | make ARCH=arm64 oldconfig 2>&1
+}
+
+# 将生成的完整 .config 覆盖回 config-6.6
 cd "$IMMORTALWRT_BUILD"
 cp -f "$KERNEL_DIR/.config" target/linux/mediatek/filogic/config-6.6
 echo "✅ 内核配置已更新为完整版本"
 
-cd "$IMMORTALWRT_BUILD"
+# 再次运行 OpenWrt oldconfig 以确保配置一致性
+make oldconfig 2>&1 | tail -10
+
 echo "$PWD" > "$WORKSPACE/build-dir.txt"
