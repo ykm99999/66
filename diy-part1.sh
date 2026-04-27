@@ -27,12 +27,10 @@ echo "✅ 三件套完整"
 cp -r "$SOURCE_DIR/immortalwrt" "$IMMORTALWRT_BUILD"
 cd "$IMMORTALWRT_BUILD"
 
-# 禁用 telephony feed
 sed -i 's/^src-git telephony/#src-git telephony/' feeds.conf.default
 
 ./scripts/feeds update -a || { echo "❌ feeds update failed"; exit 1; }
 
-# 删除已知问题包
 PROBLEM_PKGS="aardvark-dns clamav luci-app-clamav podman ruby-yaml"
 for pkg in $PROBLEM_PKGS; do
     find feeds/ -type d -name "$pkg" -exec rm -rf {} \; 2>/dev/null || true
@@ -51,11 +49,9 @@ mkdir -p "$DTS_PATH_OLD" "$DTS_PATH_NEW"
 cp -v "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" "$DTS_PATH_OLD/"
 cp -v "$CONFIG_DIR/mt7981b-sl3000-emmc.dts" "$DTS_PATH_NEW/"
 
-# 追加设备 mk 定义
 echo "" >> "$FILOGIC_MK"
 cat "$CONFIG_DIR/mt7981_sl3000.mk" >> "$FILOGIC_MK"
 
-# 提取真实设备名
 DEVICE_NAME=$(grep -oP 'TARGET_DEVICES\s*\+=\s*\K\S+' "$FILOGIC_MK" | tail -1)
 if [ -z "$DEVICE_NAME" ]; then
     echo "❌ 无法提取设备名"
@@ -88,45 +84,38 @@ if [ ${PIPESTATUS[0]} -ne 0 ]; then
     exit 1
 fi
 
-# 再次确保设备选项已启用
 if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_${DEVICE_NAME}=y" .config; then
     echo "CONFIG_TARGET_mediatek_filogic_DEVICE_${DEVICE_NAME}=y" >> .config
 fi
 
-# ========== 6. 自动补全内核配置（彻底解决 Restart config 交互） ==========
-echo "=== 自动补全内核配置（消除所有新选项询问） ==="
+# ========== 6. 补全内核 config-6.6 中的缺失选项 ==========
+echo "=== 补全内核缺失选项 ==="
+KERNEL_CFG="target/linux/mediatek/filogic/config-6.6"
+if [ -f "$KERNEL_CFG" ]; then
+    # 追加所有可能缺失的选项（默认值）
+    cat <<'KCFG_APPEND' >> "$KERNEL_CFG"
 
-# 先准备内核源码（解压、打补丁、链接工具链）
-make target/linux/prepare V=s 2>&1 | tail -30 || echo "⚠️ prepare 阶段结束"
+# Added by diy-part1.sh to fix syncconfig issues
+CONFIG_BFQ_GROUP_IOSCHED=y
+CONFIG_UCLAMP_TASK=n
+CONFIG_RODATA_FULL_DEFAULT_ENABLED=y
+CONFIG_UNMAP_KERNEL_AT_EL0=y
+CONFIG_MITIGATE_SPECTRE_BRANCH_HISTORY=y
+CONFIG_HZ_100=y
+# CONFIG_HZ_250 is not set
+# CONFIG_HZ_300 is not set
+# CONFIG_HZ_1000 is not set
+# CONFIG_NUMA is not set
+# CONFIG_SCHED_CLUSTER is not set
+# CONFIG_SCHED_SMT is not set
+KCFG_APPEND
 
-# 定位内核构建目录
-KERNEL_BUILD_DIR=$(find build_dir -maxdepth 5 -name "linux-6.6*" -type d | head -1)
-if [ -z "$KERNEL_BUILD_DIR" ]; then
-    echo "❌ 未找到内核构建目录，无法自动补全配置"
+    # 重新运行 oldconfig 以使内核配置更新
+    make -j1 V=s oldconfig 2>&1 | tail -20
+    echo "✅ 内核配置补丁已应用"
+else
+    echo "❌ 未找到 $KERNEL_CFG"
     exit 1
 fi
 
-echo "找到内核目录: $KERNEL_BUILD_DIR"
-cd "$KERNEL_BUILD_DIR"
-
-# 将当前的 config-6.6 复制为 .config
-cp ../../../../target/linux/mediatek/filogic/config-6.6 .config
-
-# 使用内核的 olddefconfig 自动回答所有新选项（包括 BFQ_GROUP_IOSCHED 等）
-make ARCH=arm64 olddefconfig 2>&1 || {
-    echo "❌ olddefconfig 执行失败，尝试其他方式..."
-    # 如果失败，强制生成默认配置再补全
-    make ARCH=arm64 defconfig 2>&1
-    make ARCH=arm64 olddefconfig 2>&1
-}
-
-# 将生成的完整 .config 覆盖回 config-6.6
-cd "$IMMORTALWRT_BUILD"
-cp -f "$KERNEL_BUILD_DIR/.config" target/linux/mediatek/filogic/config-6.6
-echo "✅ 内核配置已更新为完整版本（包含所有新选项）"
-
-# 返回 ImmortalWrt 根目录
-cd "$IMMORTALWRT_BUILD"
-
-# 保存编译目录路径供 diy-part2.sh 使用
 echo "$PWD" > "$WORKSPACE/build-dir.txt"
