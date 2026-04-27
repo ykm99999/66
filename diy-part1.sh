@@ -63,7 +63,7 @@ if [ -z "$DEVICE_NAME" ]; then
 fi
 echo "✅ 设备名: $DEVICE_NAME"
 
-# ========== 4. 复制自定义 files（preinit/shadow/network/99-auto-firstboot） ==========
+# ========== 4. 复制自定义 files ==========
 if [ -d "$CONFIG_DIR/files" ]; then
     echo "=== 注入自定义 files ==="
     cp -rv "$CONFIG_DIR/files" "$IMMORTALWRT_BUILD/"
@@ -93,5 +93,37 @@ if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_${DEVICE_NAME}=y" .config; t
     echo "CONFIG_TARGET_mediatek_filogic_DEVICE_${DEVICE_NAME}=y" >> .config
 fi
 
-# ========== 6. 保存编译目录路径 ==========
+# ========== 6. 自动生成完整内核配置（彻底解决交互） ==========
+echo "=== 自动生成完整内核配置 ==="
+# 创建内核源码的软链接目标（OpenWrt 构建时会自动准备）
+make target/linux/prepare V=s 2>&1 | tail -20 || true
+
+# 查找内核构建目录
+KERNEL_DIR=$(find build_dir -maxdepth 5 -name "linux-6.6*" -type d | head -1)
+if [ -z "$KERNEL_DIR" ]; then
+    echo "⚠️ 未找到内核目录，尝试继续（可能会有交互风险）"
+else
+    echo "找到内核目录: $KERNEL_DIR"
+    cd "$KERNEL_DIR"
+
+    # 将现有的 config-6.6 作为基础
+    cp ../../../../target/linux/mediatek/filogic/config-6.6 .config 2>/dev/null || true
+
+    # 使用 olddefconfig 自动回答所有新选项
+    make ARCH=arm64 olddefconfig 2>&1 || {
+        # 如果失败，再次尝试
+        make ARCH=arm64 defconfig 2>&1
+        make ARCH=arm64 olddefconfig 2>&1
+    }
+
+    # 将生成的完整配置复制回 config-6.6
+    cd "$IMMORTALWRT_BUILD"
+    cp "$KERNEL_DIR/.config" target/linux/mediatek/filogic/config-6.6
+    echo "✅ 内核配置已更新为完整版本"
+fi
+
+# 返回 ImmortalWrt 根目录
+cd "$IMMORTALWRT_BUILD"
+
+# 保存编译目录路径
 echo "$PWD" > "$WORKSPACE/build-dir.txt"
