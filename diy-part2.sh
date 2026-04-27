@@ -81,12 +81,11 @@ build_uboot_fip() {
 
 build_uboot_fip "nor" "mt7981_spim_nor_rfb_defconfig" "bl31-1g-nor.bin"
 
-# ========== 3. 编译 ImmortalWrt（自动回答所有内核配置询问）==========
+# ========== 3. 编译 ImmortalWrt ==========
 echo "=== Building ImmortalWrt Firmware ==="
 cd "$IMMORTALWRT_BUILD_DIR"
 
-# 关键：使用 yes "" 自动接受所有内核新选项的默认值
-yes "" | make VERSION_NUMBER="1.0.0" VERSION_CODE="r1" -j$(nproc) V=s 2>&1 | tee build.log
+make VERSION_NUMBER="1.0.0" VERSION_CODE="r1" -j$(nproc) V=s 2>&1 | tee build.log
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
     echo "❌ Firmware build failed"
     tail -100 build.log
