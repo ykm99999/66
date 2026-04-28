@@ -90,35 +90,35 @@ if ! grep -q "CONFIG_TARGET_mediatek_filogic_DEVICE_${DEVICE_NAME}=y" .config; t
     echo "CONFIG_TARGET_mediatek_filogic_DEVICE_${DEVICE_NAME}=y" >> .config
 fi
 
-# ========== 6. 自动生成完整内核配置（彻底消除交互） ==========
-echo "=== 自动补全内核配置 ==="
-make target/linux/prepare V=s 2>&1 | tail -30
-
-# 定位内核构建目录
-KERNEL_DIR=$(find build_dir -maxdepth 5 -name "linux-6.6*" -type d | head -1)
-if [ -z "$KERNEL_DIR" ]; then
-    echo "❌ 未找到内核目录"
+# ========== 6. 补全内核 config-6.6，并强制重新 prepare（根治交互） ==========
+echo "=== 补全内核配置并重新准备 ==="
+KERNEL_CFG="target/linux/mediatek/filogic/config-6.6"
+if [ ! -f "$KERNEL_CFG" ]; then
+    echo "❌ 未找到 $KERNEL_CFG"
     exit 1
 fi
 
-echo "内核目录: $KERNEL_DIR"
-cd "$KERNEL_DIR"
+# 追加已知缺失选项（一次追加，以后内核升级也不再询问）
+cat <<'KCFG_APPEND' >> "$KERNEL_CFG"
 
-# 复制当前 config-6.6 作为 .config
-cp ../../../../target/linux/mediatek/filogic/config-6.6 .config
+# Added by diy-part1.sh - fixes for new kernel options
+CONFIG_BFQ_GROUP_IOSCHED=y
+CONFIG_UCLAMP_TASK=n
+CONFIG_RODATA_FULL_DEFAULT_ENABLED=y
+CONFIG_UNMAP_KERNEL_AT_EL0=y
+CONFIG_MITIGATE_SPECTRE_BRANCH_HISTORY=y
+CONFIG_HZ_100=y
+# CONFIG_HZ_250 is not set
+# CONFIG_HZ_300 is not set
+# CONFIG_HZ_1000 is not set
+# CONFIG_NUMA is not set
+# CONFIG_SCHED_CLUSTER is not set
+# CONFIG_SCHED_SMT is not set
+KCFG_APPEND
 
-# 运行 olddefconfig 自动接受所有新选项
-make ARCH=arm64 olddefconfig 2>&1 || {
-    echo "❌ olddefconfig 执行失败，尝试 yes 管道..."
-    yes "" | make ARCH=arm64 oldconfig 2>&1
-}
-
-# 将生成的完整 .config 覆盖回 config-6.6
-cd "$IMMORTALWRT_BUILD"
-cp -f "$KERNEL_DIR/.config" target/linux/mediatek/filogic/config-6.6
-echo "✅ 内核配置已更新为完整版本"
-
-# 再次运行 OpenWrt oldconfig 以确保配置一致性
-make oldconfig 2>&1 | tail -10
+# 清除内核构建状态，强制重新 prepare
+echo "=== 清理旧内核配置并重新准备 ==="
+make target/linux/clean V=s 2>&1 | tail -10
+make target/linux/prepare V=s 2>&1 | tail -20
 
 echo "$PWD" > "$WORKSPACE/build-dir.txt"
